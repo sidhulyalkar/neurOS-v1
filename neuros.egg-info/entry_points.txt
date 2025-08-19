@@ -1,0 +1,2 @@
+[console_scripts]
+neuros = neuros.cli:main

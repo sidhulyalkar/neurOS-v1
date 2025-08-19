@@ -1,0 +1,128 @@
+Metadata-Version: 2.4
+Name: neuros
+Version: 2.0.0
+Summary: A modular operating system for brain–computer interfaces
+Home-page: https://github.com/<your-user>/neuros2
+Author: neurOS Development Team
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=1.5
+Requires-Dist: scikit-learn>=1.2
+Requires-Dist: fastapi>=0.103
+Requires-Dist: uvicorn>=0.23
+Provides-Extra: dashboard
+Requires-Dist: streamlit>=1.25; extra == "dashboard"
+Provides-Extra: brainflow
+Requires-Dist: brainflow>=5.0; extra == "brainflow"
+Provides-Extra: cloud
+Requires-Dist: boto3>=1.26; extra == "cloud"
+Provides-Extra: test
+Requires-Dist: pytest>=7.2; extra == "test"
+Provides-Extra: notebook
+Requires-Dist: ipykernel>=6.0; extra == "notebook"
+Requires-Dist: matplotlib>=3.7; extra == "notebook"
+Requires-Dist: nbformat>=5.7; extra == "notebook"
+Dynamic: author
+Dynamic: classifier
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# neurOS 2.0 – A Modular Operating System for Brain‑Computer Interfaces
+
+**neurOS 2.0** is a reimagined version of the original neurOS codebase.  It focuses
+on clarity, extensibility and measurable performance while delivering a
+production‑ready platform for brain–computer interface (BCI) development and
+research.  This repository contains a self‑contained Python package and
+accompanying scripts for real‑time neural data streaming, processing and
+classification.  It also includes benchmarking tools and a simple dashboard so
+that researchers can evaluate the system end‑to‑end.
+
+## Highlights
+
+* **Streamlined drivers** – A unified API for reading data from real or simulated
+  BCI hardware.  Drivers can be hot‑swapped without modifying the rest of the
+  pipeline.
+* **Pluggable processing pipeline** – Filters, feature extractors and models
+  live in their own modules and are loaded dynamically at run time.  New
+  algorithms can be added without changing core code.
+* **Agent‑based orchestration** – An asynchronous orchestrator coordinates
+  multiple agents (device, processing and model) to build a real‑time BCI
+  pipeline.  Agents monitor performance and can adapt their behaviour when
+  signals degrade.
+* **Model training and inference** – Built‑in support for offline training and
+  real‑time inference with state‑of‑the‑art neural and classical models.  Models
+  implement a simple interface so that custom architectures can be added
+  easily.
+* **Benchmarking suite** – Scripts to measure latency, throughput and accuracy
+  using synthetic and recorded datasets.  Benchmarks facilitate fair
+  comparisons with other BCI frameworks.
+* **Dashboard and CLI** – A lightweight Streamlit dashboard (optional) and
+  command line interface make it easy to run pipelines, launch benchmarks and
+  visualise data without writing code.
+
+## Getting Started
+
+### Installation
+
+```bash
+git clone https://github.com/<your-user>/neuros2.git
+cd neuros2
+pip install -r requirements.txt
+pip install -e .
+
+# run basic diagnostics
+neuros --help
+```
+
+### Running a Pipeline
+
+You can run a real‑time pipeline with a simulated driver using the CLI:
+
+```bash
+# run a pipeline that streams data for 5 seconds
+neuros run --duration 5
+```
+
+The pipeline will print classification outputs to the terminal and record
+latency metrics.  See `neuros run --help` for all options.
+
+### Benchmarking
+
+To evaluate the system performance on synthetic data, run:
+
+```bash
+neuros benchmark --duration 10 --report benchmarks/report.json
+```
+
+This command measures throughput, end‑to‑end latency and classification
+accuracy over a configurable duration.  The resulting report can be used to
+compare neurOS with other systems.
+
+### Dashboard
+
+An optional Streamlit dashboard is provided for interactive monitoring.  To
+launch it, install `streamlit` and run:
+
+```bash
+pip install streamlit
+neuros dashboard
+```
+
+## Contributing
+
+Contributions are welcome!  Please see `CONTRIBUTING.md` for guidelines on
+adding new drivers, processors or models.  The architecture is designed to be
+extensible, so new functionality can be added with minimal boilerplate.
+
+## License
+
+This project is licensed under the MIT license – see `LICENSE` for details.
