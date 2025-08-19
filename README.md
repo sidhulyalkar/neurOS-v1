@@ -1,6 +1,6 @@
-# neurOS 2.0 – A Modular Operating System for Brain‑Computer Interfaces
+# neurOS-v1 – A Modular Operating System for Brain‑Computer Interfaces
 
-**neurOS 2.0** is a reimagined version of the original neurOS codebase.  It focuses
+**neurOS-v1** is a reimagined version of the original neurOS codebase.  It focuses
 on clarity, extensibility and measurable performance while delivering a
 production‑ready platform for brain–computer interface (BCI) development and
 research.  This repository contains a self‑contained Python package and
