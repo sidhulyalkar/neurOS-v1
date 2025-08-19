@@ -1,0 +1,10 @@
+numpy>=1.24
+pandas>=1.5
+scikit-learn>=1.2
+fastapi>=0.103
+uvicorn>=0.23
+streamlit>=1.25  # optional, used only for dashboard
+pytest>=7.2
+matplotlib>=3.7  # needed for notebooks
+ipykernel>=6.0   # enable Jupyter notebook execution
+nbformat>=5.7    # notebook format utilities
