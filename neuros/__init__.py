@@ -16,8 +16,11 @@ from .models.base_model import BaseModel  # noqa: F401
 from .models.simple_classifier import SimpleClassifier  # noqa: F401
 from .processing.filters import BandpassFilter, SmoothingFilter  # noqa: F401
 from .processing.feature_extraction import BandPowerExtractor  # noqa: F401
-from .pipeline import Pipeline  # noqa: F401
+from .pipeline import Pipeline, MultiModalPipeline  # noqa: F401
 from .agents.orchestrator_agent import Orchestrator  # noqa: F401
+from .agents.multimodal_orchestrator import MultiModalOrchestrator  # noqa: F401
+from .agents.fusion_agent import FusionAgent  # noqa: F401
+from .models.composite_model import CompositeModel  # noqa: F401
 
 __all__ = [
     "BaseDriver",
@@ -28,5 +31,9 @@ __all__ = [
     "SmoothingFilter",
     "BandPowerExtractor",
     "Pipeline",
+    "MultiModalPipeline",
     "Orchestrator",
+    "MultiModalOrchestrator",
+    "FusionAgent",
+    "CompositeModel",
 ]
