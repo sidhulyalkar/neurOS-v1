@@ -20,6 +20,9 @@ from .facial_agent import FacialAgent  # noqa: F401
 from .blink_agent import BlinkAgent  # noqa: F401
 from .motion_agent import MotionAgent  # noqa: F401
 from .calcium_agent import CalciumAgent  # noqa: F401
+# new multimodal agents
+from .fusion_agent import FusionAgent  # noqa: F401
+from .multimodal_orchestrator import MultiModalOrchestrator  # noqa: F401
 # NotebookAgent and ModalityManagerAgent provide higher‑level automation and
 # are intentionally not imported here to avoid circular dependencies with
 # ``neuros.autoconfig`` and ``neuros.pipeline``.  Import them explicitly
