@@ -20,3 +20,6 @@ from .gbdt_model import GBDTModel  # noqa: F401
 # additional advanced models
 from .transformer_model import TransformerModel  # noqa: F401
 from .dino_v3_model import DinoV3Model  # noqa: F401
+
+# composite multi‑modal models
+from .composite_model import CompositeModel  # noqa: F401
