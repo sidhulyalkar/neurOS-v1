@@ -18,3 +18,10 @@ from .ecog_driver import ECoGDriver  # noqa: F401
 from .emg_driver import EMGDriver  # noqa: F401
 from .eog_driver import EOGDriver  # noqa: F401
 from .calcium_imaging_driver import CalciumImagingDriver  # noqa: F401
+
+# newly added biosignal and audio drivers
+from .ecg_driver import ECGDriver  # noqa: F401
+from .gsr_driver import GSRDriver  # noqa: F401
+from .respiration_driver import RespirationDriver  # noqa: F401
+from .hormone_driver import HormoneDriver  # noqa: F401
+from .audio_driver import AudioDriver  # noqa: F401
