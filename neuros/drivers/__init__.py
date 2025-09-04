@@ -25,3 +25,7 @@ from .gsr_driver import GSRDriver  # noqa: F401
 from .respiration_driver import RespirationDriver  # noqa: F401
 from .hormone_driver import HormoneDriver  # noqa: F401
 from .audio_driver import AudioDriver  # noqa: F401
+
+# behavioural and optical drivers
+from .phone_driver import PhoneDriver  # noqa: F401
+from .fnirs_driver import FnirsDriver  # noqa: F401
