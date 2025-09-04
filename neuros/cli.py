@@ -81,6 +81,59 @@ def _parse_args() -> argparse.Namespace:
     serve_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface to bind to")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port to listen on")
 
+    # constellation command
+    const_parser = subparsers.add_parser(
+        "constellation",
+        help="Run the Constellation demo pipeline with multi‑modal ingestion, storage, export and training",
+    )
+    const_parser.add_argument(
+        "--duration",
+        type=float,
+        default=10.0,
+        help="Ingestion duration in seconds (per modality)",
+    )
+    const_parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="/tmp/constellation_demo",
+        help="Base directory for raw and processed data (simulating S3)",
+    )
+    const_parser.add_argument(
+        "--subject-id",
+        type=str,
+        default="demo_subject",
+        help="Subject identifier used in metadata and file names",
+    )
+    const_parser.add_argument(
+        "--session-id",
+        type=str,
+        default="demo_session",
+        help="Session identifier used in metadata and file names",
+    )
+    const_parser.add_argument(
+        "--fault-injection",
+        action="store_true",
+        help="Enable synthetic fault injection (packet drops and jitter)",
+    )
+    const_parser.add_argument(
+        "--sagemaker-config",
+        type=str,
+        default=None,
+        help="Path to a JSON or YAML file specifying SageMaker job configuration",
+    )
+    const_parser.add_argument(
+        "--kafka-bootstrap",
+        type=str,
+        default="localhost:9092",
+        help="Kafka bootstrap servers (host:port)",
+    )
+    const_parser.add_argument(
+        "--topic-prefix",
+        type=str,
+        default="raw",
+        help="Prefix for Kafka topics (e.g. raw or aligned)",
+    )
+
     return parser.parse_args()
 
 
@@ -209,6 +262,34 @@ def main() -> None:
         from .api.server import app
 
         uvicorn.run(app, host=args.host, port=args.port)
+
+    elif args.command == "constellation":
+        # Run the Constellation multi‑modal pipeline demo
+        try:
+            # Defer import so that optional dependencies are loaded only when needed
+            from .cloud.pipeline_cloud import run_constellation_demo
+        except Exception as exc:
+            print(
+                "Constellation pipeline is not available. Ensure optional dependencies are installed and the neuros.cloud package is present.",
+                file=sys.stderr,
+            )
+            # print original error for debugging when run with verbose output
+            # Commented out to avoid leaking stack traces by default
+            # print(f"Import error: {exc}", file=sys.stderr)
+            sys.exit(1)
+        # run the async demo
+        asyncio.run(
+            run_constellation_demo(
+                duration=args.duration,
+                kafka_bootstrap=args.kafka_bootstrap,
+                topic_prefix=args.topic_prefix,
+                subject_id=args.subject_id,
+                session_id=args.session_id,
+                output_base=args.output_dir,
+                fault_injection=args.fault_injection,
+                sagemaker_config=args.sagemaker_config,
+            )
+        )
 
 
 

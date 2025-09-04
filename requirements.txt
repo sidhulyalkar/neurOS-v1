@@ -1,10 +1,36 @@
-numpy>=1.24
+# Updated dependency list for the neurOS Constellation platform
+#
+# This file enumerates all third‑party Python packages required to run
+# neurOS and its Constellation extensions.  The versions specified
+# here are minimums; newer versions may also work.  When updating
+# dependencies please verify compatibility across the codebase and
+# adjust these constraints accordingly.
+
+pylsl>=1.16.1
+pyzmq>=25.0.2
+redis>=4.6.0
+confluent-kafka>=2.1.1
+pynwb>=2.2.0
+ome-zarr>=0.8.1
+pyarrow>=15.0.0
+pyspark>=3.4.1
+webdataset>=0.2.48
+petastorm>=0.12.1
+fastapi>=0.110.0
+uvicorn>=0.27.1
+requests>=2.31.0
+prometheus-client>=0.17.1
+mlflow>=2.11.1
+wandb>=0.16.0
+protobuf>=4.25.0
+numpy>=1.24.0
+scipy>=1.11.0
+torch>=2.1.0
+boto3>=1.26.0
+sagemaker>=2.200.0
+pydantic>=1.10.10
+PyYAML>=6.0
+fsspec>=2023.1
+numcodecs>=0.11
 pandas>=1.5
 scikit-learn>=1.2
-fastapi>=0.103
-uvicorn>=0.23
-streamlit>=1.25  # optional, used only for dashboard
-pytest>=7.2
-matplotlib>=3.7  # needed for notebooks
-ipykernel>=6.0   # enable Jupyter notebook execution
-nbformat>=5.7    # notebook format utilities
