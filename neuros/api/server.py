@@ -27,6 +27,15 @@ from ..cloud import CloudStorage, LocalStorage
 from ..db.database import Database
 from ..security import require_role, get_token_info, load_token_map
 
+# Import classification model and numerical utilities for the inference endpoint.
+# SimpleClassifier is used as the primary model when a model has been trained
+# via the /train endpoint.  NumPy provides array operations for feature
+# handling, and time/perf_counter is used to measure request latency.
+from ..models.simple_classifier import SimpleClassifier  # type: ignore
+import numpy as np  # type: ignore
+import time
+from prometheus_client import Counter as _Counter, Histogram as _Histogram, make_asgi_app
+
 
 app = FastAPI(title="neurOS API", version="2.0")
 
@@ -40,6 +49,76 @@ class TrainRequest(BaseModel):
 _global_model: Optional[SimpleClassifier] = None
 _global_fs: float = 250.0
 _global_channels: int = 8
+
+# ---------------------------------------------------------------------------
+# Inference schema, dummy model and metrics
+# ---------------------------------------------------------------------------
+
+class PredictRequest(BaseModel):
+    """Schema for prediction requests.
+
+    The ``features`` field should contain a flat list of floats
+    representing a single feature vector.  An optional ``metadata``
+    dictionary may include additional contextual information (ignored
+    by the current models).  This schema mirrors the simple inference
+    API defined in ``neuros/serve/api.py`` for backward compatibility.
+    """
+
+    features: List[float]
+    metadata: Optional[Dict[str, str]] = None
+
+
+class PredictResponse(BaseModel):
+    """Schema for prediction responses.
+
+    The response comprises a string label and a floating‑point
+    confidence value between 0 and 1.  When using the default dummy
+    model the labels correspond to nominal brain states; when using a
+    trained classifier the labels are numeric class identifiers.
+    """
+
+    label: str
+    confidence: float
+
+
+class DummyBrainStateModel:
+    """Fallback model that returns a random brain state.
+
+    This class is used when no global model has been trained via the
+    ``/train`` endpoint.  It samples uniformly from a fixed set of
+    nominal brain states and assigns a random confidence between 0.5
+    and 1.0.  Replace this with a real model for production use.
+    """
+
+    labels = ["awake", "drowsy", "focused", "stressed"]
+
+    def predict(self, features: np.ndarray) -> tuple[str, float]:
+        label = str(np.random.choice(self.labels))
+        confidence = float(np.random.uniform(0.5, 1.0))
+        return label, confidence
+
+
+# Prometheus metrics for the inference endpoint.  These counters and
+# histograms mirror those used in the standalone inference API and
+# allow monitoring request volume and latency.  Using separate
+# label dimensions enables per‑endpoint aggregation.
+INFERENCE_REQUEST_COUNT = _Counter(
+    "neuros_inference_requests_total",
+    "Total number of inference requests",
+    ["endpoint"],
+)
+INFERENCE_LATENCY = _Histogram(
+    "neuros_inference_request_latency_seconds",
+    "Inference request latency in seconds",
+    ["endpoint"],
+)
+
+
+# Initialise a fallback inference model.  When the global
+# classifier is trained, it will replace this dummy model.  The type
+# annotation is Union[DummyBrainStateModel, SimpleClassifier], but
+# Optional is avoided here to simplify isinstance checks.
+_inference_model: DummyBrainStateModel | SimpleClassifier = DummyBrainStateModel()
 
 # configure global storage backend based on environment
 _storage: CloudStorage
@@ -346,3 +425,51 @@ async def search_runs(
             continue
         filtered.append(m)
     return {"runs": filtered}
+
+
+# ---------------------------------------------------------------------------
+# Predict endpoint and Prometheus metrics
+# ---------------------------------------------------------------------------
+
+@app.post("/predict", response_model=PredictResponse)
+async def predict(request: PredictRequest) -> PredictResponse:
+    """Predict the brain state for a given feature vector.
+
+    This endpoint mirrors the lightweight real‑time inference API
+    originally defined in ``neuros/serve/api.py``.  When a model has
+    been trained via the ``/train`` endpoint, that model is used to
+    compute the class probabilities.  Otherwise a dummy model returns
+    a random brain state.  Latency metrics are recorded with
+    Prometheus.
+    """
+    if not request.features:
+        raise HTTPException(status_code=400, detail="No features provided")
+    start = time.perf_counter()
+    x = np.array(request.features, dtype=np.float32).reshape(1, -1)
+    # choose model: use trained global model if available; else fallback
+    model = _global_model if _global_model is not None else _inference_model
+    # compute prediction and confidence
+    if isinstance(model, SimpleClassifier):
+        # logistic regression supports predict_proba; fallback to predict if not available
+        try:
+            prob = model._model.predict_proba(x)[0]
+            pred_idx = int(np.argmax(prob))
+            label = str(pred_idx)
+            confidence = float(np.max(prob))
+        except Exception:
+            pred_idx = int(model._model.predict(x)[0])
+            label = str(pred_idx)
+            confidence = 1.0
+    else:
+        label, confidence = model.predict(x)
+    duration = time.perf_counter() - start
+    INFERENCE_REQUEST_COUNT.labels(endpoint="/predict").inc()
+    INFERENCE_LATENCY.labels(endpoint="/predict").observe(duration)
+    return PredictResponse(label=label, confidence=confidence)
+
+# Mount the Prometheus metrics endpoint at /metrics.  Exposing
+# metrics allows scraping of both training/pipeline metrics and
+# inference metrics with a single server.  ``make_asgi_app`` builds a
+# Starlette application that exports metrics in the standard format.
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
