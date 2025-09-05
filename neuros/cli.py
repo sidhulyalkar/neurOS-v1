@@ -134,6 +134,12 @@ def _parse_args() -> argparse.Namespace:
         help="Prefix for Kafka topics (e.g. raw or aligned)",
     )
 
+    const_parser.add_argument(
+        "--no-kafka",
+        action="store_true",
+        help="Run the demo without a Kafka broker (use NoopWriter)",
+    )
+
     return parser.parse_args()
 
 
@@ -278,10 +284,12 @@ def main() -> None:
             # print(f"Import error: {exc}", file=sys.stderr)
             sys.exit(1)
         # run the async demo
+        # Override Kafka bootstrap with None if the user requested no Kafka
+        kafka_bootstrap = None if getattr(args, "no_kafka", False) else args.kafka_bootstrap
         asyncio.run(
             run_constellation_demo(
                 duration=args.duration,
-                kafka_bootstrap=args.kafka_bootstrap,
+                kafka_bootstrap=kafka_bootstrap,
                 topic_prefix=args.topic_prefix,
                 subject_id=args.subject_id,
                 session_id=args.session_id,
