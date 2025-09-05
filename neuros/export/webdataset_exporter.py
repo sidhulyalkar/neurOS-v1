@@ -23,7 +23,12 @@ import tarfile
 from pathlib import Path
 from typing import Iterable, List
 
-import fsspec
+# fsspec is used for remote storage (e.g. S3).  Import it lazily so that
+# environments without fsspec can still use local filesystem export.
+try:
+    import fsspec  # type: ignore  # noqa: F401
+except Exception:
+    fsspec = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
