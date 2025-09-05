@@ -51,12 +51,36 @@ try:
 except Exception:  # pragma: no cover
     ECGDriver = None  # type: ignore
 
-from ..ingest.kafka_writer import KafkaWriter
+# Import KafkaWriter lazily so that the module can be imported even when
+# confluent_kafka is not installed.  If the import fails, set
+# KafkaWriter to None and rely on the NoopWriter fallback when Kafka
+# is not available or when ``--no-kafka`` is passed.
+try:
+    from ..ingest.kafka_writer import KafkaWriter  # type: ignore
+except Exception:  # pragma: no cover
+    KafkaWriter = None  # type: ignore
+from ..ingest.noop_writer import NoopWriter
 from ..io.nwb_writer import write_nwb_file
 from ..io.zarr_writer import write_ome_zarr
 from ..export.webdataset_exporter import export_to_webdataset
-from ..export.petastorm_exporter import export_to_petastorm
-from ..training.sagemaker_launcher import launch_training
+# Import Petastorm exporter lazily to avoid ImportError when the
+# petastorm package is not installed.  Set to None if unavailable.
+try:
+    from ..export.petastorm_exporter import export_to_petastorm  # type: ignore
+except Exception:  # pragma: no cover
+    export_to_petastorm = None  # type: ignore
+
+# Import SageMaker launcher lazily.  When the sagemaker package is not
+# installed this import may fail.  Provide a stub fallback so that
+# ``launch_training`` can still be called without crashing.
+try:
+    from ..training.sagemaker_launcher import launch_training  # type: ignore
+except Exception:  # pragma: no cover
+    def launch_training(job_name: str, config_path: Optional[str]) -> None:
+        logger.warning(
+            "SageMaker launcher not available; skipping training job '%s'",
+            job_name,
+        )
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +209,7 @@ async def ingest_driver(
 
 async def run_multimodal_ingestion(
     duration: float = 10.0,
-    kafka_bootstrap: str = "localhost:9092",
+    kafka_bootstrap: Optional[str] = "localhost:9092",
     topic_prefix: str = "raw",
     subject_id: str = "subj1",
     session_id: str = "sess1",
@@ -206,7 +230,9 @@ async def run_multimodal_ingestion(
         to 10 seconds.
     kafka_bootstrap : str, optional
         Bootstrap servers for the Kafka producer.  Defaults to
-        ``localhost:9092``.
+        ``localhost:9092``.  If set to ``None`` or an empty string,
+        the pipeline runs in a dry‑run mode without Kafka using a
+        ``NoopWriter``.
     topic_prefix : str, optional
         Prefix for Kafka topics.  Defaults to "raw".
     subject_id : str, optional
@@ -240,7 +266,21 @@ async def run_multimodal_ingestion(
     # remove drivers that may be None (e.g. respiration if module missing)
     drivers = {k: v for k, v in drivers.items() if v is not None}
     collectors: Dict[str, SensorCollector] = {k: SensorCollector(k) for k in drivers}
-    kafka = KafkaWriter(bootstrap_servers=kafka_bootstrap)
+    # Select a writer.  Use NoopWriter for dry‑run mode or when
+    # confluent_kafka is not available.  If kafka_bootstrap is
+    # provided but KafkaWriter could not be imported, fall back to
+    # NoopWriter and emit a warning.
+    if kafka_bootstrap is None or kafka_bootstrap == "":
+        kafka: KafkaWriter | NoopWriter = NoopWriter()
+        logger.info("No Kafka bootstrap provided; using NoopWriter for ingestion.")
+    else:
+        if KafkaWriter is None:
+            logger.warning(
+                "KafkaWriter is unavailable (confluent_kafka not installed); using NoopWriter instead"
+            )
+            kafka = NoopWriter()
+        else:
+            kafka = KafkaWriter(bootstrap_servers=kafka_bootstrap)
     tasks = []
     for modality, driver in drivers.items():
         sensor_id = f"{modality}01"
@@ -259,7 +299,9 @@ async def run_multimodal_ingestion(
             )
         )
     await asyncio.gather(*tasks)
-    kafka.close()
+    # Close the writer if it defines a close method
+    if hasattr(kafka, "close"):
+        kafka.close()
     return collectors
 
 
@@ -350,7 +392,21 @@ def write_raw_data_to_storage(
             )
             file_paths[modality] = file_path
         except Exception as exc:
-            logger.error("Failed to write %s data to NWB: %s", modality, exc)
+            # Fallback: save channels as a NumPy .npz file when NWB is unavailable
+            fallback_path = os.path.join(
+                output_dir, f"{subject_id}_{session_id}_{modality}.npz"
+            )
+            np.savez(
+                fallback_path,
+                **{ch_names[i]: arr[i] for i in range(channels)},
+                sampling_rate=fs,
+            )
+            file_paths[modality] = fallback_path
+            logger.warning(
+                "Failed to write %s data to NWB (error: %s). Saved fallback .npz file instead.",
+                modality,
+                exc,
+            )
     # handle video modality (write OME‑Zarr)
     if "video" in collectors:
         collector = collectors["video"]
@@ -372,7 +428,16 @@ def write_raw_data_to_storage(
                 )
                 file_paths["video"] = zarr_path
             except Exception as exc:
-                logger.error("Failed to write video data to Zarr: %s", exc)
+                # Fallback: save raw video frames as a NumPy array
+                fallback_path = os.path.join(
+                    output_dir, f"{subject_id}_{session_id}_video.npy"
+                )
+                np.save(fallback_path, arr)
+                file_paths["video"] = fallback_path
+                logger.warning(
+                    "Failed to write video data to Zarr (error: %s). Saved fallback .npy file instead.",
+                    exc,
+                )
     return file_paths
 
 
@@ -401,6 +466,8 @@ def export_and_train(
     sagemaker_config : str, optional
         Path to a JSON or YAML file with SageMaker job configuration.
     """
+    # Ensure the output directory exists even if the exporter does nothing
+    os.makedirs(features_dir, exist_ok=True)
     # export to WebDataset shards
     try:
         export_to_webdataset(input_uri=raw_dir, output_uri=features_dir, shard_size=50)
@@ -417,7 +484,7 @@ def export_and_train(
 
 async def run_constellation_demo(
     duration: float = 10.0,
-    kafka_bootstrap: str = "localhost:9092",
+    kafka_bootstrap: Optional[str] = "localhost:9092",
     topic_prefix: str = "raw",
     subject_id: str = "demo_subject",
     session_id: str = "demo_session",
@@ -436,8 +503,10 @@ async def run_constellation_demo(
     ----------
     duration : float, optional
         Number of seconds to ingest data.  Defaults to 10.
-    kafka_bootstrap : str, optional
-        Bootstrap servers for Kafka.  Defaults to localhost.
+    kafka_bootstrap : Optional[str], optional
+        Bootstrap servers for Kafka.  Defaults to "localhost:9092".  If
+        ``None`` or an empty string, ingestion runs in dry‑run mode
+        without a Kafka broker.
     topic_prefix : str, optional
         Prefix for Kafka topics.  Defaults to "raw".
     subject_id : str, optional
