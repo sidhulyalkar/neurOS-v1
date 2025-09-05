@@ -21,9 +21,23 @@ from pathlib import Path
 from typing import Iterable, List, Tuple
 
 import numpy as np
-from pynwb import NWBFile, TimeSeries
-from pynwb.file import Subject
-from pynwb import NWBHDF5IO
+# Import pynwb lazily.  When pynwb is not installed the imports below
+# will fail; in that case we define dummy names and raise an
+# informative ImportError when the write function is called.  This
+# approach allows modules that import ``nwb_writer`` to be loaded
+# without immediately requiring pynwb.
+try:
+    from pynwb import NWBFile, TimeSeries  # type: ignore
+    from pynwb.file import Subject  # type: ignore
+    from pynwb import NWBHDF5IO  # type: ignore
+    _PYNWB_AVAILABLE = True
+except Exception as _exc:
+    NWBFile = None  # type: ignore
+    TimeSeries = None  # type: ignore
+    Subject = None  # type: ignore
+    NWBHDF5IO = None  # type: ignore
+    _PYNWB_IMPORT_ERROR = _exc
+    _PYNWB_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +77,12 @@ def write_nwb_file(
         Timestamp when the recording started.  Defaults to now if not provided.
     """
     assert len(data) == len(channel_names), "Number of channels and names must match"
+
+    # Ensure pynwb is available before proceeding
+    if not _PYNWB_AVAILABLE or NWBFile is None or TimeSeries is None or NWBHDF5IO is None:
+        raise ImportError(
+            "pynwb is required to write NWB files; install the 'pynwb' package to use this feature"
+        )
     n_channels = len(data)
     n_samples = len(data[0]) if n_channels > 0 else 0
 
