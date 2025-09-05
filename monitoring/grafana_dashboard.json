@@ -1,0 +1,62 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "title": "Ingested samples per modality",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (modality) (rate(neuros_constellation_ingest_total[1m]))",
+          "legendFormat": "{{modality}}",
+          "refId": "A"
+        }
+      ],
+      "id": 1
+    },
+    {
+      "title": "Ingestion latency per modality",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, modality) (rate(neuros_constellation_ingest_latency_seconds_bucket[5m])))",
+          "legendFormat": "95th pct {{modality}}",
+          "refId": "A"
+        }
+      ],
+      "id": 2
+    },
+    {
+      "title": "Kafka stream latency",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(neuros_constellation_stream_latency_seconds_bucket[5m]))",
+          "legendFormat": "95th pct stream latency",
+          "refId": "A"
+        }
+      ],
+      "id": 3
+    }
+  ],
+  "title": "Constellation Pipeline Metrics",
+  "uid": "constellation_dashboard",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "refresh": "30s"
+}
