@@ -1,4 +1,4 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: neuros
 Version: 2.0.0
 Summary: A modular operating system for brain–computer interfaces
@@ -9,36 +9,17 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Requires-Dist: numpy>=1.24
-Requires-Dist: pandas>=1.5
-Requires-Dist: scikit-learn>=1.2
-Requires-Dist: fastapi>=0.103
-Requires-Dist: uvicorn>=0.23
-Provides-Extra: dashboard
-Requires-Dist: streamlit>=1.25; extra == "dashboard"
 Provides-Extra: brainflow
-Requires-Dist: brainflow>=5.0; extra == "brainflow"
 Provides-Extra: cloud
-Requires-Dist: boto3>=1.26; extra == "cloud"
-Provides-Extra: test
-Requires-Dist: pytest>=7.2; extra == "test"
+Provides-Extra: constellation
+Provides-Extra: dashboard
 Provides-Extra: notebook
-Requires-Dist: ipykernel>=6.0; extra == "notebook"
-Requires-Dist: matplotlib>=3.7; extra == "notebook"
-Requires-Dist: nbformat>=5.7; extra == "notebook"
-Dynamic: author
-Dynamic: classifier
-Dynamic: description
-Dynamic: description-content-type
-Dynamic: home-page
-Dynamic: provides-extra
-Dynamic: requires-dist
-Dynamic: requires-python
-Dynamic: summary
+Provides-Extra: test
+License-File: LICENSE
 
-# neurOS 2.0 – A Modular Operating System for Brain‑Computer Interfaces
+# neurOS-v1 – A Modular Operating System for Brain‑Computer Interfaces
 
-**neurOS 2.0** is a reimagined version of the original neurOS codebase.  It focuses
+**neurOS-v1** is a reimagined version of the original neurOS codebase.  It focuses
 on clarity, extensibility and measurable performance while delivering a
 production‑ready platform for brain–computer interface (BCI) development and
 research.  This repository contains a self‑contained Python package and

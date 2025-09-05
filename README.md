@@ -36,8 +36,8 @@ that researchers can evaluate the system end‑to‑end.
 ### Installation
 
 ```bash
-git clone https://github.com/<your-user>/neuros2.git
-cd neuros2
+git clone https://github.com/shulyalk/neuros-v1.git
+cd neuros-v1
 pip install -r requirements.txt
 pip install -e .
 
@@ -77,6 +77,38 @@ launch it, install `streamlit` and run:
 ```bash
 pip install streamlit
 neuros dashboard
+
+## Constellation Demo Pipeline
+
+In addition to single‑device pipelines, neurOS includes a **Constellation
+demo** that ingests and synchronises multiple modalities (EEG, audio,
+video, EDA, fNIRS/HD‑DOT, respiration, ECG and phone sensors), writes
+raw data to NWB/Zarr (or fallbacks), exports curated samples into
+WebDataset shards and optionally launches a distributed training job.
+The demo exposes Prometheus metrics for observability and supports
+fault injection to test robustness.
+
+To run the demo locally for 10 seconds and store data in
+`/tmp/constellation_demo`:
+
+```bash
+neuros constellation \
+  --duration 10 \
+  --output-dir /tmp/constellation_demo \
+  --subject-id demo \
+  --session-id session1 \
+  --fault-injection
+```
+
+If you have a Kafka broker running on `localhost:9092`, events will be
+published to topics prefixed with `raw`.  Use `--no-kafka` to disable
+streaming and run in dry‑run mode.  A helper script
+`scripts/run_local_demo.py` simplifies launching the demo and
+optionally starting the local Kafka stack via Docker Compose.
+
+See `docs/runbook_constellation.md` for a detailed guide, including
+instructions for starting Kafka with Docker Compose, importing the
+preconfigured Grafana dashboard and running integration tests.
 ```
 
 ## Contributing

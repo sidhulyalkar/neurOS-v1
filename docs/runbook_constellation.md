@@ -19,9 +19,25 @@ interface.
   ```
 
 * Kafka broker accessible at the host/port specified via
-  `--kafka-bootstrap` (default `localhost:9092`).  For local testing you
-  can run a Kafka container with Docker Compose (see the
-  `docker-compose.yml` in the project root for an example).
+  `--kafka-bootstrap` (default `localhost:9092`).
+
+  For local testing you can spin up a Kafka broker and Zookeeper
+  using the provided `docker-compose.yml` in the project root.  To
+  start the services run:
+
+  ```bash
+  # start Zookeeper and Kafka in the background
+  docker-compose up -d
+  # verify that Kafka is listening on port 9092
+  docker-compose ps
+  ```
+
+  To stop the services run `docker-compose down`.  The Compose file
+  uses the `confluentinc/cp-zookeeper` and `confluentinc/cp-kafka`
+  images and exposes ports `2181` and `9092` on localhost.  If you
+  prefer not to use Kafka during testing, pass the `--no-kafka`
+  flag to the CLI and the pipeline will operate without sending
+  events to Kafka.
 
 * Optional: an AWS account and IAM role configured for SageMaker if you
   intend to launch distributed training jobs.
@@ -29,9 +45,12 @@ interface.
 ## Running the demo pipeline
 
 Use the `neuros` CLI with the `constellation` subcommand to execute
-the end‑to‑end pipeline.  For example, to run a 10 second ingest of
-all modalities, write the raw data to `/tmp/constellation_demo`, shard
-features into WebDataset archives and launch a (no‑op) SageMaker job:
+the end‑to‑end pipeline.  The command takes parameters for the
+ingestion duration, output directory, subject and session IDs,
+Kafka configuration and optional fault injection.  For example, to
+run a 10 second ingest of all modalities, write the raw data to
+`/tmp/constellation_demo`, shard features into WebDataset archives
+and launch a (no‑op) SageMaker job:
 
 ```bash
 neuros constellation \
@@ -45,6 +64,19 @@ neuros constellation \
   --sagemaker-config path/to/job_config.yaml
 ```
 
+If you prefer to test the pipeline without a running Kafka broker (for
+example when working offline), include the `--no-kafka` flag.  In
+this mode the ingestion loop runs as usual but no events are
+published; instead a ``NoopWriter`` counts the number of samples.
+
+```bash
+neuros constellation \
+  --duration 5 \
+  --output-dir /tmp/constellation_demo_no_kafka \
+  --subject-id demo \
+  --session-id test \
+  --no-kafka
+``` 
 ### Command‑line options
 
 | Option | Description |
@@ -135,3 +167,23 @@ export automatically.
 For more information, see the module documentation in
 `neuros/cloud/pipeline_cloud.py` and the docstrings of individual
 drivers and utility functions.
+
+## Additional utilities
+
+The repository includes a few helper scripts and dashboards to make
+development and testing easier:
+
+* **`scripts/run_local_demo.py`** – A wrapper that optionally starts
+  the local Kafka stack using Docker Compose and then runs the
+  Constellation demo with sensible defaults.  Pass `--with-kafka`
+  to bring up Kafka via Compose or `--no-kafka` to skip Kafka.
+
+* **`scripts/test_pipeline.py`** – A simple integration test that
+  runs a short dry‑run ingestion and verifies that raw NWB/Zarr files
+  and WebDataset shards are produced.  Use this script to sanity
+  check your installation.
+
+* **`monitoring/grafana_dashboard.json`** – A preconfigured Grafana
+  dashboard that visualises the Prometheus metrics emitted by the
+  ingestion loop.  Import this JSON file into Grafana to monitor
+  throughput and latency.
