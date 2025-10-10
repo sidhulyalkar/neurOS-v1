@@ -17,7 +17,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depe
 from typing import Optional
 from pydantic import BaseModel
 
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 from ..drivers.mock_driver import MockDriver
@@ -195,7 +195,7 @@ async def start_pipeline(req: RunRequest, info: dict = Depends(require_role(("ad
     # run pipeline
     metrics = await pipeline.run(duration=req.duration)
     # generate a run identifier and persist metrics with tenant context
-    run_id = datetime.utcnow().isoformat(timespec="seconds")
+    run_id = datetime.now(timezone.utc).isoformat(timespec="seconds")
     tenant_id = info.get("tenant", "default")
     try:
         _storage.upload_metrics(metrics, run_id)
@@ -276,7 +276,7 @@ async def stream(websocket: WebSocket, duration: float = 10.0) -> None:
         await websocket.close()
         # persist results if streaming completed normally
         if duration and duration > 0 and result_buffer:
-            run_id = datetime.utcnow().isoformat(timespec="seconds")
+            run_id = datetime.now(timezone.utc).isoformat(timespec="seconds")
             try:
                 _storage.stream_results(result_buffer, run_id)
             except Exception:
@@ -327,7 +327,7 @@ async def autoconfig(req: AutoConfigRequest, info: dict = Depends(require_role((
     pipeline.train(X_train, y_train)
     # run pipeline
     metrics = await pipeline.run(duration=req.duration or 5.0)
-    run_id = datetime.utcnow().isoformat(timespec="seconds")
+    run_id = datetime.now(timezone.utc).isoformat(timespec="seconds")
     tenant_id = info.get("tenant", "default")
     # persist metrics
     try:
