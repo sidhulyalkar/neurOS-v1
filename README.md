@@ -111,12 +111,46 @@ instructions for starting Kafka with Docker Compose, importing the
 preconfigured Grafana dashboard and running integration tests.
 ```
 
+## Documentation
+
+- **[QUICKSTART.md](QUICKSTART.md)** – Get up and running in 5 minutes
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** – Developer guide and contribution guidelines
+- **[AUDIT.md](AUDIT.md)** – Current project status and development roadmap
+- **[docs/](docs/)** – Technical documentation and white papers
+
+## Project Status
+
+**Version:** 2.0.0 (Beta)
+**Status:** Core functionality complete, production readiness in progress
+
+- ✅ Core pipeline working (single and multi-modal)
+- ✅ 10+ models implemented (SimpleClassifier, RandomForest, EEGNet, Transformer, etc.)
+- ✅ 15+ drivers for different modalities (EEG, video, motion, EMG, ECG, etc.)
+- ✅ CLI and API functional
+- ✅ Auto-configuration system
+- ⚠️ Test coverage: 40% (target: >90%)
+- ⚠️ Model persistence in progress
+- ⚠️ Hardware testing needed
+
+See [AUDIT.md](AUDIT.md) for detailed status and roadmap.
+
 ## Contributing
 
-Contributions are welcome!  Please see `CONTRIBUTING.md` for guidelines on
-adding new drivers, processors or models.  The architecture is designed to be
-extensible, so new functionality can be added with minimal boilerplate.
+Contributions are welcome!  Please see [CONTRIBUTING.md](CONTRIBUTING.md) for
+guidelines on adding new drivers, processors or models.  The architecture is
+designed to be extensible, so new functionality can be added with minimal
+boilerplate.
+
+## Support
+
+- **Issues:** Report bugs or request features on [GitHub Issues](https://github.com/shulyalk/neuros-v1/issues)
+- **Discussions:** Ask questions and share ideas
+- **Documentation:** Check the [docs/](docs/) folder for technical details
 
 ## License
 
-This project is licensed under the MIT license – see `LICENSE` for details.
+This project is licensed under the MIT license – see [LICENSE](LICENSE) for details.
+
+---
+
+**NeurOS v1** – Building the future of brain-computer interfaces 🧠✨
