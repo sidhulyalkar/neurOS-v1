@@ -45,6 +45,26 @@ def _parse_args() -> argparse.Namespace:
     train_parser = subparsers.add_parser("train", help="Train a model on CSV data")
     train_parser.add_argument("--csv", type=str, required=True, help="Path to CSV file with features and labels")
 
+    # save-model command
+    save_model_parser = subparsers.add_parser("save-model", help="Save a trained model to the registry")
+    save_model_parser.add_argument("--model-file", type=str, required=True, help="Path to pickled model file")
+    save_model_parser.add_argument("--name", type=str, required=True, help="Model name")
+    save_model_parser.add_argument("--version", type=str, help="Version (default: auto-generated timestamp)")
+    save_model_parser.add_argument("--tags", nargs="+", help="Tags for organization")
+    save_model_parser.add_argument("--accuracy", type=float, help="Model accuracy")
+
+    # load-model command
+    load_model_parser = subparsers.add_parser("load-model", help="Load a model from the registry")
+    load_model_parser.add_argument("--name", type=str, required=True, help="Model name")
+    load_model_parser.add_argument("--version", type=str, help="Version (default: latest)")
+    load_model_parser.add_argument("--output", type=str, help="Output path for loaded model")
+
+    # list-models command
+    list_models_parser = subparsers.add_parser("list-models", help="List all models in the registry")
+    list_models_parser.add_argument("--filter", type=str, help="Filter by name (substring match)")
+    list_models_parser.add_argument("--tags", nargs="+", help="Filter by tags")
+    list_models_parser.add_argument("--format", choices=["table", "json"], default="table", help="Output format")
+
     # dashboard command
     dash_parser = subparsers.add_parser("dashboard", help="Launch the Streamlit dashboard")
 
@@ -179,6 +199,92 @@ def main() -> None:
         with open(model_path, "wb") as f:
             pickle.dump(model, f)
         print(f"Model trained and saved to {model_path}")
+
+    elif args.command == "save-model":
+        # save a model to the registry with metadata
+        from neuros.models import ModelRegistry
+        import pickle
+
+        # Load the model
+        with open(args.model_file, "rb") as f:
+            model = pickle.load(f)
+
+        # Prepare metadata
+        metrics = {}
+        if args.accuracy is not None:
+            metrics["accuracy"] = args.accuracy
+
+        # Save to registry
+        registry = ModelRegistry()
+        metadata = registry.save(
+            model,
+            name=args.name,
+            version=args.version,
+            metrics=metrics,
+            tags=args.tags or [],
+        )
+
+        print(f"✓ Model saved: {metadata.name} v{metadata.version}")
+        print(f"  Type: {metadata.model_type}")
+        print(f"  Path: {metadata.file_path}")
+        if metrics:
+            print(f"  Metrics: {json.dumps(metrics, indent=4)}")
+
+    elif args.command == "load-model":
+        # load a model from the registry
+        from neuros.models import ModelRegistry
+        import pickle
+
+        registry = ModelRegistry()
+        model = registry.load(args.name, version=args.version)
+
+        if args.output:
+            # Save to specified path
+            with open(args.output, "wb") as f:
+                pickle.dump(model, f)
+            print(f"✓ Model loaded and saved to: {args.output}")
+        else:
+            # Just display info
+            metadata = registry.get_metadata(args.name, args.version or registry.get_latest(args.name).version)
+            print(f"✓ Model loaded: {metadata.name} v{metadata.version}")
+            print(f"  Type: {metadata.model_type}")
+            print(f"  Created: {metadata.created_at}")
+            if metadata.metrics:
+                print(f"  Metrics: {json.dumps(metadata.metrics, indent=4)}")
+
+    elif args.command == "list-models":
+        # list models in the registry
+        from neuros.models import ModelRegistry
+
+        registry = ModelRegistry()
+
+        # Apply filters
+        if args.tags:
+            models = registry.search(tags=args.tags)
+        elif args.filter:
+            models = registry.list_models(name_filter=args.filter)
+        else:
+            models = registry.list_models()
+
+        if not models:
+            print("No models found in registry.")
+            return
+
+        if args.format == "json":
+            # JSON output
+            output = [m.to_dict() for m in models]
+            print(json.dumps(output, indent=2))
+        else:
+            # Table output
+            print(f"\n{'Name':<30} {'Version':<15} {'Type':<20} {'Created':<20} {'Accuracy':<10}")
+            print("=" * 105)
+            for m in models:
+                accuracy = m.metrics.get("accuracy", "-")
+                if isinstance(accuracy, float):
+                    accuracy = f"{accuracy:.3f}"
+                created = m.created_at[:19].replace("T", " ")  # Format timestamp
+                print(f"{m.name:<30} {m.version:<15} {m.model_type:<20} {created:<20} {accuracy:<10}")
+            print(f"\nTotal: {len(models)} models\n")
 
     elif args.command == "dashboard":
         """Launch the Streamlit dashboard in a proper script context.

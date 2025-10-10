@@ -23,3 +23,7 @@ from .dino_v3_model import DinoV3Model  # noqa: F401
 
 # composite multi‑modal models
 from .composite_model import CompositeModel  # noqa: F401
+from .attention_fusion_model import AttentionFusionModel  # noqa: F401
+
+# model management
+from .model_registry import ModelRegistry, ModelMetadata  # noqa: F401
