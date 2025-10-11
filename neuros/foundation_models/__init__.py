@@ -45,6 +45,15 @@ except ImportError:
     CEBRA_AVAILABLE = False
     CEBRAModel = None
 
+# Neuroformer models
+try:
+    from .neuroformer_model import NeuroformerModel
+
+    NEUROFORMER_AVAILABLE = True
+except ImportError:
+    NEUROFORMER_AVAILABLE = False
+    NeuroformerModel = None
+
 __all__ = [
     "BaseFoundationModel",
     "POYOModel",
@@ -55,4 +64,6 @@ __all__ = [
     "NDT_AVAILABLE",
     "CEBRAModel",
     "CEBRA_AVAILABLE",
+    "NeuroformerModel",
+    "NEUROFORMER_AVAILABLE",
 ]
