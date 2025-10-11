@@ -26,9 +26,22 @@ except ImportError:
     POYOModel = None
     POYOPlusModel = None
 
+# NDT models
+try:
+    from .ndt_model import NDT2Model, NDT3Model
+
+    NDT_AVAILABLE = True
+except ImportError:
+    NDT_AVAILABLE = False
+    NDT2Model = None
+    NDT3Model = None
+
 __all__ = [
     "BaseFoundationModel",
     "POYOModel",
     "POYOPlusModel",
     "POYO_AVAILABLE",
+    "NDT2Model",
+    "NDT3Model",
+    "NDT_AVAILABLE",
 ]
