@@ -14,6 +14,7 @@ from .bci_datasets import load_bnci_horizon, load_physionet_mi
 from .allen_datasets import (
     load_allen_visual_coding,
     load_allen_neuropixels,
+    load_allen_mock_data,
     AllenDatasetConfig,
 )
 
@@ -24,5 +25,6 @@ __all__ = [
     # Allen Institute datasets
     "load_allen_visual_coding",
     "load_allen_neuropixels",
+    "load_allen_mock_data",
     "AllenDatasetConfig",
 ]
