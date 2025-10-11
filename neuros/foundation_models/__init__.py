@@ -36,6 +36,15 @@ except ImportError:
     NDT2Model = None
     NDT3Model = None
 
+# CEBRA models
+try:
+    from .cebra_model import CEBRAModel
+
+    CEBRA_AVAILABLE = True
+except ImportError:
+    CEBRA_AVAILABLE = False
+    CEBRAModel = None
+
 __all__ = [
     "BaseFoundationModel",
     "POYOModel",
@@ -44,4 +53,6 @@ __all__ = [
     "NDT2Model",
     "NDT3Model",
     "NDT_AVAILABLE",
+    "CEBRAModel",
+    "CEBRA_AVAILABLE",
 ]
