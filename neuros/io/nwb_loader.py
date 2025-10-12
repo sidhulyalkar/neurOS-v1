@@ -12,7 +12,7 @@ References:
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -208,7 +208,7 @@ class NWBLoader:
                     spatial_series = position.spatial_series[spatial_series_name]
                     behavior_data[f"position_{spatial_series_name}"] = {
                         "data": spatial_series.data[:],
-                        "timestamps": spatial_series.timestamps[:],
+                        "timestamps": spatial_series.timestamps[:] if spatial_series.timestamps is not None else None,
                         "unit": spatial_series.unit if hasattr(spatial_series, "unit") else None,
                     }
 
@@ -219,7 +219,7 @@ class NWBLoader:
                         ts = interface.time_series[ts_name]
                         behavior_data[f"{interface_name}_{ts_name}"] = {
                             "data": ts.data[:],
-                            "timestamps": ts.timestamps[:],
+                            "timestamps": ts.timestamps[:] if ts.timestamps is not None else None,
                             "unit": ts.unit if hasattr(ts, "unit") else None,
                         }
 
@@ -341,7 +341,10 @@ class NWBWriter:
         self.file_path = Path(file_path)
 
         if session_start_time is None:
-            session_start_time = datetime.now()
+            session_start_time = datetime.now(timezone.utc)
+        elif session_start_time.tzinfo is None:
+            # Add UTC timezone if not specified
+            session_start_time = session_start_time.replace(tzinfo=timezone.utc)
 
         self.nwbfile = NWBFile(
             session_description=session_description,
@@ -368,14 +371,25 @@ class NWBWriter:
         spike_times : dict
             Dictionary mapping unit IDs to spike time arrays.
         unit_ids : list of int, optional
-            List of unit IDs. If None, uses keys from spike_times.
+            List of unit IDs. If None, extracts integer ID from unit name.
         waveform_mean : dict, optional
             Dictionary mapping unit IDs to mean waveforms.
         """
-        for unit_name, times in spike_times.items():
+        for idx, (unit_name, times) in enumerate(spike_times.items()):
+            # Extract numeric ID from unit name (e.g., "unit_0" -> 0)
+            if unit_ids is not None:
+                unit_id = unit_ids[idx]
+            elif unit_name.startswith("unit_"):
+                try:
+                    unit_id = int(unit_name.split("_")[1])
+                except (ValueError, IndexError):
+                    unit_id = idx
+            else:
+                unit_id = idx
+
             self.nwbfile.add_unit(
                 spike_times=times,
-                id=unit_name if unit_ids is None else unit_ids.pop(0),
+                id=unit_id,
                 waveform_mean=waveform_mean.get(unit_name) if waveform_mean else None,
             )
 
@@ -402,9 +416,27 @@ class NWBWriter:
         timestamps : ndarray, optional
             Timestamps for each sample. If None, uses sampling rate.
         """
+        # Create device if it doesn't exist
+        if "device" not in self.nwbfile.devices:
+            device = self.nwbfile.create_device(name="device")
+        else:
+            device = self.nwbfile.devices["device"]
+
         # Create electrode table if it doesn't exist
-        if self.nwbfile.electrodes is None:
+        if self.nwbfile.electrodes is None or len(self.nwbfile.electrodes) == 0:
             n_electrodes = lfp_data.shape[1] if lfp_data.ndim > 1 else 1
+
+            # Create electrode group
+            if "electrode_group" not in self.nwbfile.electrode_groups:
+                electrode_group = self.nwbfile.create_electrode_group(
+                    name="electrode_group",
+                    description="Electrode group",
+                    location="unknown",
+                    device=device
+                )
+            else:
+                electrode_group = self.nwbfile.electrode_groups["electrode_group"]
+
             for i in range(n_electrodes):
                 self.nwbfile.add_electrode(
                     id=electrode_ids[i] if electrode_ids else i,
@@ -412,29 +444,42 @@ class NWBWriter:
                     imp=np.nan,
                     location="unknown",
                     filtering="unknown",
-                    group=self.nwbfile.create_electrode_group(
-                        name=f"electrode_group_{i}",
-                        description="Electrode group",
-                        location="unknown",
-                        device=self.nwbfile.create_device(name="device")
-                    ),
+                    group=electrode_group,
                 )
 
-        # Create electrical series
-        lfp_series = ElectricalSeries(
-            name="LFP",
-            data=lfp_data,
-            electrodes=list(range(lfp_data.shape[1])) if electrode_ids is None else electrode_ids,
-            starting_time=0.0 if timestamps is None else timestamps[0],
-            rate=sampling_rate if timestamps is None else None,
-            timestamps=timestamps,
+        # Create electrode table region
+        electrode_table_region = self.nwbfile.create_electrode_table_region(
+            region=list(range(lfp_data.shape[1])) if electrode_ids is None else electrode_ids,
+            description="Selected electrodes",
         )
 
-        # Add to processing module
-        ecephys_module = self.nwbfile.create_processing_module(
-            name="ecephys",
-            description="Processed extracellular electrophysiology data",
-        )
+        # Create electrical series
+        # NWB doesn't allow both starting_time and timestamps
+        if timestamps is not None:
+            lfp_series = ElectricalSeries(
+                name="LFP",
+                data=lfp_data,
+                electrodes=electrode_table_region,
+                timestamps=timestamps,
+            )
+        else:
+            lfp_series = ElectricalSeries(
+                name="LFP",
+                data=lfp_data,
+                electrodes=electrode_table_region,
+                starting_time=0.0,
+                rate=sampling_rate,
+            )
+
+        # Create or get processing module
+        if "ecephys" not in self.nwbfile.processing:
+            ecephys_module = self.nwbfile.create_processing_module(
+                name="ecephys",
+                description="Processed extracellular electrophysiology data",
+            )
+        else:
+            ecephys_module = self.nwbfile.processing["ecephys"]
+
         ecephys_module.add(LFP(electrical_series=lfp_series))
 
         logger.info(f"Added LFP data to NWB file: shape {lfp_data.shape}, rate {sampling_rate} Hz")
@@ -457,10 +502,14 @@ class NWBWriter:
         timestamps : ndarray, optional
             Timestamps for each sample.
         """
-        behavior_module = self.nwbfile.create_processing_module(
-            name="behavior",
-            description="Behavioral data",
-        )
+        # Create or get behavior module
+        if "behavior" not in self.nwbfile.processing:
+            behavior_module = self.nwbfile.create_processing_module(
+                name="behavior",
+                description="Behavioral data",
+            )
+        else:
+            behavior_module = self.nwbfile.processing["behavior"]
 
         for name, data in behavior_data.items():
             time_series = TimeSeries(
