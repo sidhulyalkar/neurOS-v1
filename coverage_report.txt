@@ -1,0 +1,140 @@
+........................................................................ [ 30%]
+........................................................................ [ 60%]
+........................................................................ [ 90%]
+.......................                                                  [100%]
+=============================== warnings summary ===============================
+tests/test_alignment.py::TestAlignTrials::test_align_two_trials
+tests/test_alignment.py::TestAlignTrials::test_align_multiple_trials
+tests/test_alignment.py::TestAlignTrials::test_align_improves_alignment
+tests/test_alignment.py::TestAlignTrials::test_align_with_template
+tests/test_alignment.py::TestAlignTrials::test_align_knot_points
+tests/test_alignment.py::TestApplyWarp::test_apply_warp_to_new_data
+tests/test_alignment.py::TestApplyWarp::test_apply_warp_1d
+tests/test_alignment.py::TestEdgeCases::test_align_single_trial
+tests/test_alignment.py::TestEdgeCases::test_align_trials_few_iterations
+  /Users/sidhulyalkar/Documents/Projects/neuros-v1/neuros/alignment.py:233: DeprecationWarning: scipy.optimize: The `disp` and `iprint` options of the L-BFGS-B solver are deprecated and will be removed in SciPy 1.18.0.
+    result = minimize(
+
+tests/test_evaluation.py::TestCrossValidateModel::test_cross_validation_eegnet_model
+tests/test_evaluation.py::TestCrossValidateModel::test_cross_validation_eegnet_model
+tests/test_evaluation.py::TestCrossValidateModel::test_cross_validation_eegnet_model
+tests/test_evaluation.py::TestCrossValidateModel::test_cross_validation_eegnet_model
+  /Users/sidhulyalkar/Documents/Projects/neuros-v1/.venv/lib/python3.13/site-packages/sklearn/neural_network/_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (100) reached and the optimization hasn't converged yet.
+    warnings.warn(
+
+tests/test_evaluation.py::TestCrossValidateModel::test_cross_validation_return_predictions
+  /Users/sidhulyalkar/Documents/Projects/neuros-v1/.venv/lib/python3.13/site-packages/scipy/_lib/array_api_compat/common/_helpers.py:673: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x15faff790>
+    if bare_xp is sys.modules.get("numpy"):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_evaluation.py::TestEdgeCases::test_cross_validation_with_too_few_samples
+  /Users/sidhulyalkar/Documents/Projects/neuros-v1/.venv/lib/python3.13/site-packages/sklearn/model_selection/_split.py:811: UserWarning: The least populated class in y has only 3 members, which is less than n_splits=5.
+    warnings.warn(
+
+tests/test_models.py::test_models_train_predict
+  /Users/sidhulyalkar/Documents/Projects/neuros-v1/.venv/lib/python3.13/site-packages/sklearn/neural_network/_multilayer_perceptron.py:781: ConvergenceWarning: Stochastic Optimizer: Maximum iterations (200) reached and the optimization hasn't converged yet.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.13.3-final-0 _______________
+
+Name                                                Stmts   Miss  Cover
+-----------------------------------------------------------------------
+neuros/__init__.py                                     12      0   100%
+neuros/agents/__init__.py                              13      0   100%
+neuros/agents/base_agent.py                            12      1    92%
+neuros/agents/blink_agent.py                           38     29    24%
+neuros/agents/calcium_agent.py                         28     19    32%
+neuros/agents/device_agent.py                          27      6    78%
+neuros/agents/facial_agent.py                          38      5    87%
+neuros/agents/fusion_agent.py                          38     29    24%
+neuros/agents/modality_manager_agent.py                27      2    93%
+neuros/agents/model_agent.py                           61     12    80%
+neuros/agents/motion_agent.py                          26      4    85%
+neuros/agents/multimodal_orchestrator.py               98     79    19%
+neuros/agents/notebook_agent.py                        67     14    79%
+neuros/agents/orchestrator_agent.py                   114     12    89%
+neuros/agents/pose_agent.py                            38     29    24%
+neuros/agents/processing_agent.py                      36      6    83%
+neuros/agents/video_agent.py                           28     19    32%
+neuros/alignment.py                                   131      0   100%
+neuros/api/__init__.py                                  1      0   100%
+neuros/api/server.py                                  229    112    51%
+neuros/augmentation.py                                168     13    92%
+neuros/autoconfig.py                                  113     37    67%
+neuros/benchmarks/__init__.py                           1      0   100%
+neuros/benchmarks/benchmark_pipeline.py                43      0   100%
+neuros/cli.py                                         193    193     0%
+neuros/cloud/__init__.py                              113     62    45%
+neuros/cloud/pipeline_cloud.py                        157    157     0%
+neuros/dashboard.py                                   107    107     0%
+neuros/datasets/__init__.py                             4      0   100%
+neuros/datasets/allen_datasets.py                     115     66    43%
+neuros/datasets/bci_datasets.py                        76     45    41%
+neuros/db/database.py                                  56      8    86%
+neuros/drivers/__init__.py                             17      0   100%
+neuros/drivers/audio_driver.py                         26     16    38%
+neuros/drivers/base_driver.py                          49      7    86%
+neuros/drivers/brainflow_driver.py                     62     38    39%
+neuros/drivers/calcium_imaging_driver.py               31     20    35%
+neuros/drivers/dataset_driver.py                       54     17    69%
+neuros/drivers/ecg_driver.py                           28     18    36%
+neuros/drivers/ecog_driver.py                          25     16    36%
+neuros/drivers/emg_driver.py                           22     13    41%
+neuros/drivers/eog_driver.py                           24     15    38%
+neuros/drivers/fnirs_driver.py                         26     15    42%
+neuros/drivers/gsr_driver.py                           24     15    38%
+neuros/drivers/hormone_driver.py                       20     11    45%
+neuros/drivers/mock_driver.py                          22      0   100%
+neuros/drivers/motion_sensor_driver.py                 19     10    47%
+neuros/drivers/phone_driver.py                         34     23    32%
+neuros/drivers/respiration_driver.py                   23     14    39%
+neuros/drivers/video_driver.py                         22      1    95%
+neuros/evaluation.py                                  103     16    84%
+neuros/federated/__init__.py                            3      3     0%
+neuros/federated/aggregator.py                         48     48     0%
+neuros/federated/client.py                             19     19     0%
+neuros/foundation_models/__init__.py                   29     14    52%
+neuros/foundation_models/base_foundation_model.py      57      3    95%
+neuros/foundation_models/cebra_model.py               114     13    89%
+neuros/foundation_models/ndt_model.py                 186     43    77%
+neuros/foundation_models/neuroformer_model.py         134     28    79%
+neuros/foundation_models/poyo_model.py                145     35    76%
+neuros/foundation_models/utils.py                     117     26    78%
+neuros/io/__init__.py                                   8      8     0%
+neuros/io/nwb_loader.py                               153    153     0%
+neuros/io/nwb_writer.py                                40     40     0%
+neuros/io/zarr_writer.py                               38     38     0%
+neuros/models/__init__.py                              14      0   100%
+neuros/models/attention_fusion_model.py               124    107    14%
+neuros/models/base_model.py                            15      2    87%
+neuros/models/cnn_model.py                             48     18    62%
+neuros/models/composite_model.py                       38     29    24%
+neuros/models/dino_v3_model.py                         90     60    33%
+neuros/models/eegnet_model.py                          49     18    63%
+neuros/models/gbdt_model.py                            22      1    95%
+neuros/models/knn_model.py                             20      1    95%
+neuros/models/lstm_model.py                           134     16    88%
+neuros/models/model_registry.py                       141     19    87%
+neuros/models/random_forest_model.py                   21      1    95%
+neuros/models/simple_classifier.py                     16      1    94%
+neuros/models/svm_model.py                             21      1    95%
+neuros/models/transformer_model.py                     28     18    36%
+neuros/pipeline.py                                     73     26    64%
+neuros/plugins/__init__.py                              1      1     0%
+neuros/plugins/cv/__init__.py                           3      3     0%
+neuros/plugins/cv/dinov3_backbone.py                   62     62     0%
+neuros/plugins/cv/feature_matching.py                  21     21     0%
+neuros/plugins/cv/linear_seg_head.py                   40     40     0%
+neuros/processing/__init__.py                           3      0   100%
+neuros/processing/adaptation.py                        18      0   100%
+neuros/processing/feature_extraction.py                77     41    47%
+neuros/processing/filters.py                           21      9    57%
+neuros/processing/health_monitor.py                    18      0   100%
+neuros/security.py                                     55     24    56%
+-----------------------------------------------------------------------
+TOTAL                                                5103   2321    55%
+Coverage HTML written to dir htmlcov
+239 passed, 16 warnings in 24.23s

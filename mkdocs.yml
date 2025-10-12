@@ -1,0 +1,131 @@
+site_name: NeurOS Documentation
+site_description: Real-time neural data processing with foundation models
+site_author: NeurOS Team
+site_url: https://neuros.readthedocs.io
+
+repo_name: neuros-v1
+repo_url: https://github.com/yourusername/neuros-v1
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            docstring_style: numpy
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - First Pipeline: getting-started/first-pipeline.md
+  - User Guide:
+    - Pipelines: user-guide/pipelines.md
+    - Models: user-guide/models.md
+    - Foundation Models: user-guide/foundation-models.md
+    - Agents: user-guide/agents.md
+    - CLI Reference: user-guide/cli.md
+    - Data Formats: user-guide/data-formats.md
+  - Tutorials:
+    - Basic Pipeline: tutorials/basic-pipeline.md
+    - Foundation Models Showcase: tutorials/foundation-models.md
+    - Multi-Modal Processing: tutorials/multi-modal.md
+    - Custom Models: tutorials/custom-models.md
+    - Benchmarking: tutorials/benchmarking.md
+    - NWB Integration: tutorials/nwb-integration.md
+  - API Reference:
+    - Pipeline: api/pipeline.md
+    - Models: api/models.md
+    - Foundation Models: api/foundation-models.md
+    - Agents: api/agents.md
+    - Datasets: api/datasets.md
+    - I/O: api/io.md
+  - Development:
+    - Contributing: development/contributing.md
+    - Architecture: development/architecture.md
+    - Testing: development/testing.md
+    - Roadmap: development/roadmap.md
+  - About:
+    - Comparison: about/comparison.md
+    - Publications: about/publications.md
+    - Team: about/team.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourusername/neuros-v1
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/neuros/
+  version:
+    provider: mike
