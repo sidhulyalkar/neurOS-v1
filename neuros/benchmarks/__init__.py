@@ -6,4 +6,4 @@ Benchmarks report throughput, latency and accuracy metrics to facilitate
 comparisons with other BCI frameworks.
 """
 
-from .benchmark_pipeline import run_benchmark  # noqa: F401
+from neuros.benchmarks.benchmark_pipeline import run_benchmark  # noqa: F401

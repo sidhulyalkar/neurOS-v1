@@ -35,7 +35,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class DinoV3Model(BaseModel):

@@ -26,16 +26,16 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 
-from ..drivers.base_driver import BaseDriver
-from ..models.base_model import BaseModel
-from ..processing.adaptation import AdaptiveThreshold
-from ..processing.filters import SmoothingFilter
-from ..processing.feature_extraction import BandPowerExtractor
-from .device_agent import DeviceAgent
-from .processing_agent import ProcessingAgent
-from .model_agent import ModelAgent
-from .base_agent import BaseAgent
-from .fusion_agent import FusionAgent
+from neuros.drivers.base_driver import BaseDriver
+from neuros.models.base_model import BaseModel
+from neuros.processing.adaptation import AdaptiveThreshold
+from neuros.processing.filters import SmoothingFilter
+from neuros.processing.feature_extraction import BandPowerExtractor
+from neuros.agents.device_agent import DeviceAgent
+from neuros.agents.processing_agent import ProcessingAgent
+from neuros.agents.model_agent import ModelAgent
+from neuros.agents.base_agent import BaseAgent
+from neuros.agents.fusion_agent import FusionAgent
 
 
 class MultiModalOrchestrator(BaseAgent):

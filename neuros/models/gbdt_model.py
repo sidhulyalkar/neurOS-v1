@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class GBDTModel(BaseModel):

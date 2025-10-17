@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..models.base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 logger = logging.getLogger(__name__)
 

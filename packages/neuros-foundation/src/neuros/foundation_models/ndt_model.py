@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .base_foundation_model import BaseFoundationModel
-from .utils import spikes_to_tokens, create_session_embeddings
+from neuros.foundation_models.base_foundation_model import BaseFoundationModel
+from neuros.foundation_models.utils import spikes_to_tokens, create_session_embeddings
 
 logger = logging.getLogger(__name__)
 

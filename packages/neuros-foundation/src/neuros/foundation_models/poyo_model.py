@@ -19,8 +19,8 @@ from typing import Optional, Dict, Any, List, Tuple
 
 import numpy as np
 
-from .base_foundation_model import BaseFoundationModel
-from .utils import spikes_to_tokens, create_session_embeddings, create_readout_spec
+from neuros.foundation_models.base_foundation_model import BaseFoundationModel
+from neuros.foundation_models.utils import spikes_to_tokens, create_session_embeddings, create_readout_spec
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,7 @@ ulation decoding with Y... Optimization) is a transformer-based
             n_units = len(spike_times)
         else:
             # Assume spike raster, convert to spike times
-            from .utils import raster_to_spike_times
+            from neuros.foundation_models.utils import raster_to_spike_times
 
             spike_times = raster_to_spike_times(X, fs=1000.0)  # Assume 1kHz
             n_units = X.shape[1] if X.ndim > 1 else 1

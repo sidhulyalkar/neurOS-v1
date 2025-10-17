@@ -15,9 +15,9 @@ from typing import Callable, Optional, Tuple
 
 import numpy as np
 
-from ..models.base_model import BaseModel
-from ..processing.adaptation import AdaptiveThreshold
-from .base_agent import BaseAgent
+from neuros.models.base_model import BaseModel
+from neuros.processing.adaptation import AdaptiveThreshold
+from neuros.agents.base_agent import BaseAgent
 
 
 class ModelAgent(BaseAgent):

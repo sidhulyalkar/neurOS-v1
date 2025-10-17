@@ -36,8 +36,8 @@ from typing import Iterable, Dict, Any
 
 import numpy as np
 
-from ..autoconfig import generate_pipeline_for_task
-from .notebook_agent import NotebookAgent
+from neuros.autoconfig import generate_pipeline_for_task
+from neuros.agents.notebook_agent import NotebookAgent
 
 
 class ModalityManagerAgent:

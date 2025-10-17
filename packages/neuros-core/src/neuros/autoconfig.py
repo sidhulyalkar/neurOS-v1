@@ -17,16 +17,16 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .pipeline import Pipeline
-from .drivers.mock_driver import MockDriver
-from .drivers.brainflow_driver import BrainFlowDriver
-from .drivers.video_driver import VideoDriver
-from .drivers.calcium_imaging_driver import CalciumImagingDriver
-from .drivers.motion_sensor_driver import MotionSensorDriver
-from .drivers.ecog_driver import ECoGDriver
-from .drivers.emg_driver import EMGDriver
-from .drivers.eog_driver import EOGDriver
-from .models import (
+from neuros.pipeline import Pipeline
+from neuros.drivers.mock_driver import MockDriver
+from neuros.drivers.brainflow_driver import BrainFlowDriver
+from neuros.drivers.video_driver import VideoDriver
+from neuros.drivers.calcium_imaging_driver import CalciumImagingDriver
+from neuros.drivers.motion_sensor_driver import MotionSensorDriver
+from neuros.drivers.ecog_driver import ECoGDriver
+from neuros.drivers.emg_driver import EMGDriver
+from neuros.drivers.eog_driver import EOGDriver
+from neuros.models import (
     EEGNetModel,
     CNNModel,
     RandomForestModel,
@@ -38,7 +38,7 @@ from .models import (
     DinoV3Model,
 )
 
-from .agents import (
+from neuros.agents import (
     VideoAgent,
     PoseAgent,
     FacialAgent,
@@ -46,7 +46,7 @@ from .agents import (
     MotionAgent,
     CalciumAgent,
 )
-from .drivers.dataset_driver import DatasetDriver
+from neuros.drivers.dataset_driver import DatasetDriver
 
 
 def generate_pipeline_for_task(
@@ -158,7 +158,7 @@ def generate_pipeline_for_task(
         # instantiate dataset driver at the provided sampling rate
         driver = DatasetDriver(dataset_name=selected_name, sampling_rate=fs)
         # pass through raw features to model; use MotionAgent to forward samples unchanged
-        from .agents import MotionAgent  # inline import to avoid circular dependencies
+        from neuros.agents import MotionAgent  # inline import to avoid circular dependencies
         processing_agent_class = MotionAgent
         processing_kwargs = {}
         # dataset tasks often benefit from strong models; if no explicit model requested,

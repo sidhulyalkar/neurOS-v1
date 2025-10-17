@@ -20,7 +20,7 @@ from typing import AsyncIterator, Tuple
 
 import numpy as np
 
-from .base_driver import BaseDriver
+from neuros.drivers.base_driver import BaseDriver
 
 
 class PhoneDriver(BaseDriver):

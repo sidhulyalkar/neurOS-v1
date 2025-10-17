@@ -24,7 +24,7 @@ from typing import AsyncGenerator, Iterable, Tuple
 
 import numpy as np
 
-from .base_driver import BaseDriver
+from neuros.drivers.base_driver import BaseDriver
 
 
 class CalciumImagingDriver(BaseDriver):

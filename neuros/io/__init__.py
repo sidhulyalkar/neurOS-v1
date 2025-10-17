@@ -8,7 +8,7 @@ from __future__ import annotations
 
 # NWB support
 try:
-    from .nwb_loader import NWBLoader, NWBWriter, NWB_AVAILABLE
+    from neuros.io.nwb_loader import NWBLoader, NWBWriter, NWB_AVAILABLE
 except ImportError:
     NWB_AVAILABLE = False
     NWBLoader = None

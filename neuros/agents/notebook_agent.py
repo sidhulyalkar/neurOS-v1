@@ -54,7 +54,7 @@ try:
 except ImportError as e:  # pragma: no cover
     nbf = None
 
-from ..autoconfig import generate_pipeline_for_task
+from neuros.autoconfig import generate_pipeline_for_task
 
 
 class NotebookAgent:
@@ -118,7 +118,7 @@ class NotebookAgent:
         agent_cls = getattr(pipeline, "processing_agent_class", None)
         # import here to avoid circular imports
         try:
-            from ..agents import (
+            from neuros.agents import (
                 VideoAgent,
                 PoseAgent,
                 FacialAgent,

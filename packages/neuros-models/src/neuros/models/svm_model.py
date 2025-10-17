@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.svm import SVC
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class SVMModel(BaseModel):

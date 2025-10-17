@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Optional
 import numpy as np
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class LSTMModel(BaseModel):

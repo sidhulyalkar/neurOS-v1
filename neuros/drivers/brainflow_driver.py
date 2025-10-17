@@ -15,8 +15,8 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator, Optional
 
-from .base_driver import BaseDriver
-from .mock_driver import MockDriver
+from neuros.drivers.base_driver import BaseDriver
+from neuros.drivers.mock_driver import MockDriver
 
 
 class BrainFlowDriver(BaseDriver):

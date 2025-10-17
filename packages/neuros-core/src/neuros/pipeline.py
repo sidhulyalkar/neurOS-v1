@@ -173,13 +173,13 @@ class MultiModalPipeline:
                         pass
         # ensure monitor exists if not provided
         if self.monitor is None:
-            from .processing.health_monitor import QualityMonitor
+            from neuros.processing.health_monitor import QualityMonitor
             try:
                 self.monitor = QualityMonitor()
             except Exception:
                 self.monitor = None
         # instantiate orchestrator
-        from .agents.multimodal_orchestrator import MultiModalOrchestrator
+        from neuros.agents.multimodal_orchestrator import MultiModalOrchestrator
         orchestrator = MultiModalOrchestrator(
             drivers=self.drivers,
             model=self.model,

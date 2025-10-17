@@ -20,18 +20,18 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 import os
 
-from ..drivers.mock_driver import MockDriver
-from ..pipeline import Pipeline
-from ..agents.orchestrator_agent import Orchestrator
-from ..cloud import CloudStorage, LocalStorage
-from ..db.database import Database
-from ..security import require_role, get_token_info, load_token_map
+from neuros.drivers.mock_driver import MockDriver
+from neuros.pipeline import Pipeline
+from neuros.agents.orchestrator_agent import Orchestrator
+from neuros.cloud import CloudStorage, LocalStorage
+from neuros.db.database import Database
+from neuros.security import require_role, get_token_info, load_token_map
 
 # Import classification model and numerical utilities for the inference endpoint.
 # SimpleClassifier is used as the primary model when a model has been trained
 # via the /train endpoint.  NumPy provides array operations for feature
 # handling, and time/perf_counter is used to measure request latency.
-from ..models.simple_classifier import SimpleClassifier  # type: ignore
+from neuros.models.simple_classifier import SimpleClassifier  # type: ignore
 import numpy as np  # type: ignore
 import time
 from prometheus_client import Counter as _Counter, Histogram as _Histogram, make_asgi_app
@@ -124,7 +124,7 @@ _inference_model: DummyBrainStateModel | SimpleClassifier = DummyBrainStateModel
 _storage: CloudStorage
 _storage_type = os.getenv("NEUROS_STORAGE", "local").lower()
 if _storage_type == "s3":  # pragma: no cover - requires boto3
-    from ..cloud import S3Storage  # type: ignore
+    from neuros.cloud import S3Storage  # type: ignore
 
     bucket = os.getenv("NEUROS_S3_BUCKET")
     if not bucket:
@@ -310,7 +310,7 @@ async def autoconfig(req: AutoConfigRequest, info: dict = Depends(require_role((
     trains it on synthetic data and runs it for the specified duration.
     The resulting metrics and run ID are returned.
     """
-    from ..autoconfig import generate_pipeline_for_task
+    from neuros.autoconfig import generate_pipeline_for_task
     # create pipeline using heuristics
     pipeline = generate_pipeline_for_task(
         req.task_description,

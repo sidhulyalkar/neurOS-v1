@@ -14,14 +14,14 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .drivers.base_driver import BaseDriver
-from .drivers.mock_driver import MockDriver
-from .models.base_model import BaseModel
-from .models.simple_classifier import SimpleClassifier
-from .processing.filters import BandpassFilter, SmoothingFilter
-from .processing.feature_extraction import BandPowerExtractor
-from .agents.orchestrator_agent import Orchestrator
-from .processing.health_monitor import QualityMonitor
+from neuros.drivers.base_driver import BaseDriver
+from neuros.drivers.mock_driver import MockDriver
+from neuros.models.base_model import BaseModel
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.processing.filters import BandpassFilter, SmoothingFilter
+from neuros.processing.feature_extraction import BandPowerExtractor
+from neuros.agents.orchestrator_agent import Orchestrator
+from neuros.processing.health_monitor import QualityMonitor
 
 
 @dataclass
@@ -173,13 +173,13 @@ class MultiModalPipeline:
                         pass
         # ensure monitor exists if not provided
         if self.monitor is None:
-            from .processing.health_monitor import QualityMonitor
+            from neuros.processing.health_monitor import QualityMonitor
             try:
                 self.monitor = QualityMonitor()
             except Exception:
                 self.monitor = None
         # instantiate orchestrator
-        from .agents.multimodal_orchestrator import MultiModalOrchestrator
+        from neuros.agents.multimodal_orchestrator import MultiModalOrchestrator
         orchestrator = MultiModalOrchestrator(
             drivers=self.drivers,
             model=self.model,

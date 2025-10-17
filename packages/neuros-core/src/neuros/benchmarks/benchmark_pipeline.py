@@ -17,11 +17,11 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-from ..drivers.mock_driver import MockDriver
-from ..models.simple_classifier import SimpleClassifier
-from ..pipeline import Pipeline
-from ..processing.feature_extraction import BandPowerExtractor
-from ..processing.filters import SmoothingFilter
+from neuros.drivers.mock_driver import MockDriver
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.pipeline import Pipeline
+from neuros.processing.feature_extraction import BandPowerExtractor
+from neuros.processing.filters import SmoothingFilter
 
 
 async def run_benchmark(duration: float = 10.0) -> Dict[str, float]:

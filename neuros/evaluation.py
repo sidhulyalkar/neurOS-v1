@@ -29,7 +29,7 @@ from sklearn.metrics import (
     classification_report,
 )
 
-from .models.base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 logger = logging.getLogger(__name__)
 

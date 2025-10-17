@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
-from .base_foundation_model import BaseFoundationModel
+from neuros.foundation_models.base_foundation_model import BaseFoundationModel
 
 logger = logging.getLogger(__name__)
 

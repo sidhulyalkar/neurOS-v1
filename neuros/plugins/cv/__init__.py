@@ -25,7 +25,7 @@ The segmentation head expects patch features of shape ``[B, N, C]`` where
 is the feature dimension.  It outputs logits at the original image resolution.
 """
 
-from .dinov3_backbone import DINOv3Backbone  # noqa: F401
-from .linear_seg_head import LinearSegHead    # noqa: F401
+from neuros.plugins.cv.dinov3_backbone import DINOv3Backbone  # noqa: F401
+from neuros.plugins.cv.linear_seg_head import LinearSegHead    # noqa: F401
 
 __all__ = ["DINOv3Backbone", "LinearSegHead"]

@@ -19,7 +19,7 @@ from typing import Tuple
 
 import numpy as np
 
-from .base_agent import BaseAgent
+from neuros.agents.base_agent import BaseAgent
 
 
 class VideoAgent(BaseAgent):

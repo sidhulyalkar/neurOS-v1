@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class SimpleClassifier(BaseModel):

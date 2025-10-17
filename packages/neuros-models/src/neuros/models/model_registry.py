@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Type
 
 import numpy as np
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 @dataclass

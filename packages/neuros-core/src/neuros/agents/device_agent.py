@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from ..drivers.base_driver import BaseDriver
-from .base_agent import BaseAgent
+from neuros.drivers.base_driver import BaseDriver
+from neuros.agents.base_agent import BaseAgent
 
 
 class DeviceAgent(BaseAgent):

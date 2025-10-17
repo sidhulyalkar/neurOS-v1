@@ -17,10 +17,10 @@ from typing import Optional
 
 import numpy as np
 
-from .pipeline import Pipeline
-from .drivers.mock_driver import MockDriver
-from .models.simple_classifier import SimpleClassifier
-from .benchmarks.benchmark_pipeline import run_benchmark
+from neuros.pipeline import Pipeline
+from neuros.drivers.mock_driver import MockDriver
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.benchmarks.benchmark_pipeline import run_benchmark
 
 
 def _parse_args() -> argparse.Namespace:
@@ -334,7 +334,7 @@ def main() -> None:
         # generate a demonstration notebook for a task
         try:
             # import directly from the module to avoid circular dependencies
-            from .agents.notebook_agent import NotebookAgent
+            from neuros.agents.notebook_agent import NotebookAgent
         except ImportError:
             print(
                 "NotebookAgent could not be imported. Ensure neurOS is installed correctly.",
@@ -349,7 +349,7 @@ def main() -> None:
         # run multiple pipelines for specified tasks and return metrics
         try:
             # import directly from the module to avoid circular dependencies
-            from .agents.modality_manager_agent import ModalityManagerAgent
+            from neuros.agents.modality_manager_agent import ModalityManagerAgent
         except ImportError:
             print(
                 "ModalityManagerAgent could not be imported. Ensure neurOS is installed correctly.",
@@ -371,7 +371,7 @@ def main() -> None:
             )
             sys.exit(1)
         # import app lazily to allow optional FastAPI installation
-        from .api.server import app
+        from neuros.api.server import app
 
         uvicorn.run(app, host=args.host, port=args.port)
 
@@ -379,7 +379,7 @@ def main() -> None:
         # Run the Constellation multi‑modal pipeline demo
         try:
             # Defer import so that optional dependencies are loaded only when needed
-            from .cloud.pipeline_cloud import run_constellation_demo
+            from neuros.cloud.pipeline_cloud import run_constellation_demo
         except Exception as exc:
             print(
                 "Constellation pipeline is not available. Ensure optional dependencies are installed and the neuros.cloud package is present.",

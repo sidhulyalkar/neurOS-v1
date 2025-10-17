@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 try:
     import tensorflow as _tf  # pragma: no cover

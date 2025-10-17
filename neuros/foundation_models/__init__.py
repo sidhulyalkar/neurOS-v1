@@ -14,11 +14,11 @@ All foundation models extend the neurOS BaseModel interface for seamless integra
 
 from __future__ import annotations
 
-from .base_foundation_model import BaseFoundationModel
+from neuros.foundation_models.base_foundation_model import BaseFoundationModel
 
 # POYO models
 try:
-    from .poyo_model import POYOModel, POYOPlusModel
+    from neuros.foundation_models.poyo_model import POYOModel, POYOPlusModel
 
     POYO_AVAILABLE = True
 except ImportError:
@@ -28,7 +28,7 @@ except ImportError:
 
 # NDT models
 try:
-    from .ndt_model import NDT2Model, NDT3Model
+    from neuros.foundation_models.ndt_model import NDT2Model, NDT3Model
 
     NDT_AVAILABLE = True
 except ImportError:
@@ -38,7 +38,7 @@ except ImportError:
 
 # CEBRA models
 try:
-    from .cebra_model import CEBRAModel
+    from neuros.foundation_models.cebra_model import CEBRAModel
 
     CEBRA_AVAILABLE = True
 except ImportError:
@@ -47,7 +47,7 @@ except ImportError:
 
 # Neuroformer models
 try:
-    from .neuroformer_model import NeuroformerModel
+    from neuros.foundation_models.neuroformer_model import NeuroformerModel
 
     NEUROFORMER_AVAILABLE = True
 except ImportError:

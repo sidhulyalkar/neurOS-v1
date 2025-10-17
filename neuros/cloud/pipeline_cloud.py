@@ -32,22 +32,22 @@ from typing import Dict, Iterable, List, Optional
 import numpy as np
 from prometheus_client import Counter, Histogram
 
-from ..drivers.audio_driver import AudioDriver
-from ..drivers.video_driver import VideoDriver
-from ..drivers.gsr_driver import GSRDriver
-from ..drivers.mock_driver import MockDriver
-from ..drivers.phone_driver import PhoneDriver
-from ..drivers.fnirs_driver import FnirsDriver
+from neuros.drivers.audio_driver import AudioDriver
+from neuros.drivers.video_driver import VideoDriver
+from neuros.drivers.gsr_driver import GSRDriver
+from neuros.drivers.mock_driver import MockDriver
+from neuros.drivers.phone_driver import PhoneDriver
+from neuros.drivers.fnirs_driver import FnirsDriver
 
 # Optional drivers may not be present in minimal installations.  Import them
 # lazily and fall back to None if unavailable.
 try:
-    from ..drivers.respiration_driver import RespirationDriver  # type: ignore
+    from neuros.drivers.respiration_driver import RespirationDriver  # type: ignore
 except Exception:  # pragma: no cover
     RespirationDriver = None  # type: ignore
 
 try:
-    from ..drivers.ecg_driver import ECGDriver  # type: ignore
+    from neuros.drivers.ecg_driver import ECGDriver  # type: ignore
 except Exception:  # pragma: no cover
     ECGDriver = None  # type: ignore
 
@@ -56,17 +56,17 @@ except Exception:  # pragma: no cover
 # KafkaWriter to None and rely on the NoopWriter fallback when Kafka
 # is not available or when ``--no-kafka`` is passed.
 try:
-    from ..ingest.kafka_writer import KafkaWriter  # type: ignore
+    from neuros.ingest.kafka_writer import KafkaWriter  # type: ignore
 except Exception:  # pragma: no cover
     KafkaWriter = None  # type: ignore
-from ..ingest.noop_writer import NoopWriter
-from ..io.nwb_writer import write_nwb_file
-from ..io.zarr_writer import write_ome_zarr
-from ..export.webdataset_exporter import export_to_webdataset
+from neuros.ingest.noop_writer import NoopWriter
+from neuros.io.nwb_writer import write_nwb_file
+from neuros.io.zarr_writer import write_ome_zarr
+from neuros.export.webdataset_exporter import export_to_webdataset
 # Import Petastorm exporter lazily to avoid ImportError when the
 # petastorm package is not installed.  Set to None if unavailable.
 try:
-    from ..export.petastorm_exporter import export_to_petastorm  # type: ignore
+    from neuros.export.petastorm_exporter import export_to_petastorm  # type: ignore
 except Exception:  # pragma: no cover
     export_to_petastorm = None  # type: ignore
 
@@ -74,7 +74,7 @@ except Exception:  # pragma: no cover
 # installed this import may fail.  Provide a stub fallback so that
 # ``launch_training`` can still be called without crashing.
 try:
-    from ..training.sagemaker_launcher import launch_training  # type: ignore
+    from neuros.training.sagemaker_launcher import launch_training  # type: ignore
 except Exception:  # pragma: no cover
     def launch_training(job_name: str, config_path: Optional[str]) -> None:
         logger.warning(

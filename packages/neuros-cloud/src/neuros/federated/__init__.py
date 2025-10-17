@@ -20,7 +20,7 @@ independent devices or institutions, facilitating cross‑site analysis
 and model evaluation without centralising raw data.
 """
 
-from .aggregator import FederatedAggregator  # noqa: F401
-from .client import FederatedClient  # noqa: F401
+from neuros.federated.aggregator import FederatedAggregator  # noqa: F401
+from neuros.federated.client import FederatedClient  # noqa: F401
 
 __all__ = ["FederatedAggregator", "FederatedClient"]

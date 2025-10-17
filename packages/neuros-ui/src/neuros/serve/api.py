@@ -10,6 +10,6 @@ classes (``PredictRequest`` and ``PredictResponse``) are also
 re‑exported for compatibility.
 """
 
-from ..api.server import app, PredictRequest, PredictResponse
+from neuros.api.server import app, PredictRequest, PredictResponse
 
 __all__ = ["app", "PredictRequest", "PredictResponse"]

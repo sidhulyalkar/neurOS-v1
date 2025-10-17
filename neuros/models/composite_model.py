@@ -24,7 +24,7 @@ from typing import Iterable, List, Sequence
 
 import numpy as np
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 
 class CompositeModel(BaseModel):

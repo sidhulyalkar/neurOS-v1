@@ -7,4 +7,4 @@ designed to run behind `uvicorn` or another ASGI server and requires
 `fastapi` to be installed.
 """
 
-from .server import app  # noqa: F401
+from neuros.api.server import app  # noqa: F401

@@ -16,7 +16,7 @@ from typing import Optional
 import numpy as np
 from sklearn.neural_network import MLPClassifier
 
-from .base_model import BaseModel
+from neuros.models.base_model import BaseModel
 
 try:
     # Attempt to import TensorFlow for a real deep learning implementation.

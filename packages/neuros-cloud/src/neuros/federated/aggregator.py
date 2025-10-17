@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
 
-from ..db.database import Database
+from neuros.db.database import Database
 
 
 class FederatedAggregator:

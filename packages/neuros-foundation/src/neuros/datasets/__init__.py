@@ -8,10 +8,10 @@ from various sources including Allen Institute, BNCI Horizon, PhysioNet, and mor
 from __future__ import annotations
 
 # Public BCI datasets
-from .bci_datasets import load_bnci_horizon, load_physionet_mi
+from neuros.datasets.bci_datasets import load_bnci_horizon, load_physionet_mi
 
 # Allen Institute datasets (for foundation models)
-from .allen_datasets import (
+from neuros.datasets.allen_datasets import (
     load_allen_visual_coding,
     load_allen_neuropixels,
     load_allen_mock_data,
