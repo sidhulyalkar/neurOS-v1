@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-drivers"
+version = "2.0.0"
+description = "Hardware drivers for neurOS - EEG, video, audio, and multi-modal data acquisition"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Development Team"}
+]
+keywords = ["neuroscience", "bci", "eeg", "brainflow", "lsl", "video", "audio"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "neuros-core>=2.0.0",
+    "numpy>=1.24.0",
+    "pynwb>=2.2.0",
+    "hdmf>=3.10.0",
+]
+
+[project.optional-dependencies]
+eeg = [
+    "brainflow>=5.10.0",
+    "pylsl>=1.16.1",
+]
+video = [
+    "opencv-python>=4.8.0",
+]
+audio = [
+    "pyaudio>=0.2.13",
+]
+nwb = [
+    "pynwb>=2.2.0",
+    "hdmf>=3.10.0",
+]
+all = [
+    "brainflow>=5.10.0",
+    "pylsl>=1.16.1",
+    "opencv-python>=4.8.0",
+    "pyaudio>=0.2.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/<your-user>/neuros2"
+Documentation = "https://neuros.readthedocs.io"
+Repository = "https://github.com/<your-user>/neuros2"
+Issues = "https://github.com/<your-user>/neuros2/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["neuros*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+neuros = ["py.typed"]

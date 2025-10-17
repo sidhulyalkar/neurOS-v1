@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-foundation"
+version = "2.0.0"
+description = "Foundation models for neurOS - POYO, NDT, CEBRA, Neuroformer"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Development Team"}
+]
+keywords = ["neuroscience", "foundation-models", "poyo", "ndt", "cebra", "neuroformer", "transfer-learning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "neuros-core>=2.0.0",
+    "neuros-models>=2.0.0",
+    "numpy>=1.24.0",
+    "torch>=2.1.0",
+]
+
+[project.optional-dependencies]
+poyo = [
+    # POYO-specific dependencies when available
+]
+ndt = [
+    # NDT-specific dependencies when available
+]
+cebra = [
+    "cebra>=0.3.0",
+]
+neuroformer = [
+    # Neuroformer-specific dependencies when available
+]
+allen = [
+    # Allen Institute dataset loaders
+    "allensdk>=2.15.0",
+]
+all = [
+    "cebra>=0.3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/<your-user>/neuros2"
+Documentation = "https://neuros.readthedocs.io"
+Repository = "https://github.com/<your-user>/neuros2"
+Issues = "https://github.com/<your-user>/neuros2/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["neuros*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+neuros = ["py.typed"]

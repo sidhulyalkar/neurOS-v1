@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-ui"
+version = "2.0.0"
+description = "User interfaces for neurOS - Streamlit dashboard, FastAPI server, and visualizations"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Development Team"}
+]
+keywords = ["neuroscience", "dashboard", "visualization", "api", "streamlit"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+dependencies = [
+    "neuros-core>=2.0.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "streamlit>=1.28.0",
+]
+api = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.1",
+]
+viz = [
+    "plotly>=5.17.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
+]
+all = [
+    "streamlit>=1.28.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.1",
+    "plotly>=5.17.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/<your-user>/neuros2"
+Documentation = "https://neuros.readthedocs.io"
+Repository = "https://github.com/<your-user>/neuros2"
+Issues = "https://github.com/<your-user>/neuros2/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["neuros*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+neuros = ["py.typed"]
