@@ -1,0 +1,139 @@
+# NeuroFM-X Pretraining Experiment Configuration
+# Multi-dataset pretraining following the 4-stage curriculum
+
+defaults:
+  - /model: neurofmx_base
+  - _self_
+
+experiment_name: neurofmx_pretrain
+seed: 42
+
+# Dataset Configuration
+data:
+  # Stage 1: DataSpec - Small diverse datasets for rapid iteration
+  stage1:
+    datasets:
+      - name: ibl_steinmetz
+        path: /data/ibl/steinmetz
+        modalities: [spikes, behavior]
+        sessions: 10
+        duration_hours: 5
+      - name: allen_neuropixels
+        path: /data/allen/neuropixels
+        modalities: [spikes, lfp]
+        sessions: 5
+        duration_hours: 3
+
+  # Stage 2: Pretrain - Large-scale multi-dataset pretraining
+  stage2:
+    datasets:
+      - name: ibl_repeated_site
+        path: /data/ibl/repeated_site
+        modalities: [spikes, behavior]
+        sessions: 100
+        duration_hours: 200
+      - name: allen_visual_coding
+        path: /data/allen/visual_coding
+        modalities: [calcium, behavior]
+        sessions: 50
+        duration_hours: 100
+      - name: dandi_mc_rtt
+        path: /data/dandi/000128
+        modalities: [spikes, behavior]
+        sessions: 20
+        duration_hours: 40
+
+  # Common data parameters
+  batch_size: 32
+  num_workers: 8
+  pin_memory: true
+  prefetch_factor: 2
+
+  # Sequence parameters
+  sequence_length: 2000  # 2 seconds @ 1kHz
+  overlap: 0.5  # 50% overlap between sequences
+
+  # Augmentation
+  augmentation:
+    enabled: true
+    jitter_std: 0.1  # Temporal jitter
+    dropout_prob: 0.1  # Random unit dropout
+    noise_std: 0.05  # Gaussian noise
+
+# Training Configuration
+trainer:
+  accelerator: auto
+  devices: auto
+  strategy: ddp  # Distributed data parallel
+  precision: bf16
+  max_epochs: 100
+
+  # Checkpointing
+  checkpoint:
+    monitor: val/loss
+    mode: min
+    save_top_k: 3
+    save_last: true
+    dirpath: checkpoints/${experiment_name}
+    filename: epoch_{epoch:03d}_loss_{val/loss:.4f}
+
+  # Early stopping
+  early_stopping:
+    monitor: val/loss
+    patience: 10
+    mode: min
+
+  # Logging
+  logger:
+    - type: wandb
+      project: neurofmx
+      name: ${experiment_name}
+      tags: [pretrain, base]
+    - type: tensorboard
+      save_dir: logs/${experiment_name}
+
+  # Callbacks
+  callbacks:
+    - type: learning_rate_monitor
+      logging_interval: step
+    - type: model_checkpoint
+    - type: early_stopping
+    - type: gradient_accumulation
+      accumulate_grad_batches: 4
+
+# Validation Configuration
+validation:
+  check_val_every_n_epoch: 1
+  val_check_interval: 1.0  # Check every epoch
+  limit_val_batches: 100  # Limit validation to 100 batches for speed
+
+# Metrics to track
+metrics:
+  train:
+    - loss
+    - decoder_loss
+    - encoder_loss
+    - contrastive_loss
+    - diffusion_loss
+    - learning_rate
+  val:
+    - loss
+    - decoder_r2  # R² for behavioral decoding
+    - encoder_bps  # Bits-per-spike for neural encoding
+    - contrastive_accuracy
+    - diffusion_mse
+
+# Compute requirements
+compute:
+  min_gpu_memory_gb: 40  # A100 40GB recommended
+  estimated_time_hours: 72  # 3 days for full pretraining
+  checkpoint_frequency_hours: 6
+
+# Resume from checkpoint
+resume_from_checkpoint: null  # Set to checkpoint path to resume
+
+# Debug mode (reduced dataset for testing)
+debug:
+  enabled: false
+  max_batches: 10
+  max_epochs: 2

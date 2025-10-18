@@ -1,0 +1,98 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-neurofm"
+version = "0.1.0"
+description = "NeuroFM-X: Foundation Model for Neural Population Dynamics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Team", email = "neuros@example.com"}
+]
+keywords = ["neuroscience", "BCI", "foundation-model", "SSM", "mamba"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.3.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "einops>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.3.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.3.0",
+]
+mamba = [
+    "mamba-ssm>=2.0.0",
+]
+training = [
+    "pytorch-lightning>=2.4.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
+    "wandb>=0.15.0",
+    "tensorboard>=2.13.0",
+]
+datasets = [
+    "pynwb>=2.5.0",
+    "h5py>=3.8.0",
+    "zarr>=2.14.0",
+    "dandi>=0.56.0",
+    "allensdk>=2.15.0",
+    "ONE-api>=2.0.0",  # International Brain Lab
+]
+all = [
+    "neuros-neurofm[dev,mamba,training,datasets]",
+]
+
+[project.urls]
+Homepage = "https://github.com/shulyalk/neuros-v1"
+Documentation = "https://neuros-v1.readthedocs.io"
+Repository = "https://github.com/shulyalk/neuros-v1"
+Issues = "https://github.com/shulyalk/neuros-v1/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu: marks tests requiring GPU",
+    "dataset: marks tests requiring dataset downloads",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

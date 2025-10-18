@@ -1,0 +1,163 @@
+# NeuroFM-X Base Configuration
+# This config defines the standard NeuroFM-X architecture with 768-dim embeddings
+
+name: neurofmx_base
+
+# Mamba/SSM Backbone Configuration
+backbone:
+  type: mamba_ssm
+  d_model: 768
+  n_blocks: 16
+  d_state: 16  # SSM state dimension
+  d_conv: 4    # Local convolution width
+  expand: 2    # Expansion factor for inner dimension
+  dt_rank: auto  # auto sets it to ceil(d_model / 16)
+  dropout: 0.1
+  bias: false
+  conv_bias: true
+
+  # Multi-rate streams for different temporal scales
+  multi_rate:
+    enabled: true
+    rates: [1, 4, 16]  # 1x, 4x, 16x downsampling
+    fusion_method: concat  # or 'add', 'attention'
+
+# Perceiver-IO Fusion Configuration
+fusion:
+  type: perceiver_io
+  n_latents: 128
+  latent_dim: 512
+  n_heads: 8
+  n_layers: 3
+  dropout: 0.1
+  cross_attention_dim: 768  # matches backbone output
+
+  # Modality-specific encoders
+  modalities:
+    spikes:
+      enabled: true
+      input_dim: null  # inferred from data
+      projection_dim: 768
+    lfp:
+      enabled: true
+      input_dim: null
+      projection_dim: 768
+    behavior:
+      enabled: true
+      input_dim: null
+      projection_dim: 768
+    calcium:
+      enabled: false
+      input_dim: null
+      projection_dim: 768
+
+# PopT Population Aggregator Configuration
+popt:
+  type: population_transformer
+  n_layers: 3
+  hidden_dim: 512
+  n_heads: 8
+  dropout: 0.1
+  max_units: 1000  # Maximum number of units to handle
+  use_set_pooling: true  # Use set pooling for permutation invariance
+
+# Latent Diffusion Configuration
+diffusion:
+  type: latent_diffusion
+  enabled: true
+  latent_dim: 512
+  n_timesteps: 1000
+  noise_schedule: cosine  # or 'linear', 'quadratic'
+  prediction_type: epsilon  # or 'v_prediction'
+
+  # UNet architecture for denoising
+  unet:
+    dim: 512
+    dim_mults: [1, 2, 4]
+    n_heads: 8
+    dropout: 0.1
+
+  # Forecast horizon (in milliseconds)
+  forecast_horizon_ms: 1000  # 1 second
+
+# Multi-Task Heads Configuration
+heads:
+  # Behavioral decoding head
+  decoder:
+    enabled: true
+    input_dim: 512
+    hidden_dims: [256, 128]
+    output_dim: null  # inferred from task
+    dropout: 0.1
+
+  # Neural encoding head (predict neural activity from behavior)
+  encoder:
+    enabled: true
+    input_dim: 512
+    hidden_dims: [256, 128]
+    output_dim: null
+    dropout: 0.1
+
+  # Contrastive learning head (CEBRA-style)
+  contrastive:
+    enabled: true
+    projection_dim: 256
+    temperature: 0.07
+    use_temporal_contrast: true
+    temporal_window: 50  # ms
+
+# Adapter Configuration
+adapters:
+  # Unit-ID adapter for few-shot transfer
+  unit_id:
+    enabled: false
+    n_units: 96
+    freeze_backbone: true
+    bottleneck_dim: 128
+
+  # Session/Region stitching adapter
+  stitcher:
+    enabled: false
+    n_sessions: null
+    n_regions: null
+    embedding_dim: 64
+
+  # LoRA (Low-Rank Adaptation)
+  lora:
+    enabled: false
+    rank: 8
+    alpha: 16
+    dropout: 0.1
+    target_modules: [q_proj, v_proj]  # Apply to specific attention layers
+
+# Training Configuration
+training:
+  # Loss weights for multi-task learning
+  loss_weights:
+    decoder: 1.0
+    encoder: 0.5
+    contrastive: 0.3
+    diffusion: 0.2
+
+  # Optimization
+  optimizer:
+    type: adamw
+    lr: 3.0e-4
+    weight_decay: 0.01
+    betas: [0.9, 0.95]
+
+  # Learning rate schedule
+  lr_scheduler:
+    type: cosine_annealing_warmup
+    warmup_epochs: 10
+    max_epochs: 100
+    eta_min: 1.0e-6
+
+  # Gradient clipping
+  gradient_clip_val: 1.0
+
+  # Mixed precision training
+  precision: bf16  # or 'fp16', '32'
+
+# Model size summary
+# Parameters: ~150M (backbone) + ~50M (fusion/PopT) + ~30M (diffusion) ≈ 230M total
