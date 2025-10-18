@@ -1,0 +1,141 @@
+# NeuroFM-X Configuration for Allen Dataset
+# Optimized for NVIDIA RTX 3070 Ti (8GB VRAM)
+
+# Model Architecture
+model:
+  d_model: 256              # Model dimension (good balance for 8GB)
+  n_mamba_blocks: 8         # Temporal modeling depth
+  n_latents: 64             # Perceiver latent vectors
+  latent_dim: 512           # Latent dimension
+  n_perceiver_layers: 3     # Perceiver depth
+  dropout: 0.1              # Regularization
+  use_multi_rate: true      # Multi-scale temporal modeling
+  downsample_rates: [1, 4, 16]  # Multi-rate streams
+
+# Training Configuration
+training:
+  # Hardware
+  gpus: 1                   # Single RTX 3070 Ti
+  precision: 16             # FP16 mixed precision (2x speedup, 2x batch size)
+
+  # Batch settings (optimized for 8GB VRAM)
+  batch_size: 48            # Fits comfortably in 8GB with FP16
+  accumulate_grad_batches: 2  # Effective batch size: 96
+
+  # Optimization
+  learning_rate: 1e-3       # Adam learning rate
+  weight_decay: 1e-4        # L2 regularization
+  max_epochs: 50            # Usually converges in 20-30
+
+  # Early stopping
+  early_stopping:
+    patience: 5             # Stop if no improvement for 5 epochs
+    monitor: val_loss       # Metric to monitor
+    mode: min               # Minimize validation loss
+
+  # Checkpointing
+  checkpoint:
+    dirpath: checkpoints/allen
+    filename: neurofmx-allen-{epoch:02d}-{val_loss:.4f}
+    save_top_k: 3           # Keep best 3 checkpoints
+    monitor: val_loss
+    mode: min
+
+  # Gradient clipping
+  gradient_clip_val: 1.0    # Prevent exploding gradients
+
+# Dataset Configuration
+data:
+  # Paths
+  train_path: data/allen/train/*.nwb
+  val_path: data/allen/val/*.nwb
+
+  # Data loading (optimized for fast I/O)
+  num_workers: 4            # Parallel data loading
+  pin_memory: true          # Faster GPU transfer
+  persistent_workers: true  # Keep workers alive
+
+  # Preprocessing
+  bin_size_ms: 10.0         # 10ms bins
+  sequence_length: 200      # 2 seconds (200 × 10ms)
+  overlap: 0.75             # 75% overlap for more samples
+
+  # Modality
+  neural_key: Units         # Neuropixels spikes
+  behavior_keys:
+    - running_speed
+    - pupil_diameter
+
+  # Train/val split
+  train_split: 0.8          # 80% training, 20% validation
+
+# Optimizer Configuration
+optimizer:
+  type: AdamW
+  lr: 1e-3
+  betas: [0.9, 0.999]
+  weight_decay: 1e-4
+
+# LR Scheduler
+lr_scheduler:
+  type: ReduceLROnPlateau
+  mode: min
+  factor: 0.5               # Reduce LR by 50%
+  patience: 3               # After 3 epochs without improvement
+  min_lr: 1e-6              # Minimum learning rate
+
+# Logging
+logging:
+  # Console
+  progress_bar: true
+  log_every_n_steps: 50
+
+  # Tensorboard
+  tensorboard:
+    save_dir: logs/allen
+    name: neurofmx-rtx3070ti
+
+  # Weights & Biases (optional)
+  # wandb:
+  #   project: neurofmx-allen
+  #   entity: your-username
+
+# Performance Optimizations
+performance:
+  # Memory
+  use_gradient_checkpointing: false  # Not needed with 8GB
+  find_unused_parameters: false
+
+  # Speed
+  benchmark: true           # cuDNN auto-tuning
+  deterministic: false      # Faster (non-deterministic)
+
+  # Multi-GPU (for future scaling)
+  strategy: ddp             # Distributed data parallel
+  sync_batchnorm: false     # Not needed for single GPU
+
+# Evaluation
+evaluation:
+  metrics:
+    - r2_score              # Behavioral decoding R²
+    - pearson_correlation   # Neural prediction correlation
+    - mse                   # Mean squared error
+
+  # FALCON benchmark (optional)
+  falcon:
+    enabled: false          # Enable after initial training
+    n_shot: 10              # 10-shot learning
+    n_sessions: 5           # Test on 5 held-out sessions
+
+# Expected Performance
+# ----------------------
+# Training time: 5-8 minutes per epoch
+# Total epochs: 20-30 (with early stopping)
+# Total time: 2-4 hours per session
+# GPU memory usage: ~4-5 GB / 8 GB
+# GPU utilization: 90-95%
+#
+# For 10 Allen sessions:
+# - Sequential training: 20-40 hours (1-2 days)
+# - Overnight runs: 2-3 nights
+# - Total cost: $0 (electricity: ~$2-5)
