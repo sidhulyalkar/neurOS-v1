@@ -50,12 +50,49 @@ pip install -e ".[all]"
 
 ## Quick Start
 
-### Pretraining
+### Run the Demo
+
+```bash
+cd packages/neuros-neurofm
+python examples/quickstart_demo.py
+```
+
+This will:
+- Generate synthetic neural data
+- Train a NeuroFM-X model
+- Evaluate behavioral decoding (R² ~ 0.58)
+- Test transfer learning with adapters
+- Save/load model checkpoints
+
+### Basic Usage
 
 ```python
-from neuros_neurofm.training import NeuroFMXPretrainer
-from neuros_neurofm.models import NeuroFMX
-from neuros_neurofm.datasets import NWBDataModule
+from neuros_neurofm.datasets import SyntheticNeuralDataset, create_dataloaders
+from neuros_neurofm.tokenizers import BinnedTokenizer
+from neuros_neurofm.fusion import PerceiverIO
+from neuros_neurofm.models import PopT, MultiTaskHeads
+
+# Create dataset
+dataset = SyntheticNeuralDataset(n_samples=1000, n_units=96)
+train_loader, val_loader = create_dataloaders(dataset)
+
+# Build model pipeline
+tokenizer = BinnedTokenizer(n_units=96, d_model=256)
+fusion = PerceiverIO(n_latents=32, latent_dim=128, input_dim=256)
+popt = PopT(d_model=128, n_output_seeds=1)
+heads = MultiTaskHeads(input_dim=128, decoder_output_dim=2)
+
+# Tokenize and predict
+tokens, mask = tokenizer(neural_data)  # (batch, seq, units) → (batch, seq, 256)
+latents = fusion(tokens, mask)  # (batch, seq, 256) → (batch, 32, 128)
+aggregated = popt(latents)  # (batch, 32, 128) → (batch, 128)
+behavior = heads(aggregated, task="decoder")  # (batch, 128) → (batch, 2)
+```
+
+### Complete Model
+
+```python
+from neuros_neurofm.models.neurofmx_complete import NeuroFMXComplete
 
 # Load model
 model = NeuroFMX(
