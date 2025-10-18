@@ -131,3 +131,44 @@ All notable changes to the NeuroFM-X package will be documented in this file.
 - Few-Shot Transfer: Accuracy > 0.70
 - Inference Latency: < 10 ms/sample
 - Throughput: > 1000 samples/s
+
+## [0.2.0] - 2025-10-18
+
+### Added - Core Components Complete (Phases 5-8)
+
+#### PopT (Population Transformer) - Phase 5 ✅
+- **PopT**: Permutation-invariant neural population aggregator
+  - Set-based attention with learnable seed vectors
+  - 3-layer architecture with self-attention + FFN
+  - Handles variable numbers of neurons across sessions
+  - Tested: (2, 96 units, 512) → (2, 512) ✅
+
+- **PopTWithLatents**: Variant that outputs to latent space
+  - Integrates seamlessly with Perceiver-IO
+  - Tested and working ✅
+
+#### Multi-Task Heads - Phase 7 ✅
+- **DecoderHead**: Behavioral decoding (neural → behavior) ✅
+- **EncoderHead**: Neural encoding (behavior → neural) ✅
+- **ContrastiveHead**: CEBRA-style contrastive learning ✅
+- **ForecastHead**: Future neural activity prediction ✅
+- **MultiTaskHeads**: Unified container ✅
+
+#### Transfer Learning Adapters - Phase 8 ✅
+- **UnitIDAdapter**: POYO-style few-shot transfer ✅
+- **SessionStitcher**: Cross-session alignment ✅
+- **LoRAAdapter**: Low-rank fine-tuning (< 1% overhead) ✅
+- **LoRALinear**: Drop-in replacement for nn.Linear ✅
+
+#### Complete Model Integration
+- **NeuroFMXComplete**: Unified model with all components
+  - Full pipeline tested and working ✅
+  - Multi-modal fusion tested ✅
+  - Transfer learning tested ✅
+
+### Status Update
+- ✅ Phases 1-5, 7-8 COMPLETE
+- ⏳ Phase 6: Latent diffusion (pending)
+- ⏳ Phases 9-12: Training, evaluation, tutorials (pending)
+
+Total: ~215M parameters (base model)
