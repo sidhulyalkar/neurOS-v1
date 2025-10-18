@@ -1,0 +1,523 @@
+Here is a guide for implementing NeuroM-X (a new neuro foundational model idea)
+
+<project name="NeuroFM-X" version="1.0">
+  <goals>
+    <goal>Train a general, multi-modal foundation model of neural activity that transfers to new subjects/sessions/tasks with minimal labeled data.</goal>
+    <goal>Provide robust decoding/encoding, forecasting, and imputation across spikes, calcium, and iEEG/LFP.</goal>
+    <goal>Deliver reproducible pipelines (data → model → eval) with CI-tested code and docs.</goal>
+  </goals>
+
+  <system-requirements>
+    <languages>Python>=3.10, CUDA>=12.1</languages>
+    <frameworks>PyTorch>=2.3, PyTorch Lightning>=2.4, xFormers (optional), mamba-ssm, hydra-core</frameworks>
+    <hardware>Linux x86_64, 1–8x A100/H100 or equivalent; supports CPU-only for tests</hardware>
+  </system-requirements>
+
+  <repo-structure>
+    <tree>
+      <![CDATA[
+      neurofm-x/
+      ├─ pyproject.toml
+      ├─ setup.cfg
+      ├─ README.md
+      ├─ LICENSE
+      ├─ .pre-commit-config.yaml
+      ├─ .github/workflows/ci.yml
+      ├─ Makefile
+      ├─ docker/
+      │  ├─ Dockerfile
+      │  └─ compose.dev.yml
+      ├─ configs/                 # Hydra configs
+      │  ├─ defaults.yaml
+      │  ├─ data/*.yaml
+      │  ├─ model/*.yaml
+      │  ├─ train/*.yaml
+      │  └─ eval/*.yaml
+      ├─ data/
+      │  ├─ nwb_io/               # NWB readers/writers
+      │  ├─ datamodules/          # LightningDataModules
+      │  └─ adapters/             # unit/session/region stitchers
+      ├─ neurofm/
+      │  ├─ tokenizers/           # spikes-as-tokens, binned tensors, STFT
+      │  ├─ backbones/            # ssm (mamba/mamba2), attention (baseline)
+      │  ├─ fusion/               # perceiver_io latent hub
+      │  ├─ population/           # popt aggregator
+      │  ├─ priors/               # latent diffusion (ldns/gnocchi)
+      │  ├─ heads/                # task heads (decoding, encoding, contrastive)
+      │  ├─ adapters/             # unit-id, session/region adapters, LoRA
+      │  ├─ losses/               # poisson/bernoulli recon, contrastive, NLL
+      │  ├─ utils/                # metrics, logging, registry
+      │  └─ model.py              # full model assembly
+      ├─ scripts/
+      │  ├─ prepare_datasets.py   # DANDI/IBL/Allen download + NWB normalize
+      │  ├─ train.py              # pretrain/finetune entry
+      │  ├─ evaluate.py           # metrics + FALCON harness
+      │  ├─ export_ckpt.py        # ONNX/torchscript export
+      │  └─ demo_inference.py
+      ├─ tests/
+      │  ├─ unit/
+      │  ├─ integration/
+      │  └─ regression/
+      └─ docs/
+         ├─ quickstart.md
+         ├─ data_spec.md
+         ├─ architecture.md
+         └─ evaluation.md
+      ]]>
+    </tree>
+  </repo-structure>
+
+  <data-contracts>
+    <standard>NWB 2.x (PyNWB)</standard>
+    <modalities>
+      <spikes>units, spike_times; optional counts via binning (10–20 ms)</spikes>
+      <calcium>ophys ΔF/F traces; sampling 10–50 ms; stimulus/ROI metadata</calcium>
+      <ieeg_lfp>Continuous iEEG/LFP 250–1000 Hz; STFT or learned downsampler</ieeg_lfp>
+      <behavior>kinematics/EMG/audio; frame-synced timestamps</behavior>
+      <stimuli>identifiers and (if available) raw/movie features</stimuli>
+    </modalities>
+    <metadata required="true">
+      <fields>subject_id, species, session_id, brain_region(s), device, sampling_rate, coordinate frames</fields>
+    </metadata>
+    <ingestion>
+      <source>IBL repeated-site, Allen Brain Observatory (2p/Neuropixels), DANDI datasets</source>
+      <scripts>scripts/prepare_datasets.py (CLI: --dataset ibl|allen|dandi --subset ...)</scripts>
+      <validation>pynwb validation + schema checks; hash caching</validation>
+    </ingestion>
+  </data-contracts>
+
+  <model-architecture name="NeuroFM-X">
+    <tokenizers>
+      <spikes_as_tokens>
+        <description>Event tokens (Δt, unit_id, session_id) + learned embeddings; supports Unit Identification (UI).</description>
+        <refs>POYO; Unit-ID adapters</refs>
+      </spikes_as_tokens>
+      <population_bins>
+        <description>Time-binned counts tensor with masking (for masked modeling and NDT-style training).</description>
+      </population_bins>
+      <continuous_signals>
+        <description>iEEG/LFP via 1D conv downsampler or STFT encoder.</description>
+      </continuous_signals>
+    </tokenizers>
+
+    <backbone type="selective-ssm">
+      <impl>mamba-ssm (Mamba/Mamba-2)</impl>
+      <hyperparams>
+        <d_model>768</d_model>
+        <n_blocks>16</n_blocks>
+        <d_state>64</d_state>
+        <d_conv>4</d_conv>
+        <expand>2</expand>
+        <multirate_streams>5ms|20ms|80ms with cross-scale gates every 2 blocks</multirate_streams>
+        <dropout>0.1</dropout>
+      </hyperparams>
+      <note>Swap attention backbone via configs/model/ for ablations.</note>
+    </backbone>
+
+    <fusion_hub type="perceiver-io">
+      <latent_dim>512</latent_dim>
+      <latent_slots>128</latent_slots>
+      <cross_attn_steps>4</cross_attn_steps>
+      <modalities>neural streams, behavior/EMG, video features, metadata tokens (region/layer/species/task)</modalities>
+    </fusion_hub>
+
+    <population_aggregator type="PopT">
+      <layers>3</layers>
+      <width>512</width>
+      <objectives>channel-level + ensemble-level self-supervision during pretrain</objectives>
+    </population_aggregator>
+
+    <generative_prior type="latent_diffusion">
+      <latent_source>backbone hidden states</latent_source>
+      <horizon_seconds>1.0–2.0</horizon_seconds>
+      <conditioning>behavior, task tokens, region embeddings</conditioning>
+      <uses>imputation, forecasting, augmentation</uses>
+    </generative_prior>
+
+    <heads>
+      <decoding>MSE/CE to kinematics/EMG/phonemes (multi-task, task embeddings)</decoding>
+      <encoding>predict held-out neurons/regions (Poisson/Bernoulli recon)</encoding>
+      <contrastive>CEBRA-style (time/behavior positives) for identifiable latents</contrastive>
+    </heads>
+
+    <adapters>
+      <unit_adapter>learn unit embeddings only (UI) for new electrodes; core frozen</unit_adapter>
+      <session_region_stitchers>linear in/out maps; optional LoRA(r=8) on last N backbone blocks</session_region_stitchers>
+      <task_adapters>task tokens + small MLP heads</task_adapters>
+    </adapters>
+
+    <loss>
+      <![CDATA[
+      L = λ1 * masked_reconstruction_{Poisson/Bernoulli}
+        + λ2 * contrastive_{CEBRA}
+        + λ3 * diffusion_NLL
+        + λ4 * task_{MSE/CE}
+      ]]>
+      <schedule>unsupervised pretrain (λ1,λ2,λ3) → introduce tasks (λ4) after 60–70% steps</schedule>
+    </loss>
+  </model-architecture>
+
+  <training>
+    <stages>
+      <stage name="S0-DataSpec">Convert/validate to NWB; build train/val/test splits; materialize event & binned views.</stage>
+      <stage name="S1-Pretrain">
+        <objective>masked modeling + contrastive (and PopT pretraining); optional diffusion auxiliary.</objective>
+        <optimizer>AdamW (lr=3e-4), cosine decay, warmup 5k steps</optimizer>
+        <batching>packed sequences; context 8–32s (SSM lets us scale)</batching>
+        <duration>~200–400k steps or to convergence</duration>
+      </stage>
+      <stage name="S2-Adapters+Heads">
+        <modes>
+          <freeze_core>true</freeze_core>
+          <train>unit/session adapters + task heads</train>
+          <unfreeze_if_plateau>last 2–4 backbone blocks</unfreeze_if_plateau>
+        </modes>
+      </stage>
+      <stage name="S3-Online">
+        <test_time_self_supervision>masked-time consistency on unlabeled new-session data</test_time_self_supervision>
+      </stage>
+    </stages>
+
+    <hydra-config-snippets>
+      <defaults_yaml><![CDATA[
+      defaults:
+        - data: ibl_repeated_site
+        - model: neurofm_x_mamba2
+        - train: pretrain_large
+        - eval: falcon
+      ]]></defaults_yaml>
+
+      <model_yaml><![CDATA[
+      model:
+        backbone: mamba2
+        d_model: 768
+        n_blocks: 16
+        multirate: [5,20,80]
+        fusion: perceiver_io
+        popt:
+          layers: 3
+          width: 512
+        diffusion:
+          enable: true
+          horizon_s: 1.5
+        heads:
+          decoding: [velocity, emg]
+          encoding: true
+          contrastive: true
+        adapters:
+          unit_id: true
+          stitchers: {in: linear, out: linear}
+          lora:
+            enable: true
+            rank: 8
+      ]]></model_yaml>
+
+      <train_yaml><![CDATA[
+      train:
+        optimizer: adamw
+        lr: 3e-4
+        weight_decay: 0.05
+        warmup_steps: 5000
+        max_steps: 300000
+        precision: bf16
+        accumulate_grad_batches: 2
+        devices: 4
+        strategy: ddp
+        loss_weights: {masked: 1.0, contrastive: 0.2, diffusion: 0.5, task: 1.0}
+      ]]></train_yaml>
+    </hydra-config-snippets>
+  </training>
+
+  <evaluation>
+    <benchmarks>
+      <falcon>
+        <desc>Few-shot robustness across held-out sessions/subjects; plot performance vs calibration minutes (0–30).</desc>
+        <script>scripts/evaluate.py --benchmark falcon --ckpt ...</script>
+      </falcon>
+      <visual_foundation_core>
+        <desc>Freeze core; new-mouse readouts; OOD stimuli (e.g., coherent motion, noise) with normalized correlation metrics.</desc>
+      </visual_foundation_core>
+    </benchmarks>
+    <metrics>
+      <decoding>R2 / Pearson r</decoding>
+      <encoding>corr/NC; bits-per-spike (BPS)</encoding>
+      <forecasting>NLL/CRPS; imputation MSE</forecasting>
+      <consistency>latent alignment/identifiability scores (CEBRA)</consistency>
+    </metrics>
+    <ablations>
+      <list>
+        <item>SSM vs attention backbone</item>
+        <item>with/without PopT</item>
+        <item>with/without Unit-ID; stitchers only</item>
+        <item>heterogeneity curriculum on/off; session selection vs naive mixing</item>
+        <item>with/without diffusion prior</item>
+      </list>
+    </ablations>
+  </evaluation>
+
+  <datasets>
+    <ibl_repeated_site>scripts/prepare_datasets.py --dataset ibl --nwb_out ...</ibl_repeated_site>
+    <allen_visual_observatory>scripts/prepare_datasets.py --dataset allen_vc --nwb_out ...</allen_visual_observatory>
+    <dandi>scripts/prepare_datasets.py --dataset dandi --dandiset XXXXX --nwb_out ...</dandi>
+  </datasets>
+
+  <testing_and_ci>
+    <unit_tests>tokenizers, losses, adapters, PopT blocks, diffusion step</unit_tests>
+    <integration_tests>1-epoch smoke trains (CPU); NWB round-trip; inference determinism</integration_tests>
+    <ci_pipeline>pytest -q; flake8; mypy; black --check; pre-commit; build docker; docs link-check</ci_pipeline>
+  </testing_and_ci>
+
+  <security_privacy>
+    <data_handling>All local data paths configurable; optional federated adapter training; automatic PII scrubber for metadata</data_handling>
+  </security_privacy>
+
+  <deliverables>
+    <artifacts>pretrained checkpoints (.ckpt), ONNX export, model cards, dataset cards, benchmark reports (CSV/HTML)</artifacts>
+    <docs>Quickstart, Data Spec, Architecture, Evaluation Playbook, API Reference</docs>
+  </deliverables>
+
+  <agent-tasks>
+    <task order="1" id="env">Create conda env; install dependencies; set up pre-commit and CI.</task>
+    <task order="2" id="nwb">Implement NWB readers/writers; dataset normalizers; validators.</task>
+    <task order="3" id="tokenizers">Implement spikes-as-tokens + binned tensors + iEEG encoders.</task>
+    <task order="4" id="backbone">Implement Mamba/Mamba-2 blocks; attention baseline.</task>
+    <task order="5" id="fusion">Implement Perceiver-IO latent hub with modality/metadata tokens.</task>
+    <task order="6" id="popt">Implement PopT and self-supervised channel+ensemble objectives.</task>
+    <task order="7" id="diffusion">Implement latent diffusion (conditional UNet on backbone latents).</task>
+    <task order="8" id="heads_losses">Implement decoding/encoding/contrastive heads + losses.</task>
+    <task order="9" id="adapters">Implement Unit-ID embeddings, stitchers, and LoRA hooks.</task>
+    <task order="10" id="train_loops">Lightning modules for S1 pretrain, S2 adapters/heads, S3 online TTA.</task>
+    <task order="11" id="eval">Implement FALCON harness + visual OOD protocol; metrics & plots.</task>
+    <task order="12" id="ablation">Hydra configs for ablations; auto-run matrix with summary table.</task>
+    <task order="13" id="packaging">Build Docker; export ONNX; prepare model card & docs.</task>
+  </agent-tasks>
+
+  <acceptance-criteria>
+    <criterion>Reproduce smoke runs on CPU; full pretrain on a small public subset; pass all tests.</criterion>
+    <criterion>Show few-shot gains on FALCON and successful UI-only transfer on a held-out session.</criterion>
+    <criterion>Demonstrate OOD generalization on new mouse/stimuli with frozen core + new readout.</criterion>
+    <criterion>Provide deterministic inference and exportable artifacts (ckpt + ONNX).</criterion>
+  </acceptance-criteria>
+</project>
+
+
+
+
+neurOS-v1: Current Status and Proposed NeuroFM-X Integration Plan
+
+Core Capabilities: neurOS-v1 already provides a powerful, modular BCI pipeline with real-time and offline modes. It supports asynchronous agent-based orchestration, pluggable drivers, processing agents, and models, with built-in offline training and real-time inference
+GitHub
+GitHub
+. The platform implements over 10 models (classical and neural) and 15+ sensor drivers (EEG, kinematics, video, etc.)
+GitHub
+. A REST API and CLI/Streamlit dashboard enable easy use, and a model registry ensures versioning of trained models
+GitHub
+GitHub
+. In v2.1, neurOS has already incorporated a Foundation Model Zoo: a BaseFoundationModel interface, wrappers for POYO/POYO+ (multi-session neural decoders), neural data transformers (NDT2/3), CEBRA (contrastive latent embeddings), and a “Neuroformer” multimodal generative model
+GitHub
+GitHub
+. In short, neurOS has a solid core and modern features (multi-modal pipelines, foundation-model support, augmentation, etc.), meeting many DIAMOND goals
+GitHub
+GitHub
+.
+
+Gaps & Next Steps: To implement the NeuroFM-X vision, we must integrate several new components and training recipes into neurOS:
+
+Event tokenization & data prep: Create modules to ingest spike/event data as tokens (time Δt + unit ID), as in POYO
+proceedings.neurips.cc
+, and to handle binned population tensors (e.g. calcium, LFP). We will use existing dataset loaders (Allen Visual Coding, IBL motor, public iEEG) and convert them to NWB with standardized metadata (subject, session, region, etc.)
+GitHub
+. A new data preprocessing agent can transform NWB streams into token streams or fixed-rate event arrays for model input. Tests should verify correct token generation (order, Δt computation, unit IDs) and NWB loading.
+
+Selective SSM Backbone: Implement a multi-resolution, Selective State-Space Model (SSM) backbone (e.g. Mamba) for ultra-long sequences. Mamba SSMs use input-dependent recurrent dynamics to achieve linear-time long-range modeling
+openreview.net
+. We will integrate a PyTorch SSM library (or implement Mamba-like layers) with multiple parallel streams (e.g. dilated time scales such as 2–10–50 ms) and cross-scale gating. This backbone replaces quadratic attention with linear SSM layers. The model should test that it handles sequence lengths up to millions of steps with throughput advantages (following reported 5× speedup vs. Transformers
+openreview.net
+). Unit tests will cover forward/backward passes, receptive field checks, and comparisons against smaller Transformers on synthetic tasks.
+
+Cross-Modal Fusion (Perceiver-style): Add a latent fusion hub that pools multiple modalities into shared latents. Concretely, implement a trainable latent array (size 256–512) that attends (via cross-attention) to each modality’s token or feature stream each block
+proceedings.neurips.cc
+. For example, one could use PyTorch’s nn.MultiheadAttention where the latent queries attend to (key,value) sequences from neural spikes, behavior/EMG, kinematics, and/or video embeddings. This Perceiver-inspired architecture keeps attention complexity linear in each modality rather than quadratic in joint size
+proceedings.neurips.cc
+. Integration tests should verify that adding a modality (e.g. video features) properly augments the fused representation and that the model remains computationally feasible.
+
+Population Aggregation (PopT): Build a population-level aggregator (“PopT”) on top of temporal features to handle sparse, changing channels. Following Chau et al. (2025), we will implement a small Transformer or MLP block that treats each neuron’s embedding as input and outputs a unified, permutation-invariant population code
+arxiv.org
+. This PopT head will be pretrained self-supervised to compress multi-channel activity into subject-generic latents. Tests should confirm PopT improves cross-session decoding accuracy and can aggregate variable channel counts (e.g. simulate dropping/adding neurons and ensure robustness).
+
+Generative Latent Prior (Diffusion): Add a latent diffusion module (inspired by LDNS and GNOCCHI) to model long-range neural sequences. We plan a two-stage approach: (1) train an encoder (e.g. SSM autoencoder) to map neural data to low-dimensional latents, (2) train a conditional diffusion model (e.g. latent DDPM) on these latents for forecasting/imputation. For example, latent diffusion models have generated realistic spiking data matching true single-neuron statistics
+arxiv.org
+. We will incorporate conditioning on behavioral/context codes. Unit tests include reconstructing withheld data and measuring likelihood or bits-per-spike compared to baselines.
+
+Multi-Task Readouts & Contrastive Heads: Add specialized output heads for each task (e.g. velocity regression, EMG decoding, phoneme classification, video decoding). Each head takes the shared latent features (possibly with a task embedding input) and outputs the target variable. In parallel, incorporate a CEBRA-style contrastive loss to align neural latents with behavior/time
+arxiv.org
+. For interpretability, we can also train auxiliary sparse autoencoders or linear probes on hidden units. Tests will ensure multi-task training converges and that adding/removing tasks yields expected behavior (e.g. mask-out experiments).
+
+Adapters for Transfer: Implement adapter modules to freeze the core and fine-tune on new data. Specifically:
+
+Unit adapters: Learn embeddings for new neurons without changing core SSM weights (following POYO)
+proceedings.neurips.cc
+.
+
+Session/Region adapters: Small linear “stitcher” layers at input/output or as inserted in the model; optionally use LoRA on the last N blocks. These adapters let us adjust to a new session or brain area cheaply.
+
+Task adapters: Lightweight heads or learned task tokens for new objectives.
+Tests here include few-shot transfer: e.g. freeze core, train only adapters on limited data, and verify rapid convergence.
+
+Online & Offline Integration: Ensure the new model can operate in both modes. In the pipeline, add a NeuroFM-X model agent (a BaseFoundationModel) that hooks into the MultiModalOrchestrator. For real-time BCI, the model should accept incoming spike events and emit predictions with low latency. Offline, provide training scripts (extending neuros train or custom CLI) for pretraining/fine-tuning. We will create clear tests and documentation to train on IBL and Allen datasets and deploy for live demo.
+
+Training Recipe
+
+We will follow a staged training plan:
+
+Stage 0 – Data Curation: Collect relevant datasets (IBL repeated-site motor, Allen Brain Observatory, public iEEG speech/handwriting). Convert all to NWB format with standardized metadata (subject, implant location, etc.), using DANDI and AllenSDK as needed. For spiking data, derive both spike-event sequences and binned count tensors (10–20 ms bins). Write unit tests to verify data fields (e.g. shape, metadata) and summary stats (e.g. spike counts).
+
+Stage 1 – Self-Supervised Pretraining: Pretrain the core model on unlabeled neural data:
+
+Masked reconstruction: Randomly mask time steps × neurons and train the model to predict spikes (using a Poisson/Bernoulli likelihood).
+
+Behavior contrastive: When behavior/video is available, train a contrastive loss (CEBRA-style) to align neural latents with behavior features
+arxiv.org
+.
+
+Latent diffusion: As auxiliary task, train diffusion in latent space conditioned on context (as in LDNS
+arxiv.org
+).
+We mirror recent successes: combining masked autoencoding (like NDT/MAE) with CEBRA and diffusion encourages rich latents. We will schedule learning (e.g. start only unsupervised 70% of steps, then introduce tasks). We will validate this stage by checking latent quality (e.g. by low-dimensional projections) and held-out reconstruction error.
+
+Stage 2 – Heterogeneity Curriculum: Gradually introduce cross-session and cross-area data. Start with a consistent brain region subset, then incrementally include more heterogeneous sessions. This addresses the finding that data heterogeneity can limit scaling
+internationalbrainlab.com
+. We will implement curriculum scheduling (e.g. sample sessions in order) and monitor performance. Tests should compare training with vs. without this curriculum, expecting improved scaling and downstream accuracy.
+
+Stage 3 – Multi-Task Heads & Adapters: Add labeled tasks and adapter modules:
+
+Train specialized heads for multiple tasks (reach velocity, EMG, speech phonemes, etc.), jointly or sequentially.
+
+Introduce adapters: freeze core SSM+fusion, train only unit/session/task adapters on task data (POYO-style fine-tuning
+proceedings.neurips.cc
+).
+
+Use population aggregator (PopT) head to further compress across neurons.
+We will measure how adapters reduce the labeled data needed per lab/subject. Tests: few-shot learning experiments (e.g. varying training size), verifying that adapters give near-oracle performance with minimal data.
+
+Stage 4 – Transfer & Benchmark Evaluation: Rigorously evaluate generalization:
+
+Few-shot (FALCON): Use FALCON splits to test few-shot decoding accuracy vs calibration time
+arxiv.org
+.
+
+Cross-subject/session: Freeze core, train adapters or linear readouts on held-out subjects, measuring drop-off.
+
+Modality transfer: For vision or novel stimuli, test “foundation-core” protocol: freeze core, train minimal readout on new stimulus set.
+
+Forecasting/Imputation: Compare the latent diffusion generative model to deterministic baselines using negative log-likelihood or bits-per-spike metrics
+arxiv.org
+.
+
+Ablation studies: Systematically disable components (e.g. replace SSM with self-attention, remove PopT, remove contrastive loss, turn off heterogeneity scheduling) to quantify each’s benefit. For example, switching from SSM to attention should degrade efficiency on long data
+openreview.net
+. We will report gains per component with statistical rigor.
+
+Throughout, we will write detailed tests: unit tests for each new module (tokenizer, SSM layer, fusion, diffusion, adapters) and integration tests for the full pipeline (e.g. end-to-end training on a small synthetic dataset yields expected metrics). We will ensure each test passes with high coverage and that no dead code remains.
+
+Implementation Timeline & Responsibilities
+
+Foundation & Data Setup (Weeks 1–2):
+
+Data integration: Use neuros.datasets to load IBL, Allen, iEEG; write converters to NWB (citing [33†L69-L78]).
+
+NWB support: Ensure neurOS can read NWB streams via drivers or processing agents. Write tests verifying data fields.
+
+Baseline tests: Run existing pipelines on these datasets to establish baseline performance.
+
+Model Skeleton (Weeks 3–4):
+
+New model class: Create neuros.foundation_models/neurofm_model.py, subclassing BaseFoundationModel.
+
+Tokenizers: Implement neural spike tokenizer (spike-to-token logic); integrate binned tensor input option.
+
+Placeholders: Stub out backbone, fusion, heads in code so entire pipeline compiles. Write shape-check tests (dummy data → dummy output).
+
+SSM Backbone (Weeks 5–6):
+
+SSM library: Integrate an SSM layer (e.g. use state-spaces/s4 library or custom Mamba code).
+
+Multi-rate streams: Build dilated stack (e.g. parallel SSMs with different time constants) with cross-attention or gating.
+
+Tests: Verify long-sequence behavior: e.g. fixed-size random input of length 1e6 yields consistent results and sub-quadratic time (as in [51†L39-L42]).
+
+Fusion Hub (Weeks 7–8):
+
+Perceiver layers: Implement latent cross-attention blocks; code must support N modalities easily (latent queries attend to each feature stream sequentially).
+
+Integration: Hook fusion into SSM blocks (e.g. after every 2 SSM layers).
+
+Tests: Feed multimodal synthetic data and check latent output shapes; compare training with vs without extra modalities to ensure learning.
+
+Aggregation and Heads (Weeks 9–10):
+
+PopT head: Implement population-transformer layers over channel dimension (e.g. self-attention or pooled MLP).
+
+Diffusion head: Integrate a latent diffusion module (e.g. using a U-Net on latent trajectories).
+
+Task heads: Add modular MLPs or linear layers for each target; use task tokens if appropriate.
+
+Tests: Confirm each head produces correctly shaped outputs; test contrastive head by checking that adding a small behavioral correlation loss improves validation.
+
+Adapters & Transfer (Weeks 11–12):
+
+Unit/Session Adapters: Code small embedding layers per new unit or linear transforms. Implement optional LoRA on final SSM blocks.
+
+Model freezing logic: Ensure fine_tune() can freeze parts of model and train only adapters.
+
+Tests: Simulate transfer: freeze core, train only adapters on limited new data; verify that performance improves significantly over zero-shot and is close to full fine-tune.
+
+Training Pipeline & CLI (Weeks 13–14):
+
+Pretraining scripts: Develop training scripts (e.g. neuros train --model neurofm) with config options for masking, diffusion, etc.
+
+Curriculum scheduler: Implement data loader that can gradually mix sessions. Write tests to ensure curriculum ordering.
+
+Evaluation scripts: Add FALCON benchmark runner and scripts for forecasting/imputation metrics.
+
+Tests: Automate running a small-scale training loop end-to-end and verify loss decreases and metrics compute correctly.
+
+Documentation & Demonstrations (Weeks 15–16):
+
+Notebooks/tutorials: Create example notebooks for NWB loading, training NeuroFM-X on Allen/IBL, and performing online inference.
+
+Pipeline integration: Demonstrate running the new model in the real-time pipeline on a mock driver (e.g. simulate spikes).
+
+Tests: Notebook examples should run without errors; CI should include minimal checks of demo pipelines.
+
+By the end of these stages, neurOS-v1 will fully support the NeuroFM-X foundation model stack, with exhaustive tests at every level. The code will be efficient, modular, and production-ready (target 90%+ coverage). All development will use PyTorch (given existing codebase), but we will evaluate JAX libraries for potential future gains.
+
+Expected Impact and Citations
+
+This NeuroFM-X integration will significantly advance neurOS capabilities. The SSM backbone will allow modeling hour-long recordings at high sample rates with linear complexity
+openreview.net
+. The Perceiver fusion hub natively supports video, behavior, and EMG inputs without costly attention blowups
+proceedings.neurips.cc
+. The PopT aggregator will explicitly learn to align neural populations across sessions, addressing a key transfer issue
+arxiv.org
+. Generative diffusion priors (LDNS/GNOCCHI
+arxiv.org
+arxiv.org
+) will enable realistic neural imputation and augmentation. Smooth transfer via adapters will leverage known best-practices (as in POYO
+proceedings.neurips.cc
+) to minimize retraining. We will also incorporate heterogeneity-aware training schedules, following recent findings that “data heterogeneity limits scaling”
+internationalbrainlab.com
+.
+
+In summary, neurOS-v1 will combine state-of-the-art research (Selective SSMs
+openreview.net
+, Perceiver fusion, PopT
+arxiv.org
+, latent diffusion
+arxiv.org
+, CEBRA
+arxiv.org
+) into a unified, tested platform. The result should set a new standard for neural foundation models, directly aligning with neurIPS-level contributions in efficiency, multimodality, and transfer. Each step above is accompanied by tests to ensure correctness and reproducibility. All work will be fully integrated into sidhulyalkar/neurOS-v1 so it is demo-ready (e.g., live BCI with the new model), ensuring that neurOS can outperform existing models on both accuracy and scalability
+openreview.net
+proceedings.neurips.cc
+.

@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neurofm-x
+  labels:
+    app: neurofm-x
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: neurofm-x
+  template:
+    metadata:
+      labels:
+        app: neurofm-x
+        version: v1
+    spec:
+      containers:
+      - name: neurofm-x
+        image: neurofmx/neurofm-x:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: NEUROFM_DEVICE
+          valueFrom:
+            configMapKeyRef:
+              name: neurofm-config
+              key: device
+        - name: NEUROFM_BATCH_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: neurofm-config
+              key: batch_size
+        - name: NEUROFM_MAX_WAIT_MS
+          valueFrom:
+            configMapKeyRef:
+              name: neurofm-config
+              key: max_wait_ms
+        - name: NEUROFM_MODEL_PATH
+          value: /app/models/neurofmx.pt
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: model-volume
+          mountPath: /app/models
+          readOnly: true
+        - name: data-volume
+          mountPath: /app/data
+        - name: logs-volume
+          mountPath: /app/logs
+      volumes:
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: neurofm-model-pvc
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: neurofm-data-pvc
+      - name: logs-volume
+        emptyDir: {}
+---
+# GPU variant
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neurofm-x-gpu
+  labels:
+    app: neurofm-x-gpu
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: neurofm-x-gpu
+  template:
+    metadata:
+      labels:
+        app: neurofm-x-gpu
+        version: v1
+    spec:
+      containers:
+      - name: neurofm-x
+        image: neurofmx/neurofm-x:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        env:
+        - name: NEUROFM_DEVICE
+          value: "cuda"
+        - name: NEUROFM_BATCH_SIZE
+          value: "64"
+        - name: NEUROFM_MAX_WAIT_MS
+          value: "5.0"
+        - name: NEUROFM_MODEL_PATH
+          value: /app/models/neurofmx.pt
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+            nvidia.com/gpu: 1
+          limits:
+            memory: "32Gi"
+            cpu: "8"
+            nvidia.com/gpu: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        volumeMounts:
+        - name: model-volume
+          mountPath: /app/models
+          readOnly: true
+        - name: data-volume
+          mountPath: /app/data
+        - name: logs-volume
+          mountPath: /app/logs
+      volumes:
+      - name: model-volume
+        persistentVolumeClaim:
+          claimName: neurofm-model-pvc
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: neurofm-data-pvc
+      - name: logs-volume
+        emptyDir: {}
+      nodeSelector:
+        accelerator: nvidia-tesla-v100
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule

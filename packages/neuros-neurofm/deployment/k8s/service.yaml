@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: neurofm-x
+  labels:
+    app: neurofm-x
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: neurofm-x
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: neurofm-x-gpu
+  labels:
+    app: neurofm-x-gpu
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: neurofm-x-gpu
+---
+# Headless service for StatefulSet (if using persistent instances)
+apiVersion: v1
+kind: Service
+metadata:
+  name: neurofm-x-headless
+  labels:
+    app: neurofm-x
+spec:
+  clusterIP: None
+  ports:
+  - port: 8000
+    name: http
+  selector:
+    app: neurofm-x

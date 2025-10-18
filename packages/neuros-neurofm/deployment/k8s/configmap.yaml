@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neurofm-config
+  labels:
+    app: neurofm-x
+data:
+  device: "cpu"
+  batch_size: "32"
+  max_wait_ms: "10.0"
+  model_path: "/app/models/neurofmx.pt"
+  log_level: "INFO"

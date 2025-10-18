@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # NeuroFM-X API Server
+  neurofm-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neurofm-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - NEUROFM_MODEL_DIR=/app/models
+      - NEUROFM_DATA_DIR=/app/data
+      - NEUROFM_LOG_DIR=/app/logs
+      - NEUROFM_DEVICE=cpu  # Change to 'cuda' for GPU
+      - NEUROFM_BATCH_SIZE=32
+      - NEUROFM_MAX_WAIT_MS=10.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # GPU-enabled variant (optional)
+  neurofm-api-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neurofm-api-gpu
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - NEUROFM_MODEL_DIR=/app/models
+      - NEUROFM_DATA_DIR=/app/data
+      - NEUROFM_LOG_DIR=/app/logs
+      - NEUROFM_DEVICE=cuda
+      - NEUROFM_BATCH_SIZE=64
+      - NEUROFM_MAX_WAIT_MS=5.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles: ["gpu"]
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: neurofm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    profiles: ["cache"]
+
+  # Prometheus for monitoring (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: neurofm-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: neurofm-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: neurofm-network
