@@ -203,32 +203,36 @@ class SimpleUNet(nn.Module):
         in_dim = dim
         for mult in dim_mults:
             out_dim = dim * mult
-            self.downs.append(nn.ModuleList([
+            self.downs.append(nn.Sequential(
                 nn.Linear(in_dim + time_dim, out_dim),
                 nn.SiLU(),
                 nn.LayerNorm(out_dim),
                 nn.Dropout(dropout),
-            ]))
+            ))
             in_dim = out_dim
 
         # Middle
         mid_dim = in_dim
-        self.mid = nn.ModuleList([
+        self.mid = nn.Sequential(
             nn.Linear(mid_dim + time_dim, mid_dim),
             nn.SiLU(),
             nn.LayerNorm(mid_dim),
-        ])
+        )
 
-        # Up blocks
+        # Up blocks (process in reverse order, matching skip connections)
         self.ups = nn.ModuleList([])
-        for mult in reversed(dim_mults):
-            out_dim = dim * mult
-            self.ups.append(nn.ModuleList([
-                nn.Linear(in_dim * 2 + time_dim, out_dim),  # *2 for skip connection
+        # Build list of dims for up path
+        up_dims = [dim * mult for mult in reversed(dim_mults)]
+
+        for i, out_dim in enumerate(up_dims):
+            # Input dimension: current h + skip connection (which matches output of corresponding down block)
+            skip_dim = dim * list(reversed(dim_mults))[i]
+            self.ups.append(nn.Sequential(
+                nn.Linear(in_dim + skip_dim + time_dim, out_dim),
                 nn.SiLU(),
                 nn.LayerNorm(out_dim),
                 nn.Dropout(dropout),
-            ]))
+            ))
             in_dim = out_dim
 
         # Final projection
@@ -267,26 +271,20 @@ class SimpleUNet(nn.Module):
         # Downsampling
         skip_connections = []
         h = x
-        for down_layers in self.downs:
+        for down_block in self.downs:
             # Concatenate with time embedding
             h_with_time = torch.cat([h, t_emb], dim=-1)
-            for layer in down_layers:
-                h_with_time = layer(h_with_time)
-            h = h_with_time
+            h = down_block(h_with_time)
             skip_connections.append(h)
 
         # Middle
         h_with_time = torch.cat([h, t_emb], dim=-1)
-        for layer in self.mid:
-            h_with_time = layer(h_with_time)
-        h = h_with_time
+        h = self.mid(h_with_time)
 
         # Upsampling with skip connections
-        for up_layers, skip in zip(self.ups, reversed(skip_connections)):
+        for up_block, skip in zip(self.ups, reversed(skip_connections)):
             h_with_skip_time = torch.cat([h, skip, t_emb], dim=-1)
-            for layer in up_layers:
-                h_with_skip_time = layer(h_with_skip_time)
-            h = h_with_skip_time
+            h = up_block(h_with_skip_time)
 
         # Final projection
         return self.final(h)
