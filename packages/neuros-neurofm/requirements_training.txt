@@ -1,0 +1,18 @@
+# NeuroFM-X Training Requirements
+# Install with: pip install -r requirements_training.txt
+
+# Core dependencies
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=1.5.0
+tqdm>=4.65.0
+
+# PyTorch - Install separately with CUDA support
+# For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Or visit: https://pytorch.org/get-started/locally/
+
+# Allen SDK for data download
+allensdk>=2.14.0
+pynwb>=2.5.0
+h5py>=3.8.0

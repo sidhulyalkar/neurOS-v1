@@ -1,0 +1,44 @@
+name: neurofm
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  # Python
+  - python=3.10
+
+  # PyTorch with CUDA support (for RTX 3070 Ti)
+  - pytorch>=2.0.0
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.8
+
+  # Core scientific computing
+  - numpy>=1.24.0
+  - scipy>=1.10.0
+  - pandas>=1.5.0
+
+  # Data handling
+  - h5py>=3.8.0
+  - pynwb>=2.5.0
+
+  # Utilities
+  - tqdm
+  - requests
+
+  # Install remaining with pip
+  - pip
+  - pip:
+      - allensdk>=2.14.0,<2.15
+      - xarray
+      - nest-asyncio
+      - cachetools
+      - boto3
+      - simplejson
+      - psycopg2-binary
+
+# Usage:
+# conda env create -f environment.yml
+# conda activate neurofm
