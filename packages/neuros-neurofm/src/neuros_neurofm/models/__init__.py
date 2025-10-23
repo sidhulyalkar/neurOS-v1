@@ -25,4 +25,6 @@ __all__ = [
     "ForecastHead",
     "MultiTaskHeads",
     "NeuroFMX",
+    "NeuroFMXComplete",
+    "NeuroFMXMultiTask",
 ]

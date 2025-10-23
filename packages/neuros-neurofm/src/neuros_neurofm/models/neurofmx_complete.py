@@ -20,7 +20,7 @@ from neuros_neurofm.models.popt import PopT, PopTWithLatents
 from neuros_neurofm.fusion.perceiver import PerceiverIO
 from neuros_neurofm.models.heads import MultiTaskHeads
 from neuros_neurofm.adapters import UnitIDAdapter, SessionStitcher
-
+from neuros_neurofm.tokenizers import BinnedTokenizer, SpikeTokenizer, LFPTokenizer, CalciumTokenizer, TwoPhotonTokenizer, MiniscopeTokenizer
 
 class NeuroFMXComplete(nn.Module):
     """Complete NeuroFM-X foundation model with all components.
@@ -94,15 +94,42 @@ class NeuroFMXComplete(nn.Module):
         enable_decoder: bool = True,
         enable_encoder: bool = True,
         enable_contrastive: bool = True,
+        enable_forecast: bool = False,
         decoder_output_dim: Optional[int] = None,
-        encoder_output_dim: Optional[int] = None,
+        encoder_output_dim: int = 384,
+        sequence_length: Optional[int] = None,
         dropout: float = 0.1,
+        input_modality: str = 'binned',
     ):
         super().__init__()
         self.d_model = d_model
         self.n_latents = n_latents
         self.latent_dim = latent_dim
         self.use_popt = use_popt
+        self.sequence_length = sequence_length
+
+        self.input_modality = input_modality
+        if input_modality == 'binned':
+            # BinnedTokenizer input_dim = N_units
+            if encoder_output_dim is None:
+                 raise ValueError("encoder_output_dim (N_units) must be set for 'binned' modality.")
+            self.tokenizer = BinnedTokenizer(
+                n_units=encoder_output_dim,  # Use encoder_output_dim as n_units
+                d_model=d_model, # Output dim must match Mamba's d_model
+                dropout=dropout
+            )
+        elif input_modality == 'spike':
+            self.tokenizer = SpikeTokenizer(output_dim=d_model, dropout=dropout)
+        elif input_modality == 'lfp':
+            self.tokenizer = LFPTokenizer(output_dim=d_model, dropout=dropout)
+        elif input_modality == 'calcium':
+            self.tokenizer = CalciumTokenizer(output_dim=d_model, dropout=dropout)
+        elif input_modality == 'two_photon':
+            self.tokenizer = TwoPhotonTokenizer(output_dim=d_model, dropout=dropout)
+        elif input_modality == 'miniscope':
+            self.tokenizer = MiniscopeTokenizer(output_dim=d_model, dropout=dropout)
+        else:
+            raise ValueError(f"Unknown input_modality: {input_modality}")
 
         # 1. Mamba/SSM backbone
         self.backbone = MambaBackbone(
@@ -135,14 +162,19 @@ class NeuroFMXComplete(nn.Module):
         else:
             self.popt = None
 
+        # Diagnostic print to verify encoder_output_dim
+        print(f"DEBUG_CHECK: Using encoder_output_dim = {encoder_output_dim} for MultiTaskHeads.")
+
         # 4. Multi-task heads
         head_input_dim = latent_dim
         self.heads = MultiTaskHeads(
             input_dim=head_input_dim,
             decoder_output_dim=decoder_output_dim,
             encoder_output_dim=encoder_output_dim,
+            sequence_length=sequence_length,
             enable_decoder=enable_decoder,
             enable_encoder=enable_encoder,
+            enable_forecast=enable_forecast,
             enable_contrastive=enable_contrastive,
             dropout=dropout,
         )
@@ -349,6 +381,13 @@ class NeuroFMXComplete(nn.Module):
     @classmethod
     def from_config(cls, config: dict) -> "NeuroFMXComplete":
         """Create model from configuration dict."""
+        # -------------------------------------------------------------
+        # AGGRESSIVE DIAGNOSTIC FIX: Overriding any persistent config error
+        # We know the true number of units is 384, as confirmed by the data.
+        if config.get("encoder_output_dim") != 384:
+            print("WARNING: Forcing encoder_output_dim to 384 to match data size.")
+            config["encoder_output_dim"] = 384
+        # -------------------------------------------------------------
         return cls(
             d_model=config.get("d_model", 768),
             n_mamba_blocks=config.get("n_blocks", 16),

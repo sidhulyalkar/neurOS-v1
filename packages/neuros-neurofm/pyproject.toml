@@ -26,7 +26,7 @@ classifiers = [
 
 dependencies = [
     "torch>=2.3.0",
-    "numpy>=1.24.0",
+    "numpy==1.26.4",
     "scipy>=1.10.0",
     "einops>=0.7.0",
 ]

@@ -1,0 +1,87 @@
+# Quick Test Configuration
+# Purpose: Fast validation on small subset (2-3 hours on RTX 3070 Ti)
+# Use: Test architecture, debug issues, validate before cloud training
+
+name: "quick_test"
+description: "Fast validation run on 4 sessions"
+
+# Data Configuration
+data:
+  data_dir: "./data/allen_neuropixels"
+  processed_dir: "./data/allen_neuropixels/processed_sequences_full"
+  cache_dir: "./data/allen_neuropixels/cache"
+
+  # Limit to subset for quick testing
+  num_sessions: 4  # Only use 4 sessions
+  train_split: 0.8
+
+  sequence_length: 100
+  bin_size_ms: 10.0
+  max_units: 384
+
+  # Data loading
+  batch_size: 8  # Larger batch for faster training
+  num_workers: 2
+  pin_memory: true
+
+# Model Architecture (Small for testing)
+model:
+  d_model: 128
+  n_mamba_blocks: 4
+  n_latents: 32
+  latent_dim: 128
+  n_perceiver_layers: 2
+  n_popt_layers: 2
+
+  use_popt: true
+  use_multi_rate: true
+  downsample_rates: [1, 4]
+
+  dropout: 0.1
+  input_modality: "binned"
+
+# Task Heads
+tasks:
+  enable_encoder: true
+  enable_decoder: true
+  enable_contrastive: true
+  enable_forecast: false
+
+  decoder_output_dim: 3
+  encoder_output_dim: 384  # n_units
+
+# Training Configuration
+training:
+  max_epochs: 10  # Quick test, not full training
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_epochs: 1
+
+  gradient_accumulation_steps: 2  # Effective batch = 16
+  gradient_clip_norm: 1.0
+
+  use_amp: true  # Mixed precision
+
+  # Early stopping for quick test
+  early_stopping:
+    enabled: true
+    patience: 3
+    min_delta: 0.001
+
+# Checkpointing
+checkpointing:
+  checkpoint_dir: "./checkpoints_quick_test"
+  log_dir: "./logs_quick_test"
+  save_interval: 2  # Every 2 epochs
+  keep_last_n: 3
+
+# Logging
+logging:
+  use_tensorboard: true
+  use_wandb: false
+  log_interval: 10  # Log every 10 batches
+
+# Hardware
+hardware:
+  device: "cuda"
+  mixed_precision: true

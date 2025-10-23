@@ -92,17 +92,20 @@ class DecoderHead(nn.Module):
 
 
 class EncoderHead(nn.Module):
-    """Neural encoding head.
+    """Neural encoding head (Reconstruction).
 
-    Predicts neural activity from behavioral/sensory variables.
-    This is the inverse of decoding.
+    Reconstructs neural activity sequences from latent representations.
+    For NeuroFM-X, this reconstructs (B, S, N) from pooled latents (B, latent_dim).
 
     Parameters
     ----------
     input_dim : int
-        Input dimension (behavioral variables).
+        Input dimension (latent dimension from PopT/Perceiver).
     output_dim : int
-        Output dimension (neural activity dimension).
+        Output dimension (neural activity dimension = n_units).
+    sequence_length : int, optional
+        Sequence length to reconstruct. If None, outputs single timestep.
+        Default: None.
     hidden_dims : List[int], optional
         Hidden layer dimensions.
         Default: [256, 128].
@@ -118,6 +121,7 @@ class EncoderHead(nn.Module):
         self,
         input_dim: int,
         output_dim: int,
+        sequence_length: Optional[int] = None,
         hidden_dims: List[int] = [256, 128],
         dropout: float = 0.1,
         output_activation: Optional[str] = 'softplus',
@@ -125,6 +129,7 @@ class EncoderHead(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.sequence_length = sequence_length
 
         # Build MLP
         layers = []
@@ -139,8 +144,13 @@ class EncoderHead(nn.Module):
             ])
             prev_dim = hidden_dim
 
-        # Output layer
-        layers.append(nn.Linear(prev_dim, output_dim))
+        # Output layer: project to (S * N) if sequence_length is specified
+        if sequence_length is not None:
+            output_size = sequence_length * output_dim
+        else:
+            output_size = output_dim
+
+        layers.append(nn.Linear(prev_dim, output_size))
 
         # Output activation
         if output_activation == 'softplus':
@@ -153,19 +163,28 @@ class EncoderHead(nn.Module):
         self.mlp = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Encode behavioral variables to neural activity.
+        """Encode/reconstruct neural activity.
 
         Parameters
         ----------
         x : torch.Tensor
-            Behavioral features, shape (batch, input_dim) or (batch, seq_len, input_dim).
+            Latent features, shape (batch, input_dim).
 
         Returns
         -------
         torch.Tensor
-            Predicted neural activity, same shape with output_dim.
+            Reconstructed neural activity.
+            If sequence_length is set: (batch, sequence_length, output_dim)
+            Otherwise: (batch, output_dim)
         """
-        return self.mlp(x)
+        output = self.mlp(x)  # (batch, S*N) or (batch, N)
+
+        # Reshape to sequence if needed
+        if self.sequence_length is not None:
+            batch_size = x.shape[0]
+            output = output.view(batch_size, self.sequence_length, self.output_dim)
+
+        return output
 
 
 class ContrastiveHead(nn.Module):
@@ -400,7 +419,10 @@ class MultiTaskHeads(nn.Module):
     decoder_output_dim : int, optional
         Decoder output dimension (behavioral variables).
     encoder_output_dim : int, optional
-        Encoder output dimension (neural activity).
+        Encoder output dimension (neural activity = n_units).
+    sequence_length : int, optional
+        Sequence length for reconstruction (encoder head).
+        Default: None.
     enable_decoder : bool, optional
         Enable decoder head.
         Default: True.
@@ -423,6 +445,7 @@ class MultiTaskHeads(nn.Module):
         input_dim: int,
         decoder_output_dim: Optional[int] = None,
         encoder_output_dim: Optional[int] = None,
+        sequence_length: Optional[int] = None,
         enable_decoder: bool = True,
         enable_encoder: bool = True,
         enable_contrastive: bool = True,
@@ -444,6 +467,7 @@ class MultiTaskHeads(nn.Module):
             self.heads['encoder'] = EncoderHead(
                 input_dim=input_dim,
                 output_dim=encoder_output_dim,
+                sequence_length=sequence_length,
                 dropout=dropout,
             )
 

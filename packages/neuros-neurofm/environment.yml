@@ -1,4 +1,4 @@
-name: neurofm
+name: neurofm_v2
 channels:
   - pytorch
   - nvidia
@@ -16,10 +16,15 @@ dependencies:
   - pytorch-cuda=11.8
 
   # Core scientific computing
-  - numpy>=1.24.0
+  - numpy=1.26.4          # Pinned version
   - scipy>=1.10.0
   - pandas>=1.5.0
+  - hdmf                    # Explicitly added
 
+  # Mamba-SSM Dependencies
+  - packaging
+  - ninja
+    
   # Data handling
   - h5py>=3.8.0
   - pynwb>=2.5.0
@@ -31,14 +36,10 @@ dependencies:
   # Install remaining with pip
   - pip
   - pip:
-      - allensdk>=2.14.0,<2.15
       - xarray
       - nest-asyncio
       - cachetools
       - boto3
       - simplejson
       - psycopg2-binary
-
-# Usage:
-# conda env create -f environment.yml
-# conda activate neurofm
+      - mamba-ssm

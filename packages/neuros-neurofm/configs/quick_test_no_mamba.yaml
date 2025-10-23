@@ -1,0 +1,78 @@
+# Ultra-Fast Quick Test (No Mamba - For Immediate Validation)
+# Use this if mamba-ssm is not installed
+# Speed: ~0.5-1s/batch on RTX 3070 Ti
+
+name: "quick_test_no_mamba"
+description: "Fast validation without Mamba (GRU fallback)"
+
+data:
+  data_dir: "./data/allen_neuropixels"
+  processed_dir: "./data/allen_neuropixels/processed_sequences_full"
+  cache_dir: "./data/allen_neuropixels/cache"
+
+  num_sessions: 4
+  train_split: 0.8
+  sequence_length: 100
+  bin_size_ms: 10.0
+  max_units: 384
+
+  # OPTIMIZED for RTX 3070 Ti
+  batch_size: 16  # Increased from 8
+  num_workers: 0  # WSL2 issue - keep at 0
+  pin_memory: true
+
+# Simplified Model (No Mamba - Uses GRU)
+model:
+  d_model: 128
+  n_mamba_blocks: 0  # DISABLE Mamba
+  n_latents: 32
+  latent_dim: 128
+  n_perceiver_layers: 2
+  n_popt_layers: 2
+
+  use_popt: true
+  use_multi_rate: false  # Disable multi-rate
+  downsample_rates: [1]
+
+  dropout: 0.1
+  input_modality: "binned"
+
+tasks:
+  enable_encoder: true
+  enable_decoder: true
+  enable_contrastive: false  # Disable for speed
+  enable_forecast: false
+
+  decoder_output_dim: 3
+  encoder_output_dim: 384
+
+training:
+  max_epochs: 5  # Quick test
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_epochs: 1
+
+  gradient_accumulation_steps: 1  # No accumulation
+  gradient_clip_norm: 1.0
+
+  use_amp: true  # Keep mixed precision
+
+  early_stopping:
+    enabled: true
+    patience: 2
+    min_delta: 0.01
+
+checkpointing:
+  checkpoint_dir: "./checkpoints_quick_no_mamba"
+  log_dir: "./logs_quick_no_mamba"
+  save_interval: 1
+  keep_last_n: 3
+
+logging:
+  use_tensorboard: true
+  use_wandb: false
+  log_interval: 10
+
+hardware:
+  device: "cuda"
+  mixed_precision: true

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  neurofm-train:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    image: neurofm:latest
+    container_name: neurofm_training
+
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Volumes
+    volumes:
+      - ../data:/data
+      - ../checkpoints:/checkpoints
+      - ../logs:/logs
+      - ../configs:/workspace/neurofm/configs
+
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTHONPATH=/workspace/neurofm
+      - WANDB_API_KEY=${WANDB_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+
+    # Command (override with config)
+    command: --config configs/local_full.yaml
+
+    # Interactive mode for debugging
+    stdin_open: true
+    tty: true
+
+  # TensorBoard service
+  tensorboard:
+    image: tensorflow/tensorflow:latest
+    container_name: neurofm_tensorboard
+    command: tensorboard --logdir=/logs --host=0.0.0.0 --port=6006
+    ports:
+      - "6006:6006"
+    volumes:
+      - ../logs:/logs
+
+networks:
+  default:
+    name: neurofm_network

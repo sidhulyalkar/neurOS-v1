@@ -1,0 +1,160 @@
+# AWS Cloud Training Configuration (A100 40GB)
+# Purpose: Large-scale multi-modal foundation model training
+# Cost: ~$4.10/hour
+# Use: Production training with diverse datasets
+
+name: "cloud_aws_foundation"
+description: "Multi-modal foundation model on AWS A100"
+
+# Data Configuration
+data:
+  # S3 bucket path (will be mounted)
+  data_dir: "s3://neurofm-training/data"  # Update with your bucket
+  processed_dir: "s3://neurofm-training/processed"
+  cache_dir: "./cache_local"  # Local cache
+
+  # Multi-dataset configuration
+  datasets:
+    - name: "allen_neuropixels"
+      path: "allen_neuropixels"
+      modality: "binned"
+      weight: 0.40  # 40% of training
+      num_sessions: 100
+
+    - name: "allen_2photon"
+      path: "allen_2photon"
+      modality: "calcium"
+      weight: 0.25  # 25% of training
+      num_sessions: 50
+
+    - name: "ibl_neuropixels"
+      path: "ibl_neuropixels"
+      modality: "binned"
+      weight: 0.20  # 20% of training
+      num_sessions: 40
+
+    - name: "crcns_hippocampus"
+      path: "crcns"
+      modality: "binned"
+      weight: 0.10  # 10% of training
+      num_sessions: 20
+
+    - name: "miniscope"
+      path: "miniscope"
+      modality: "miniscope"
+      weight: 0.05  # 5% of training
+      num_sessions: 10
+
+  train_split: 0.85  # Larger training set for foundation model
+  sequence_length: 100
+  bin_size_ms: 10.0
+  max_units: 512  # Larger for diverse datasets
+
+  # Data loading optimized for A100
+  batch_size: 64  # Much larger on A100
+  num_workers: 8  # More CPU cores available
+  pin_memory: true
+  prefetch_factor: 4
+
+# Model Architecture (Larger for foundation model)
+model:
+  d_model: 256  # Increased capacity
+  n_mamba_blocks: 8  # Deeper
+  n_latents: 64  # More latents
+  latent_dim: 256  # Larger latent dimension
+  n_perceiver_layers: 4  # More layers
+  n_popt_layers: 3
+
+  use_popt: true
+  use_multi_rate: true
+  downsample_rates: [1, 2, 4, 8]  # More temporal scales
+
+  dropout: 0.15  # Slightly higher for regularization
+  input_modality: "multi"  # Multi-modal
+
+# Task Heads
+tasks:
+  enable_encoder: true
+  enable_decoder: true
+  enable_contrastive: true
+  enable_forecast: true  # Enable for foundation model
+
+  decoder_output_dim: 8  # More behavioral dimensions
+  encoder_output_dim: 512  # Larger reconstruction
+
+  # Task loss weights
+  loss_weights:
+    encoder: 1.0
+    decoder: 1.0
+    contrastive: 0.5
+    forecast: 0.3
+
+# Training Configuration
+training:
+  max_epochs: 50
+  learning_rate: 1.0e-4  # Lower for stability at scale
+  weight_decay: 0.01
+  warmup_epochs: 3
+
+  gradient_accumulation_steps: 1  # No accumulation needed with large batch
+  gradient_clip_norm: 1.0
+
+  use_amp: true
+
+  # Learning rate schedule
+  lr_scheduler:
+    type: "cosine"  # Cosine annealing with warmup
+    warmup_steps: 1000
+    min_lr: 1.0e-6
+
+  # Optimizer
+  optimizer:
+    type: "adamw"
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+
+  early_stopping:
+    enabled: true
+    patience: 8
+    min_delta: 0.00005
+
+# Checkpointing
+checkpointing:
+  checkpoint_dir: "s3://neurofm-training/checkpoints"
+  log_dir: "s3://neurofm-training/logs"
+  save_interval: 2
+  keep_last_n: 10
+
+  # Save to local and S3
+  save_local: true
+  local_checkpoint_dir: "./checkpoints"
+
+# Logging
+logging:
+  use_tensorboard: true
+  use_wandb: true  # Cloud training - use WandB
+  log_interval: 20
+
+  wandb:
+    project: "neurofm-foundation"
+    entity: null  # Set your WandB username
+    tags: ["foundation", "multi-modal", "aws", "a100"]
+
+# Hardware (AWS A100)
+hardware:
+  device: "cuda"
+  mixed_precision: true
+  distributed: false  # Set to true for multi-GPU
+
+# AWS Specific
+aws:
+  instance_type: "p4d.24xlarge"  # A100 instance
+  region: "us-east-1"
+  spot_instance: false  # Use on-demand for reliability
+
+  # Auto-shutdown on completion
+  auto_shutdown: true
+
+  # Cost monitoring
+  max_cost: 500.0  # Stop if cost exceeds $500
+  cost_alert_threshold: 400.0  # Alert at $400

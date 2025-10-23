@@ -1,0 +1,85 @@
+# Local Full Training Configuration
+# Purpose: Full training on RTX 3070 Ti (12-17 hours per 50 epochs)
+# Use: Production training on local GPU with current 20 sessions
+
+name: "local_full_training"
+description: "Full training on local RTX 3070 Ti"
+
+# Data Configuration
+data:
+  data_dir: "./data/allen_neuropixels"
+  processed_dir: "./data/allen_neuropixels/processed_sequences_full"
+  cache_dir: "./data/allen_neuropixels/cache"
+
+  num_sessions: null  # Use all available sessions
+  train_split: 0.8
+
+  sequence_length: 100
+  bin_size_ms: 10.0
+  max_units: 384
+
+  # Data loading optimized for RTX 3070 Ti
+  batch_size: 8  # Increased from 2
+  num_workers: 2
+  pin_memory: true
+
+# Model Architecture (Optimized for 8GB VRAM)
+model:
+  d_model: 128
+  n_mamba_blocks: 4
+  n_latents: 32
+  latent_dim: 128
+  n_perceiver_layers: 2
+  n_popt_layers: 2
+
+  use_popt: true
+  use_multi_rate: true
+  downsample_rates: [1, 4]
+
+  dropout: 0.1
+  input_modality: "binned"
+
+# Task Heads
+tasks:
+  enable_encoder: true
+  enable_decoder: true
+  enable_contrastive: true
+  enable_forecast: false
+
+  decoder_output_dim: 3
+  encoder_output_dim: 384
+
+# Training Configuration
+training:
+  max_epochs: 50
+  learning_rate: 3.0e-4
+  weight_decay: 0.01
+  warmup_epochs: 2
+
+  gradient_accumulation_steps: 2  # Effective batch = 16
+  gradient_clip_norm: 1.0
+
+  use_amp: true
+
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+
+# Checkpointing
+checkpointing:
+  checkpoint_dir: "./checkpoints_local_full"
+  log_dir: "./logs_local_full"
+  save_interval: 5
+  keep_last_n: 5
+
+# Logging
+logging:
+  use_tensorboard: true
+  use_wandb: false
+  log_interval: 50
+
+# Hardware
+hardware:
+  device: "cuda"
+  mixed_precision: true
