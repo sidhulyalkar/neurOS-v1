@@ -1,0 +1,230 @@
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: neurofmx-ray
+  namespace: neurofmx
+spec:
+  rayVersion: "2.34.0"
+  enableInTreeAutoscaling: false
+
+  # Head node configuration
+  headGroupSpec:
+    serviceType: ClusterIP
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-gpus: "0"  # Head node doesn't need GPU
+      block: "true"
+    template:
+      metadata:
+        labels:
+          role: ray-head
+          app: neurofmx
+      spec:
+        nodeSelector:
+          gpu: "h100"
+        tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        containers:
+        - name: ray-head
+          image: ghcr.io/YOUR_USERNAME/neurofmx-train:latest  # Replace with your image
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "8"
+              memory: "32Gi"
+            limits:
+              cpu: "16"
+              memory: "64Gi"
+          env:
+          - name: RAY_memory_monitor_refresh_ms
+            value: "0"
+          - name: NCCL_P2P_DISABLE
+            value: "0"
+          - name: NCCL_IB_DISABLE
+            value: "1"  # Single-node NVLink only; set "0" for multi-node with InfiniBand
+          - name: NCCL_SOCKET_NTHREADS
+            value: "4"
+          - name: NCCL_NSOCKS_PERTHREAD
+            value: "8"
+          - name: CUDA_DEVICE_MAX_CONNECTIONS
+            value: "1"
+          # S3 credentials for checkpoints
+          - name: AWS_ENDPOINT_URL
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_ENDPOINT_URL
+          - name: AWS_REGION
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_REGION
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_ACCESS_KEY_ID
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_SECRET_ACCESS_KEY
+          - name: S3_BUCKET
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: S3_BUCKET
+          # WandB API key (optional)
+          - name: WANDB_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: wandb-secret
+                key: api-key
+                optional: true
+          ports:
+          - containerPort: 8265  # Ray dashboard
+            name: dashboard
+          - containerPort: 10001  # Ray client
+            name: client
+          - containerPort: 6379   # Redis
+            name: redis
+          volumeMounts:
+          - name: checkpoints
+            mountPath: /mnt/checkpoints
+          - name: data
+            mountPath: /mnt/data
+          - name: dshm
+            mountPath: /dev/shm
+        volumes:
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: neurofmx-checkpoints
+        - name: data
+          persistentVolumeClaim:
+            claimName: neurofmx-data
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "32Gi"
+
+  # Worker nodes configuration (8x H100 GPUs)
+  workerGroupSpecs:
+  - groupName: h100-workers
+    replicas: 8  # One worker per GPU on HGX node
+    minReplicas: 8
+    maxReplicas: 8
+    rayStartParams:
+      num-gpus: "1"
+      block: "true"
+    template:
+      metadata:
+        labels:
+          role: ray-worker
+          app: neurofmx
+      spec:
+        nodeSelector:
+          gpu: "h100"
+        tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        containers:
+        - name: ray-worker
+          image: ghcr.io/YOUR_USERNAME/neurofmx-train:latest  # Replace with your image
+          imagePullPolicy: Always
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              cpu: "16"
+              memory: "64Gi"
+            requests:
+              nvidia.com/gpu: 1
+              cpu: "8"
+              memory: "48Gi"
+          env:
+          # NCCL optimizations for H100 HGX with NVLink/NVSwitch
+          - name: NCCL_P2P_DISABLE
+            value: "0"  # Enable P2P (NVLink)
+          - name: NCCL_IB_DISABLE
+            value: "1"  # Disable InfiniBand for single-node
+          - name: NCCL_SOCKET_NTHREADS
+            value: "4"
+          - name: NCCL_NSOCKS_PERTHREAD
+            value: "8"
+          - name: NCCL_PROTO
+            value: "simple"
+          - name: CUDA_DEVICE_MAX_CONNECTIONS
+            value: "1"
+          - name: PYTORCH_CUDA_ALLOC_CONF
+            value: "max_split_size_mb:512"
+          # S3 credentials
+          - name: AWS_ENDPOINT_URL
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_ENDPOINT_URL
+          - name: AWS_REGION
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_REGION
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_ACCESS_KEY_ID
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: AWS_SECRET_ACCESS_KEY
+          - name: S3_BUCKET
+            valueFrom:
+              secretKeyRef:
+                name: s3-credentials
+                key: S3_BUCKET
+          # WandB API key (optional)
+          - name: WANDB_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: wandb-secret
+                key: api-key
+                optional: true
+          volumeMounts:
+          - name: dshm
+            mountPath: /dev/shm
+          - name: checkpoints
+            mountPath: /mnt/checkpoints
+          - name: data
+            mountPath: /mnt/data
+        volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "16Gi"  # Large shared memory for NCCL
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: neurofmx-checkpoints
+        - name: data
+          persistentVolumeClaim:
+            claimName: neurofmx-data
+
+---
+# Service to expose Ray dashboard
+apiVersion: v1
+kind: Service
+metadata:
+  name: neurofmx-ray-dashboard
+  namespace: neurofmx
+spec:
+  type: LoadBalancer  # Change to NodePort or ClusterIP if needed
+  selector:
+    ray.io/cluster: neurofmx-ray
+    ray.io/node-type: head
+  ports:
+  - name: dashboard
+    port: 8265
+    targetPort: 8265
+    protocol: TCP

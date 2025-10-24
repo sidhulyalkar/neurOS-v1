@@ -1,0 +1,63 @@
+#cloud-config
+package_update: true
+packages:
+  - curl
+  - git
+  - nfs-common
+  - jq
+  - containerd
+
+write_files:
+  - path: /etc/sysctl.d/90-nccl.conf
+    content: |
+      net.core.rmem_max=134217728
+      net.core.wmem_max=134217728
+      net.core.netdev_max_backlog=250000
+      net.core.somaxconn=4096
+      net.ipv4.tcp_rmem=4096 87380 134217728
+      net.ipv4.tcp_wmem=4096 65536 134217728
+
+  - path: /etc/profile.d/nccl.sh
+    content: |
+      export NCCL_PROTO=simple
+      export NCCL_P2P_DISABLE=0
+      export NCCL_IB_DISABLE=1        # single node HGX; set 0 if using IB between nodes
+      export NCCL_PXN_DISABLE=0
+      export CUDA_DEVICE_MAX_CONNECTIONS=1
+      export NCCL_SOCKET_NTHREADS=4
+      export NCCL_NSOCKS_PERTHREAD=8
+
+runcmd:
+  - sysctl --system
+
+  # Install NVIDIA drivers + container toolkit
+  - distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update && apt-get install -y nvidia-driver-535 nvidia-container-toolkit
+  - nvidia-ctk runtime configure --runtime=containerd
+  - systemctl restart containerd
+
+  # Wait for NVIDIA drivers
+  - sleep 30
+  - nvidia-smi
+
+  # Install K3s
+  %{ if is_master }
+  # Master node
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --node-taint nvidia.com/gpu=present:NoSchedule" K3S_TOKEN=${k3s_token} sh -
+  - sleep 30
+  - kubectl get nodes
+  %{ else }
+  # Worker node - join master
+  - sleep 60
+  - curl -sfL https://get.k3s.io | K3S_URL=https://${master_ip}:6443 K3S_TOKEN=${k3s_token} sh -
+  %{ endif }
+
+  # Install Helm
+  - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+  # Log completion
+  - echo "K3s installation complete" >> /var/log/cloudinit-output.log
+
+final_message: "NeuroFMx K3s node is ready after $UPTIME seconds"

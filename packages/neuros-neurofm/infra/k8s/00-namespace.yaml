@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neurofmx
+  labels:
+    name: neurofmx
+    project: neuros

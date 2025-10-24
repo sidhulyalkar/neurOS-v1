@@ -1,0 +1,17 @@
+# NeuroFMx Crusoe Configuration
+# Copy to terraform.tfvars and fill in your values
+
+cluster_name       = "neurofmx-crusoe"
+region             = "us-northcentral1-a"  # Check Crusoe docs for available regions
+h100_instance_type = "gpu.h100-80gb.hgx.8x"
+node_count         = 1
+k3s_token          = "neurofmx-secure-token-change-me"  # Generate random token
+
+# SSH key IDs from your Crusoe account
+ssh_key_ids = []  # Add your SSH key IDs here
+
+# Prefer setting via environment variable:
+# export CRUSOE_API_TOKEN="your-api-token"
+
+# Uncomment only if not using env var (NOT RECOMMENDED for version control):
+# crusoe_api_token = "your-api-token"

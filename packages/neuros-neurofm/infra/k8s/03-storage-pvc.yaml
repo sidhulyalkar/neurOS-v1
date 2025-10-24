@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neurofmx-checkpoints
+  namespace: neurofmx
+spec:
+  accessModes:
+    - ReadWriteMany  # Shared across all Ray workers
+  resources:
+    requests:
+      storage: 500Gi
+  # Use your cloud provider's storage class
+  # For CoreWeave: storageClassName: "ceph-filesystem"
+  # For Crusoe or custom: storageClassName: "nfs" or "local-path"
+  storageClassName: ""  # Replace with appropriate storage class
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neurofmx-data
+  namespace: neurofmx
+spec:
+  accessModes:
+    - ReadWriteMany  # Shared data across workers
+  resources:
+    requests:
+      storage: 2Ti  # Large storage for datasets
+  storageClassName: ""  # Replace with appropriate storage class
