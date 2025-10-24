@@ -1,0 +1,162 @@
+# NeuroFMx Medium Model Configuration
+# ~50M parameters
+# Use for: Multi-modal training, standard experiments, recommended starting point
+
+model:
+  d_model: 512
+  n_mamba_blocks: 8
+  mamba_config:
+    d_state: 16
+    d_conv: 4
+    expand_factor: 2
+
+  # Perceiver-IO fusion
+  n_latents: 64
+  latent_dim: 512
+  n_perceiver_blocks: 3
+  n_cross_attn_heads: 8
+
+  # PopT aggregation
+  popt_config:
+    n_heads: 8
+    dropout: 0.1
+
+  # Domain adversarial
+  use_domain_adversarial: true
+  n_domains: 3  # mouse, monkey, human
+  domain_hidden_dim: 256
+
+  # Multi-task heads
+  decoder_hidden_dim: 512
+  encoder_hidden_dim: 512
+  contrastive_dim: 256
+  forecast_horizon: 20
+
+# Tokenizer configurations
+tokenizers:
+  spike:
+    n_units: 384
+    bin_size: 0.01  # 10ms bins
+    use_sqrt: true
+
+  lfp:
+    n_channels: 128
+    target_seq_len: 100
+    use_spectral: true
+
+  calcium:
+    n_cells: 512
+    target_fps: 10
+
+  eeg:
+    n_channels: 64
+    sfreq: 128
+    temporal_kernels: [3, 7, 15, 31]
+    extract_bands: true
+
+  fmri:
+    n_rois: 400
+    tr: 0.72
+    dilation_rates: [1, 2, 4, 8]
+
+  ecog:
+    n_channels: 256
+    sfreq: 500
+    use_spectral: true
+
+  emg:
+    n_channels: 32
+    sfreq: 1000
+    use_envelope: false
+
+# Training configuration
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  effective_batch_size: 64  # batch_size * gradient_accumulation_steps
+
+  learning_rate: 5.0e-4
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+  warmup_steps: 2000
+  max_steps: 200000
+
+  mixed_precision: true
+
+  # Loss weights
+  loss_balancing: "uncertainty"  # "uncertainty", "gradnorm", or "manual"
+  manual_weights:
+    decoder: 1.0
+    encoder: 1.0
+    contrastive: 0.5
+    domain: 0.1
+    forecast: 0.5
+
+  # Contrastive loss
+  contrastive:
+    temperature: 0.07
+    neural_weight: 1.0
+    stimulus_weight: 1.0
+    use_temporal: true
+    temporal_window: 5
+
+  # Domain adversarial
+  domain_adversarial:
+    grl_lambda: 1.0
+    start_grl_lambda: 0.0
+    end_grl_lambda: 1.0
+    warmup_steps: 10000
+
+# Optimizer
+optimizer:
+  type: "AdamW"
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+# Scheduler
+scheduler:
+  type: "cosine_with_warmup"
+  warmup_steps: 2000
+  min_lr: 1.0e-6
+
+# Data
+data:
+  sequence_length: 100
+  stride: 50
+  num_workers: 8
+  pin_memory: true
+
+  # Modality dropout (for robustness)
+  modality_dropout_prob: 0.1
+
+  # Augmentation
+  augmentation:
+    temporal_jitter: 0.02  # 2% jitter
+    amplitude_scale: [0.9, 1.1]
+    gaussian_noise_std: 0.01
+
+# Checkpointing
+checkpointing:
+  save_every_n_steps: 5000
+  keep_last_n_checkpoints: 5
+  checkpoint_dir: "./checkpoints_medium"
+
+# Logging
+logging:
+  log_every_n_steps: 100
+  use_wandb: true
+  wandb_project: "neurofmx"
+  wandb_entity: null
+  wandb_run_name: "neurofmx_medium"
+
+# Validation
+validation:
+  val_every_n_steps: 1000
+  val_batches: 200
+
+# Hardware
+hardware:
+  device: "cuda"
+  num_gpus: 1
+  distributed: false
