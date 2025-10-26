@@ -12,8 +12,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from neuros_neurofm.tokenizers.base_tokenizer import BaseTokenizer, TokenizedSequence
 
-class SpikeTokenizer(nn.Module):
+
+class SpikeTokenizer(BaseTokenizer):
     """Tokenize spike trains into discrete events.
 
     This tokenizer converts spike trains from multiple units into a sequence of
@@ -55,13 +57,13 @@ class SpikeTokenizer(nn.Module):
         waveform_dim: int = 32,
         learnable_unit_embeddings: bool = True,
     ):
-        super().__init__()
+        super().__init__(d_model=d_model)
         self.n_units = n_units
-        self.d_model = d_model
         self.bin_size_ms = bin_size_ms
         self.max_sequence_length = max_sequence_length
         self.use_waveform_features = use_waveform_features
         self.waveform_dim = waveform_dim
+        self.default_sampling_rate = 1000.0 / bin_size_ms  # Convert ms to Hz
 
         # Unit identity embeddings (one per neuron)
         self.unit_embeddings = nn.Embedding(
@@ -141,7 +143,9 @@ class SpikeTokenizer(nn.Module):
         spike_units: torch.Tensor,
         spike_waveforms: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        t0: float = 0.0,
+        return_sequence: bool = True
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[TokenizedSequence]]:
         """Tokenize spike trains.
 
         Parameters
@@ -156,6 +160,10 @@ class SpikeTokenizer(nn.Module):
         attention_mask : torch.Tensor, optional
             Mask for valid spikes (1 = valid, 0 = padding),
             shape (batch, n_spikes).
+        t0 : float, optional
+            Start time in seconds (default: 0.0).
+        return_sequence : bool, optional
+            If True, also return TokenizedSequence (default: True).
 
         Returns
         -------
@@ -163,6 +171,8 @@ class SpikeTokenizer(nn.Module):
             Spike tokens, shape (batch, n_spikes, d_model).
         attention_mask : torch.Tensor
             Attention mask, shape (batch, n_spikes).
+        sequence : TokenizedSequence or None
+            TokenizedSequence if return_sequence=True, else None.
         """
         batch_size, n_spikes = spike_times.shape
 
@@ -197,7 +207,26 @@ class SpikeTokenizer(nn.Module):
                 device=tokens.device,
             )
 
-        return tokens, attention_mask
+        # Create TokenizedSequence if requested
+        sequence = None
+        if return_sequence:
+            # For spike data, dt is the bin size
+            dt = self.bin_size_ms / 1000.0  # Convert ms to seconds
+
+            sequence = self.create_sequence(
+                tokens=tokens,
+                t0=t0,
+                dt=dt,
+                mask=attention_mask,
+                metadata={
+                    'modality': 'spike',
+                    'n_units': self.n_units,
+                    'bin_size_ms': self.bin_size_ms,
+                    'use_waveform_features': self.use_waveform_features
+                }
+            )
+
+        return tokens, attention_mask, sequence
 
     def from_binned_spikes(
         self,

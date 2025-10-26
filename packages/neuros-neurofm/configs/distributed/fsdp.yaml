@@ -1,0 +1,88 @@
+# PyTorch FSDP (Fully Sharded Data Parallel) Configuration
+# Enables training large models across multiple GPUs with memory efficiency
+
+strategy:
+  name: fsdp
+
+  # Sharding strategy
+  # FULL_SHARD: ZeRO-3 equivalent - shard params, gradients, optimizer states
+  # SHARD_GRAD_OP: ZeRO-2 equivalent - shard gradients and optimizer states only
+  # NO_SHARD: DDP equivalent - replicate everything
+  sharding_strategy: FULL_SHARD
+
+  # CPU offloading (trade compute for GPU memory)
+  cpu_offload: false  # Set to true for very large models (>1B params)
+
+  # Mixed precision training
+  mixed_precision:
+    param_dtype: bf16  # bfloat16 for parameters
+    reduce_dtype: fp32  # float32 for gradient reduction (stability)
+    buffer_dtype: fp32  # float32 for buffers
+
+  # Activation checkpointing (gradient checkpointing)
+  # Trades compute for memory - recompute activations during backward
+  activation_checkpointing: true
+  activation_checkpointing_policy: transformer  # or 'custom'
+
+  # Backward prefetch strategy
+  # BACKWARD_PRE: Prefetch next layer's params during current backward
+  # BACKWARD_POST: Prefetch after current layer backward completes
+  backward_prefetch: BACKWARD_PRE
+
+  # Forward prefetch
+  forward_prefetch: true
+
+  # Limit all-gather bandwidth
+  limit_all_gathers: true
+
+  # Auto-wrap policy for nested modules
+  auto_wrap_policy: transformer_auto_wrap
+
+  # Minimum number of parameters for wrapping a module
+  min_num_params: 1e6  # 1M parameters
+
+  # Synchronization settings
+  sync_module_states: true  # Broadcast rank 0's module states to all ranks
+
+  # State dict configuration
+  state_dict_type: FULL_STATE_DICT  # or SHARDED_STATE_DICT for very large models
+
+# Training configuration
+training:
+  # Devices
+  devices: auto  # Use all available GPUs
+  num_nodes: 1  # Increase for multi-node training
+
+  # Batch sizing
+  batch_size: 32  # Per-device batch size
+  gradient_accumulation_steps: 2  # Effective batch size = batch_size * devices * grad_accum
+
+  # Optimizer
+  optimizer:
+    name: adamw
+    lr: 1e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8
+    weight_decay: 0.01
+
+  # Gradient clipping
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+
+  # Checkpointing
+  checkpoint_every_n_steps: 1000
+  save_top_k: 3
+
+  # Logging
+  log_every_n_steps: 50
+
+  # Profiling (disable in production)
+  profile: false
+  profile_steps: [10, 15]  # Profile steps 10-15
+
+# Model configuration hints
+model:
+  # These settings work well with FSDP
+  use_flash_attention: true
+  use_fused_adam: true
+  compile: true  # torch.compile for 20-30% speedup

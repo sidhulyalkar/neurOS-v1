@@ -1,0 +1,117 @@
+# NeuroFMX Mechanistic Interpretability Configuration
+# Default settings for comprehensive mech-int analysis
+
+mechint:
+  # Global settings
+  enabled: true
+  sample_layers: [2, 6, 10, 14]  # Which layers to analyze
+  save_hidden_every_n_steps: 200  # Sampling frequency during training
+  output_dir: reports/mechint
+
+  # Causal graph settings
+  causal_graph:
+    enabled: true
+    window: 256  # Window size for causal analysis
+    lag: 10  # Number of lags for Granger causality
+    alpha: 0.001  # Significance threshold
+    regularization: lasso  # lasso, ridge, elastic_net
+    granularity: layer  # layer, channel, neuron
+    time_varying: true  # Track graphs over time
+    hop_size: 128  # For sliding windows
+
+  # SAE settings
+  sae:
+    enabled: true
+    k_features: 2048  # Dictionary size
+    l1: 1e-3  # Sparsity coefficient
+    hierarchical: true
+    layer_sizes: [512, 4096, 16384]  # Multi-level hierarchy
+    expansion_factor: 8  # Dictionary expansion
+    train_epochs: 100
+
+  # Alignment settings
+  alignment:
+    enabled: true
+    method: CCA  # CCA, RSA, PLS
+    n_components: 10
+    bootstrap: 200  # Bootstrap samples for CIs
+    noise_ceiling: true
+    time_varying: false  # Track alignment over time
+
+  # Control dynamics
+  control:
+    enabled: true
+    koopman_window: 128
+    compute_gramians: true
+    estimate_controllability: true
+    estimate_observability: true
+
+  # Topology settings
+  topology:
+    enabled: true
+    rips_maxdim: 2  # Max homology dimension
+    persistence_threshold: 0.1
+    compare_across_species: true
+    compare_across_tasks: true
+
+  # Energy flow settings
+  energy:
+    enabled: true
+    mi_method: mine  # mine, knn, histogram
+    mi_num_steps: 1000  # MINE training steps
+    energy_method: score  # score, quadratic, density
+    num_basins: 5
+    compute_barriers: true
+
+  # Counterfactuals
+  counterfactuals:
+    enabled: false  # Expensive, run on-demand
+    magnitude: 0.5  # Perturbation magnitude
+    duration: 20  # Timesteps
+    num_samples: 100  # Number of counterfactuals
+    interventions:
+      - layer: "backbone.layers.6"
+        dim: null  # null = all dims
+      - layer: "fusion.perceiver"
+        dim: [0, 10, 20]
+
+  # Attribution
+  attribution:
+    enabled: true
+    method: integrated_gradients  # integrated_gradients, deeplift
+    num_steps: 50  # IG steps
+    aggregate_by_region: true
+    aggregate_by_modality: true
+
+  # Meta-dynamics (requires checkpoints)
+  meta_dynamics:
+    enabled: false  # Set true if you have checkpoints
+    checkpoint_dir: checkpoints/
+    checkpoint_interval: 5000  # Steps between checkpoints
+    drift_metric: cca  # cca, rsa, procrustes
+    detect_phases: true
+    track_gradients: true
+
+  # Geometry
+  geometry:
+    enabled: true
+    estimate_curvature: true
+    k_neighbors: 10
+    slow_manifold_dims: 3
+    embedding_method: umap  # umap, isomap
+
+  # Reporting
+  reporting:
+    format: html  # html, markdown, both
+    export_mlflow: true
+    export_wandb: true
+    generate_summary: true
+    include_all_figures: true
+    max_figures_per_section: 5
+
+# Per-analysis resource limits
+resources:
+  max_samples: 10000  # Max samples per analysis
+  batch_size: 256
+  num_workers: 4
+  gpu_memory_fraction: 0.8

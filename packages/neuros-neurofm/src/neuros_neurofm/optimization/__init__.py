@@ -24,13 +24,32 @@ from neuros_neurofm.optimization.model_compression import (
     load_compression_config,
 )
 
+# Ray Tune-based hyperparameter search (optional import)
+try:
+    from neuros_neurofm.optimization.ray_tune_search import (
+        NeuroFMXRayTuner,
+        NeuroFMXSearchSpace,
+        create_neurofmx_train_fn,
+    )
+    RAY_TUNE_AVAILABLE = True
+except ImportError:
+    RAY_TUNE_AVAILABLE = False
+    NeuroFMXRayTuner = None
+    NeuroFMXSearchSpace = None
+    create_neurofmx_train_fn = None
+
 __all__ = [
-    # Hyperparameter search
+    # Hyperparameter search (Optuna-based)
     'HyperparameterSearch',
     'GridSearch',
     'create_neurofmx_objective',
     'save_best_hyperparameters',
     'load_hyperparameters',
+    # Ray Tune-based hyperparameter search
+    'NeuroFMXRayTuner',
+    'NeuroFMXSearchSpace',
+    'create_neurofmx_train_fn',
+    'RAY_TUNE_AVAILABLE',
     # Model compression
     'ModelQuantizer',
     'ModelPruner',

@@ -1,0 +1,128 @@
+# DeepSpeed ZeRO Configuration
+# Alternative to FSDP with additional optimizations
+
+strategy:
+  name: deepspeed
+
+  # DeepSpeed ZeRO stage
+  # Stage 1: Shard optimizer states only
+  # Stage 2: Shard optimizer states + gradients
+  # Stage 3: Shard optimizer states + gradients + parameters (like FSDP FULL_SHARD)
+  zero_optimization:
+    stage: 3
+
+    # CPU offloading for ZeRO-3
+    offload_optimizer:
+      device: cpu  # or 'nvme' for NVMe offloading
+      pin_memory: true
+
+    offload_param:
+      device: cpu
+      pin_memory: true
+
+    # Overlap communication and computation
+    overlap_comm: true
+
+    # Contiguous memory optimization
+    contiguous_gradients: true
+
+    # Sub-group size for parameter updates
+    sub_group_size: 1e9  # 1B parameters
+
+    # Reduce bucket size for gradient all-reduce
+    reduce_bucket_size: 5e8  # 500M
+
+    # All-gather bucket size
+    allgather_bucket_size: 5e8
+
+    # Stage 3 prefetching
+    stage3_prefetch_bucket_size: 5e8
+    stage3_param_persistence_threshold: 1e6
+
+    # Gather FP16 weights
+    stage3_gather_16bit_weights_on_model_save: true
+
+  # Mixed precision (AMP)
+  amp:
+    enabled: true
+    opt_level: O2  # O1 for conservative, O2 for aggressive
+
+  # FP16 settings
+  fp16:
+    enabled: true
+    loss_scale: 0  # Dynamic loss scaling
+    loss_scale_window: 1000
+    hysteresis: 2
+    min_loss_scale: 1
+
+  # BF16 settings (alternative to FP16, better for stability)
+  bf16:
+    enabled: false  # Set to true if using bf16 instead of fp16
+
+  # Gradient clipping
+  gradient_clipping: 1.0
+
+  # Activation checkpointing
+  activation_checkpointing:
+    partition_activations: true
+    cpu_checkpointing: false
+    contiguous_memory_optimization: true
+    synchronize_checkpoint_boundary: false
+
+  # Communication settings
+  communication_data_type: fp32
+
+  # Curriculum learning support
+  curriculum_learning:
+    enabled: false
+
+  # Sparse attention (if using sparse models)
+  sparse_attention:
+    mode: none  # or 'dense', 'fixed', 'bigbird', 'bslongformer'
+
+# Training configuration
+training:
+  devices: auto
+  num_nodes: 1
+  batch_size: 32
+  gradient_accumulation_steps: 2
+
+  optimizer:
+    name: adamw
+    lr: 1e-4
+    betas: [0.9, 0.999]
+    eps: 1e-8
+    weight_decay: 0.01
+
+  scheduler:
+    name: warmup_cosine
+    warmup_steps: 1000
+    total_steps: 100000
+
+  checkpoint_every_n_steps: 1000
+  log_every_n_steps: 50
+
+# DeepSpeed-specific optimizations
+deepspeed_config:
+  train_batch_size: auto  # Calculated from batch_size * devices * grad_accum
+  train_micro_batch_size_per_gpu: auto
+  gradient_accumulation_steps: auto
+
+  # Optimizer offloading
+  zero_allow_untested_optimizer: true
+
+  # Compression
+  compression_training:
+    weight_quantization:
+      enabled: false
+    activation_quantization:
+      enabled: false
+
+  # Monitoring
+  tensorboard:
+    enabled: true
+    output_path: logs/tensorboard
+    job_name: neurofmx_deepspeed
+
+  # Wall clock breakdown
+  wall_clock_breakdown: false

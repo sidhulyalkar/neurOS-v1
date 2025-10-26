@@ -1,0 +1,432 @@
+# NeuroFMX Evaluation Tasks Configuration
+#
+# Comprehensive suite of evaluation tasks spanning multiple species,
+# modalities, and task types for benchmarking NeuroFMX performance.
+
+tasks:
+  # ========================================================================
+  # Neural Decoding Tasks
+  # ========================================================================
+
+  - name: monkey_m1_reaching_decoding
+    task_type: decoding
+    species: monkey
+    modality: spikes
+    target: arm kinematics (position, velocity)
+    metric:
+      - r2_score
+      - correlation
+    description: |
+      Decode arm reaching kinematics from motor cortex (M1) spiking activity.
+      Classic brain-computer interface task using macaque reaching data.
+    n_classes: null
+    output_dim: 6  # 3D position + 3D velocity
+    dataset_path: data/monkey/m1_reaching/
+    reference: "Churchland et al., Nature 2012"
+    difficulty: medium
+    tags:
+      - bci
+      - motor
+      - continuous
+      - classic_benchmark
+
+  - name: monkey_pmd_grasp_classification
+    task_type: multi_class
+    species: monkey
+    modality: spikes
+    target: grasp type
+    metric: accuracy
+    description: |
+      Classify grasp type (precision, power, side) from premotor cortex activity.
+      Multi-class classification with 8 grasp types.
+    n_classes: 8
+    output_dim: 8
+    dataset_path: data/monkey/pmd_grasp/
+    reference: "Schaffelhofer & Scherberger, eLife 2016"
+    difficulty: medium
+    tags:
+      - classification
+      - motor
+      - discrete
+      - grasp
+
+  - name: human_eeg_sleep_staging
+    task_type: multi_class
+    species: human
+    modality: eeg
+    target: sleep stage
+    metric:
+      - accuracy
+      - f1_score
+    description: |
+      Classify sleep stages (Wake, N1, N2, N3, REM) from single-channel EEG.
+      Clinical benchmark for automatic sleep scoring.
+    n_classes: 5
+    output_dim: 5
+    dataset_path: data/human/sleep_edf/
+    reference: "Sleep-EDF Database (PhysioNet)"
+    difficulty: hard
+    tags:
+      - classification
+      - clinical
+      - sleep
+      - eeg
+
+  - name: human_ecog_speech_decoding
+    task_type: regression
+    species: human
+    modality: ecog
+    target: speech acoustics (spectrogram)
+    metric:
+      - correlation
+      - r2_score
+    description: |
+      Decode speech spectrograms from ECoG recordings in speech cortex.
+      Important for brain-computer interfaces for communication.
+    n_classes: null
+    output_dim: 80  # Mel-spectrogram bins
+    dataset_path: data/human/ecog_speech/
+    reference: "Herff et al., Frontiers 2015"
+    difficulty: hard
+    tags:
+      - speech
+      - bci
+      - continuous
+      - ecog
+
+  - name: mouse_ca1_position_decoding
+    task_type: regression
+    species: mouse
+    modality: calcium
+    target: 2D position
+    metric:
+      - r2_score
+      - correlation
+    description: |
+      Decode animal position from hippocampal CA1 calcium imaging.
+      Tests spatial coding and place cell representations.
+    n_classes: null
+    output_dim: 2  # x, y coordinates
+    dataset_path: data/mouse/ca1_imaging/
+    reference: "Dombeck et al., Neuron 2010"
+    difficulty: easy
+    tags:
+      - spatial
+      - hippocampus
+      - calcium_imaging
+      - navigation
+
+  # ========================================================================
+  # Neural Encoding Tasks
+  # ========================================================================
+
+  - name: mouse_v1_natural_images_encoding
+    task_type: encoding
+    species: mouse
+    modality: spikes
+    target: firing rates
+    metric:
+      - bits_per_spike
+      - correlation
+    description: |
+      Encode visual cortex (V1) responses to natural images.
+      Predict neural activity from image features.
+    n_classes: null
+    output_dim: 128  # Number of neurons
+    dataset_path: data/mouse/v1_images/
+    reference: "Stringer et al., Science 2019"
+    difficulty: medium
+    tags:
+      - vision
+      - encoding_model
+      - natural_stimuli
+      - v1
+
+  - name: monkey_it_face_encoding
+    task_type: encoding
+    species: monkey
+    modality: spikes
+    target: firing rates
+    metric:
+      - bits_per_spike
+      - correlation
+    description: |
+      Encode inferotemporal cortex responses to face stimuli.
+      Tests high-level visual representations.
+    n_classes: null
+    output_dim: 96  # Number of neurons
+    dataset_path: data/monkey/it_faces/
+    reference: "Freiwald & Tsao, Science 2010"
+    difficulty: hard
+    tags:
+      - vision
+      - encoding_model
+      - faces
+      - it_cortex
+
+  - name: human_fmri_narrative_encoding
+    task_type: encoding
+    species: human
+    modality: fmri
+    target: voxel responses
+    metric:
+      - correlation
+      - r2_score
+    description: |
+      Encode fMRI responses during natural story listening.
+      Semantic and language processing across cortex.
+    n_classes: null
+    output_dim: 500  # Number of voxels (subset)
+    dataset_path: data/human/fmri_narratives/
+    reference: "Huth et al., Nature 2016"
+    difficulty: hard
+    tags:
+      - language
+      - fmri
+      - encoding_model
+      - semantics
+
+  # ========================================================================
+  # Forecasting Tasks
+  # ========================================================================
+
+  - name: monkey_m1_dynamics_forecast
+    task_type: forecasting
+    species: monkey
+    modality: spikes
+    target: future firing rates
+    metric:
+      - correlation
+      - mse
+    description: |
+      Forecast future neural dynamics in motor cortex.
+      Predict 100ms ahead from current activity.
+    n_classes: null
+    output_dim: 64  # Number of neurons
+    dataset_path: data/monkey/m1_dynamics/
+    reference: "Sussillo et al., Nature Neuroscience 2015"
+    difficulty: medium
+    tags:
+      - forecasting
+      - dynamics
+      - motor_cortex
+      - rnn
+
+  - name: mouse_hippocampus_sequence_prediction
+    task_type: forecasting
+    species: mouse
+    modality: spikes
+    target: future spike sequences
+    metric:
+      - correlation
+      - poisson_likelihood
+    description: |
+      Predict upcoming hippocampal sequences during replay.
+      Tests temporal coding and sequence learning.
+    n_classes: null
+    output_dim: 50  # Number of neurons
+    dataset_path: data/mouse/hpc_replay/
+    reference: "Pfeiffer & Foster, Nature 2013"
+    difficulty: hard
+    tags:
+      - forecasting
+      - sequences
+      - hippocampus
+      - replay
+
+  # ========================================================================
+  # Cross-Species Transfer Tasks
+  # ========================================================================
+
+  - name: cross_species_motor_transfer
+    task_type: regression
+    species: multi_species
+    modality: spikes
+    target: movement velocity
+    metric:
+      - r2_score
+      - correlation
+    description: |
+      Transfer motor decoding across species (mouse, monkey, human).
+      Tests generalization of motor representations.
+    n_classes: null
+    output_dim: 2  # 2D velocity
+    dataset_path: data/cross_species/motor/
+    reference: "Cross-species benchmark"
+    difficulty: hard
+    tags:
+      - transfer_learning
+      - cross_species
+      - motor
+      - generalization
+
+  - name: cross_species_visual_encoding
+    task_type: encoding
+    species: multi_species
+    modality: spikes
+    target: firing rates
+    metric:
+      - bits_per_spike
+      - correlation
+    description: |
+      Encode visual responses across species (mouse, monkey, human).
+      Tests universality of visual coding principles.
+    n_classes: null
+    output_dim: 100  # Number of neurons
+    dataset_path: data/cross_species/visual/
+    reference: "Cross-species benchmark"
+    difficulty: hard
+    tags:
+      - transfer_learning
+      - cross_species
+      - vision
+      - encoding_model
+
+  # ========================================================================
+  # Clinical & Applied Tasks
+  # ========================================================================
+
+  - name: human_eeg_epilepsy_detection
+    task_type: binary_classification
+    species: human
+    modality: eeg
+    target: seizure presence
+    metric:
+      - accuracy
+      - auc_roc
+      - f1_score
+    description: |
+      Detect epileptic seizures from EEG recordings.
+      Clinical application for seizure prediction and detection.
+    n_classes: 2
+    output_dim: 1
+    dataset_path: data/human/eeg_epilepsy/
+    reference: "CHB-MIT Scalp EEG Database"
+    difficulty: medium
+    tags:
+      - clinical
+      - epilepsy
+      - binary_classification
+      - seizure_detection
+
+  - name: human_eeg_bci_motor_imagery
+    task_type: multi_class
+    species: human
+    modality: eeg
+    target: motor imagery class
+    metric:
+      - accuracy
+      - kappa_score
+    description: |
+      Classify motor imagery tasks (left hand, right hand, feet, tongue).
+      Standard BCI Competition benchmark.
+    n_classes: 4
+    output_dim: 4
+    dataset_path: data/human/bci_motor_imagery/
+    reference: "BCI Competition IV Dataset 2a"
+    difficulty: medium
+    tags:
+      - bci
+      - motor_imagery
+      - classification
+      - eeg
+
+  - name: rat_hippocampus_memory_task
+    task_type: binary_classification
+    species: rat
+    modality: spikes
+    target: task choice (left/right)
+    metric:
+      - accuracy
+      - auc_roc
+    description: |
+      Decode choice from hippocampal activity in spatial memory task.
+      Tests working memory representations.
+    n_classes: 2
+    output_dim: 1
+    dataset_path: data/rat/hpc_memory/
+    reference: "CRCNS hc-11 dataset"
+    difficulty: easy
+    tags:
+      - memory
+      - hippocampus
+      - decision
+      - binary_classification
+
+  # ========================================================================
+  # Advanced/Research Tasks
+  # ========================================================================
+
+  - name: zebrafish_wholebrain_behavior_mapping
+    task_type: regression
+    species: zebrafish
+    modality: calcium
+    target: swim vigor
+    metric:
+      - r2_score
+      - correlation
+    description: |
+      Map whole-brain calcium imaging to swimming behavior.
+      Tests scalability to large neural populations.
+    n_classes: null
+    output_dim: 3  # tail angle, frequency, amplitude
+    dataset_path: data/zebrafish/wholebrain/
+    reference: "Ahrens et al., Nature Methods 2013"
+    difficulty: hard
+    tags:
+      - whole_brain
+      - calcium_imaging
+      - behavior
+      - zebrafish
+
+  - name: monkey_pfc_working_memory_dynamics
+    task_type: forecasting
+    species: monkey
+    modality: spikes
+    target: future population state
+    metric:
+      - correlation
+      - trajectory_distance
+    description: |
+      Forecast prefrontal cortex dynamics during working memory.
+      Tests understanding of cognitive neural dynamics.
+    n_classes: null
+    output_dim: 128  # Population state dimension
+    dataset_path: data/monkey/pfc_wm/
+    reference: "Lundqvist et al., Nature 2016"
+    difficulty: hard
+    tags:
+      - working_memory
+      - pfc
+      - dynamics
+      - cognitive
+
+# ========================================================================
+# Metadata
+# ========================================================================
+
+metadata:
+  version: "1.0.0"
+  created: "2025-10-25"
+  description: "Comprehensive evaluation suite for NeuroFMX foundation model"
+  total_tasks: 18
+  coverage:
+    species: ["mouse", "monkey", "human", "rat", "zebrafish"]
+    modalities: ["spikes", "lfp", "eeg", "ecog", "fmri", "calcium"]
+    task_types: ["decoding", "encoding", "forecasting", "classification", "regression"]
+    applications: ["bci", "clinical", "basic_neuroscience", "cognitive"]
+
+  notes: |
+    This evaluation suite is designed to comprehensively test NeuroFMX across:
+    1. Different species (cross-species generalization)
+    2. Different modalities (multi-modal learning)
+    3. Different task types (versatility)
+    4. Different difficulty levels (robustness)
+
+    For each task:
+    - Zero-shot: Evaluate frozen representations with linear probe
+    - Few-shot: Evaluate adaptation with K={1,5,10,25,50} examples
+    - Full fine-tuning: Evaluate full model adaptation
+
+    Datasets should be organized in the paths specified, with standard
+    train/val/test splits (70/15/15 by default).

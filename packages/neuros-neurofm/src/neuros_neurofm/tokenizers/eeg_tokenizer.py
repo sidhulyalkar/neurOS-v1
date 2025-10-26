@@ -10,8 +10,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Tuple
 
+from neuros_neurofm.tokenizers.base_tokenizer import BaseTokenizer, TokenizedSequence
 
-class EEGTokenizer(nn.Module):
+
+class EEGTokenizer(BaseTokenizer):
     """
     Tokenizer for EEG data.
 
@@ -36,13 +38,13 @@ class EEGTokenizer(nn.Module):
         use_spectral: bool = True,
         dropout: float = 0.1
     ):
-        super().__init__()
+        super().__init__(d_model=d_model)
 
         self.n_channels = n_channels
-        self.d_model = d_model
         self.seq_len = seq_len
         self.sfreq = sfreq
         self.use_spectral = use_spectral
+        self.default_sampling_rate = sfreq
 
         # Spatial encoding across channels
         # Treats channels as a spatial dimension
@@ -83,18 +85,28 @@ class EEGTokenizer(nn.Module):
         # Dropout
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
+        t0: float = 0.0,
+        return_sequence: bool = True
+    ) -> Tuple[torch.Tensor, Optional[TokenizedSequence]]:
         """
         Forward pass.
 
         Args:
             x: EEG data (batch, time, channels)
             mask: Optional mask (batch, time)
+            t0: Start time in seconds
+            return_sequence: If True, also return TokenizedSequence
 
         Returns:
             tokens: (batch, seq_len, d_model)
+            sequence: TokenizedSequence (if return_sequence=True, else None)
         """
         batch_size = x.shape[0]
+        input_time_len = x.shape[1]
 
         # Transpose to (batch, channels, time) for conv
         x = x.transpose(1, 2)
@@ -144,8 +156,30 @@ class EEGTokenizer(nn.Module):
                 self.seq_len
             ).squeeze(1) > 0.5
             x = x * mask_pooled.unsqueeze(-1)
+        else:
+            mask_pooled = None
 
-        return x
+        # Create TokenizedSequence if requested
+        sequence = None
+        if return_sequence:
+            # Compute dt based on original input and downsampled output
+            input_duration = input_time_len / self.sfreq
+            dt = input_duration / self.seq_len
+
+            sequence = self.create_sequence(
+                tokens=x,
+                t0=t0,
+                dt=dt,
+                mask=mask_pooled,
+                metadata={
+                    'modality': 'eeg',
+                    'n_channels': self.n_channels,
+                    'original_sfreq': self.sfreq,
+                    'use_spectral': self.use_spectral
+                }
+            )
+
+        return x, sequence
 
 
 class SpectralEncoder(nn.Module):
@@ -268,6 +302,8 @@ class SpectralEncoder(nn.Module):
 
 # Example usage
 if __name__ == '__main__':
+    from neuros_neurofm.tokenizers.temporal_alignment import TemporalAligner, InterpolationMethod
+
     # Test tokenizer
     batch_size = 4
     time_len = 256  # 2 seconds at 128 Hz
@@ -284,9 +320,51 @@ if __name__ == '__main__':
     # Dummy input
     eeg_data = torch.randn(batch_size, time_len, n_channels)
 
-    # Forward pass
-    tokens = tokenizer(eeg_data)
+    # Forward pass (backward compatible)
+    tokens, sequence = tokenizer(eeg_data, t0=0.0, return_sequence=True)
 
     print(f"Input shape: {eeg_data.shape}")
     print(f"Output shape: {tokens.shape}")  # Should be (4, 100, 512)
     print(f"Tokenizer parameters: {sum(p.numel() for p in tokenizer.parameters()):,}")
+
+    if sequence is not None:
+        print(f"\nTokenizedSequence: {sequence}")
+        print(f"Duration: {sequence.duration:.3f}s")
+        print(f"Sampling rate: {sequence.sampling_rate:.1f}Hz")
+
+    # Example: Multi-modal alignment with video
+    print("\n=== Multi-modal Alignment Example ===")
+
+    # Create a simulated video sequence (30 fps)
+    video_tokens = torch.randn(batch_size, 60, 512)  # 2 seconds at 30fps
+    video_seq = TokenizedSequence(
+        tokens=video_tokens,
+        t0=0.0,
+        dt=1/30.0,
+        mask=torch.ones(batch_size, 60, dtype=torch.bool),
+        metadata={'modality': 'video', 'fps': 30}
+    )
+
+    # Align EEG and video to common 50 Hz grid
+    aligner = TemporalAligner()
+    aligned_eeg, aligned_video = aligner.align_to_grid(
+        sequences=[sequence, video_seq],
+        target_dt=0.02,  # 50 Hz
+        method=InterpolationMethod.LINEAR
+    )
+
+    print(f"Aligned EEG: {aligned_eeg}")
+    print(f"Aligned video: {aligned_video}")
+
+    # Validate alignment
+    validation = aligner.validate_alignment([aligned_eeg, aligned_video])
+    print(f"Alignment valid: {validation['valid']}")
+
+    # Create sliding windows
+    windows = aligner.create_windows(
+        sequences=[aligned_eeg, aligned_video],
+        window_size=1.0,  # 1 second windows
+        hop_size=0.5,     # 50% overlap
+        align_first=False  # Already aligned
+    )
+    print(f"Created {len(windows)} windows")
