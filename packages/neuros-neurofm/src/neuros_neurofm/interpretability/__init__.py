@@ -12,6 +12,33 @@ Core Components:
 - SAE visualization tools
 - Feature analysis and attribution
 
+Fractal Geometry Suite:
+- Temporal fractal metrics (Higuchi FD, DFA, Hurst, spectral slope)
+- Graph fractal dimension (box-covering algorithm)
+- Multifractal spectrum analysis
+- Fractal regularizers and priors for training
+- Fractal stimulus generation (fBm, cascades, colored noise)
+- Biophysical fractal simulators (fractional OU, dendrite growth)
+- Real-time fractal probes (latent FD tracking, attention-fractal coupling)
+
+Circuit Inference:
+- Latent RNN extraction (minimal computational circuits)
+- DUNL sparse coding for mixed selectivity decomposition
+- Feature visualization via activation maximization
+- Recurrent dynamics analysis (fixed points, stability)
+
+Biophysical Modeling:
+- Differentiable spiking networks (LIF, Izhikevich, Hodgkin-Huxley)
+- Surrogate gradients for backpropagation through spikes
+- Dale's law enforcement (E/I neuron separation)
+- Biologically-constrained learning
+
+Causal Interventions:
+- Activation patching for causal tracing
+- Systematic ablation studies (neurons, layers, components)
+- Path analysis and information flow
+- Causal graph construction
+
 Brain Alignment:
 - CCA (Canonical Correlation Analysis)
 - RSA (Representational Similarity Analysis)
@@ -176,6 +203,73 @@ from neuros_neurofm.interpretability.reporting import (
     Figure,
 )
 
+# Fractal Geometry Suite
+from neuros_neurofm.interpretability.fractals import (
+    HiguchiFractalDimension,
+    DetrendedFluctuationAnalysis,
+    HurstExponent,
+    SpectralSlope,
+    GraphFractalDimension,
+    MultifractalSpectrum,
+    FractalMetricsBundle,
+    SpectralPrior,
+    MultifractalSmoothness,
+    GraphFractalityPrior,
+    FractalRegularizationLoss,
+    FractionalBrownianMotion,
+    ColoredNoise,
+    MultiplicativeCascade,
+    FractalPatterns,
+    FractionalOU,
+    DendriteGrowthSimulator,
+    FractalNetworkModel,
+    LatentFDTracker,
+    AttentionFractalCoupling,
+    CausalScaleAblation,
+)
+
+# Circuit Inference Suite
+from neuros_neurofm.interpretability.circuits import (
+    LatentCircuitModel,
+    CircuitFitter,
+    RecurrentDynamicsAnalyzer,
+    DUNLModel,
+    MixedSelectivityAnalyzer,
+    FactorDecomposition,
+    FeatureVisualizer,
+    OptimalStimulus,
+    ActivationMaximization,
+)
+
+# Biophysical Modeling Suite
+from neuros_neurofm.interpretability.biophysical import (
+    SurrogateGradient,
+    LeakyIntegrateFireNeuron,
+    IzhikevichNeuron,
+    HodgkinHuxleyNeuron,
+    SpikingNeuralNetwork,
+    DalesLawConstraint,
+    DalesLinear,
+    EINetworkClassifier,
+    RecurrentDalesNetwork,
+    DalesLossRegularizer,
+)
+
+# Causal Interventions Suite
+from neuros_neurofm.interpretability.interventions import (
+    ActivationPatcher,
+    ResidualStreamPatcher,
+    AttentionPatcher,
+    MLPPatcher,
+    NeuronAblation,
+    LayerAblation,
+    ComponentAblation,
+    AblationStudy,
+    PathAnalyzer,
+    InformationFlow,
+    CausalGraph as InterventionCausalGraph,  # Alias to avoid conflict
+)
+
 try:
     from neuros_neurofm.interpretability.latent_viz import LatentSpaceVisualizer
     _has_latent_viz = True
@@ -275,6 +369,65 @@ __all__ = [
     'MechIntReporter',
     'ReportSection',
     'Figure',
+
+    # Fractal Geometry Suite
+    'HiguchiFractalDimension',
+    'DetrendedFluctuationAnalysis',
+    'HurstExponent',
+    'SpectralSlope',
+    'GraphFractalDimension',
+    'MultifractalSpectrum',
+    'FractalMetricsBundle',
+    'SpectralPrior',
+    'MultifractalSmoothness',
+    'GraphFractalityPrior',
+    'FractalRegularizationLoss',
+    'FractionalBrownianMotion',
+    'ColoredNoise',
+    'MultiplicativeCascade',
+    'FractalPatterns',
+    'FractionalOU',
+    'DendriteGrowthSimulator',
+    'FractalNetworkModel',
+    'LatentFDTracker',
+    'AttentionFractalCoupling',
+    'CausalScaleAblation',
+
+    # Circuit Inference Suite
+    'LatentCircuitModel',
+    'CircuitFitter',
+    'RecurrentDynamicsAnalyzer',
+    'DUNLModel',
+    'MixedSelectivityAnalyzer',
+    'FactorDecomposition',
+    'FeatureVisualizer',
+    'OptimalStimulus',
+    'ActivationMaximization',
+
+    # Biophysical Modeling Suite
+    'SurrogateGradient',
+    'LeakyIntegrateFireNeuron',
+    'IzhikevichNeuron',
+    'HodgkinHuxleyNeuron',
+    'SpikingNeuralNetwork',
+    'DalesLawConstraint',
+    'DalesLinear',
+    'EINetworkClassifier',
+    'RecurrentDalesNetwork',
+    'DalesLossRegularizer',
+
+    # Causal Interventions Suite
+    'ActivationPatcher',
+    'ResidualStreamPatcher',
+    'AttentionPatcher',
+    'MLPPatcher',
+    'NeuronAblation',
+    'LayerAblation',
+    'ComponentAblation',
+    'AblationStudy',
+    'PathAnalyzer',
+    'InformationFlow',
+    'InterventionCausalGraph',
 ]
 
 if _has_latent_viz:
