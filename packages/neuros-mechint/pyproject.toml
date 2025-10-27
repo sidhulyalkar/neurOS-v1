@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-mechint"
+version = "0.1.0"
+description = "Mechanistic Interpretability Toolbox for Neural Networks"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Team", email = "team@neuros.ai"}
+]
+keywords = [
+    "mechanistic interpretability",
+    "neural networks",
+    "fractal analysis",
+    "circuit discovery",
+    "biophysical modeling",
+    "causal interventions",
+    "neuroscience",
+    "deep learning",
+    "sparse autoencoders",
+    "brain alignment",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.2.0",
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "tqdm>=4.65.0",
+    "einops>=0.6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.3.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.3.0",
+    "isort>=5.12.0",
+    "mypy>=1.3.0",
+    "flake8>=6.0.0",
+]
+
+viz = [
+    "networkx>=3.0",
+    "plotly>=5.14.0",
+    "umap-learn>=0.5.3",
+    "pandas>=2.0.0",
+]
+
+notebooks = [
+    "jupyter>=1.0.0",
+    "ipykernel>=6.23.0",
+    "ipywidgets>=8.0.0",
+]
+
+all = [
+    "neuros-mechint[dev,viz,notebooks]",
+]
+
+[project.urls]
+Homepage = "https://github.com/neuros-ai/neuros-mechint"
+Documentation = "https://neuros-mechint.readthedocs.io"
+Repository = "https://github.com/neuros-ai/neuros-mechint"
+"Bug Tracker" = "https://github.com/neuros-ai/neuros-mechint/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--cov=neuros_mechint",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
