@@ -1,0 +1,352 @@
+<neurofmx_plan version="1.0">
+  <phase id="0" name="hardening">
+    <tasks>
+      <task>Create a single CLI entrypoint using Hydra configs: neuros_neurofm/train.py</task>
+      <task>Define a unified Config schema: modalities, tokenizers, fusion, objectives, optimizer, scheduler, logging, checkpointing</task>
+      <task>Add strict tensor shape/timebase contracts and unit tests for tokenizers & fusion</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/training/train.py</file>
+      <file>configs/exp/multimodal_foundation.yaml</file>
+      <file>tests/unit/test_shapes_and_masks.py</file>
+    </deliverables>
+  </phase>
+
+  <phase id="1" name="data_hub_and_tokenizers">
+    <tasks>
+      <task>Extend datasets: EEG, ECoG, LFP, spikes, fMRI, video/pose, audio/physio, eye-tracking, text/task metadata</task>
+      <task>Implement WebDataset shard writers and iterable dataset with resumable cursors</task>
+      <task>Implement per-modality tokenizers with temporal anchors; export (tokens, t0, dt, mask)</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/datasets/webdataset_writer.py</file>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/tokenizers/{eeg,ecog,lfp,spikes,fmri,video,pose,audio,eye,text}.py</file>
+      <file>docs/DATA_REGISTRY.md</file>
+    </deliverables>
+  </phase>
+
+  <phase id="2" name="fusion_and_backbones">
+    <tasks>
+      <task>Add FusionBlock registry: early, mid, late, product-of-experts</task>
+      <task>Support Transformer and SSM backbones; expose fusion schedule in config</task>
+      <task>Add modality dropout, time/channel masking, and spec-like augmentations</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/models/fusion_blocks.py</file>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/models/backbones/{transformer,ssm}.py</file>
+      <file>tests/unit/test_fusion_and_masking.py</file>
+    </deliverables>
+  </phase>
+
+  <phase id="3" name="objectives_and_curriculum">
+    <tasks>
+      <task>Implement masked modeling per modality</task>
+      <task>Add cross-modal contrastive alignment (InfoNCE/CMC)</task>
+      <task>Add predictive coding (multi-horizon forecasting) and denoising diffusion head</task>
+      <task>Define a staged curriculum: unimodal → pairwise → full multimodal</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/losses/{masked,contrastive,forecasting,diffusion}.py</file>
+      <file>configs/curriculum/stages.yaml</file>
+    </deliverables>
+  </phase>
+
+  <phase id="4" name="scale_out_training">
+    <tasks>
+      <task>Integrate Ray Train with PyTorch FSDP (or DeepSpeed ZeRO-3)</task>
+      <task>Enable bf16, activation checkpointing, gradient accumulation</task>
+      <task>Implement checkpointing and resumable data iterators</task>
+      <task>Integrate MLflow and Weights & Biases</task>
+    </tasks>
+    <deliverables>
+      <file>infra/k8s/ray_cluster.yaml</file>
+      <file>packages/neuros-neurofm/training/ray_trainer.py</file>
+      <file>configs/train/distributed.yaml</file>
+    </deliverables>
+  </phase>
+
+  <phase id="5" name="hyperparameter_search">
+    <tasks>
+      <task>Replace optimization/hyperparameter_search.py with Ray Tune (ASHA/PBT)</task>
+      <task>Define search spaces: width, depth, SSM kernel size, LR/schedule, fusion freq, masking ratios, objective weights</task>
+      <task>Emit W&B/MLflow artifacts and compare via scaling curves</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/optimization/ray_tune_search.py</file>
+      <file>reports/scaling_laws.ipynb</file>
+    </deliverables>
+  </phase>
+
+  <phase id="6" name="mech_int_suite">
+    <tasks>
+      <task>Add linear/MLP probes per block</task>
+      <task>Implement activation patching and head/block ablations with auto-report</task>
+      <task>Integrate SAEs on latent streams with feature dictionaries and visualizations</task>
+      <task>Add model-to-brain alignment (CCA/PLS/RSA) with noise ceilings</task>
+      <task>Add dynamics: Koopman estimates, Lyapunov proxies, manifold plots</task>
+      <task>Implement cross-domain shared-feature mining</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/interpretability/{probes,patching,ablations,sae,alignment,dynamics,concepts}.py</file>
+      <file>examples/mech_int_tutorial.ipynb</file>
+    </deliverables>
+  </phase>
+
+  <phase id="7" name="evaluation_matrix">
+    <tasks>
+      <task>Create eval task registry (species, tasks, modalities, metrics)</task>
+      <task>Implement zero-/few-shot transfer evaluation pipelines</task>
+      <task>Produce transfer matrices and gap-to-supervised reports</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/evaluation/registry.py</file>
+      <file>configs/eval/eval_tasks.yaml</file>
+      <file>reports/transfer_matrices/</file>
+    </deliverables>
+  </phase>
+
+  <phase id="8" name="serving_and_adapters">
+    <tasks>
+      <task>Upgrade FastAPI server with routes: /embed, /align, /decode, /interpret</task>
+      <task>Add LoRA/IA³ adapters for quick task specialization</task>
+      <task>Provide model cards and usage policies</task>
+    </tasks>
+    <deliverables>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/api/server.py</file>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/adapters/lora.py</file>
+      <file>MODEL_CARD.md</file>
+    </deliverables>
+  </phase>
+
+  <phase id="9" name="governance_and_privacy">
+    <tasks>
+      <task>Implement dataset consent/licensing registry</task>
+      <task>Add de-identification utilities for video/audio</task>
+      <task>Gate API endpoints by role and dataset policy</task>
+    </tasks>
+    <deliverables>
+      <file>docs/DATA_GOVERNANCE.md</file>
+      <file>packages/neuros-neurofm/src/neuros_neurofm/datasets/deid_utils.py</file>
+      <file>api_policies.yaml</file>
+    </deliverables>
+  </phase>
+</neurofmx_plan>
+<?xml version="1.0" encoding="UTF-8"?>
+<neurofmx_mech_int_expansion version="1.0" repo="sidhulyalkar/neurOS-v1" package_path="packages/neuros-neurofm">
+  <goals>
+    <goal>Build a comprehensive mechanistic-interpretability (Mech-Int) suite for NeuroFMx spanning causal graphs, energy/information flow, topology/geometry, control theory, counterfactuals, SAEs, alignment, and meta-interpretability.</goal>
+    <goal>Ensure tools run on multimodal time-series (EEG/ECoG/LFP/spikes/fMRI/video/pose/audio/physio/text) and integrate with existing training/eval APIs.</goal>
+    <goal>Provide reproducible, scalable implementations with Ray-compatible batch jobs and MLflow/W&amp;B logging.</goal>
+  </goals>
+
+  <layout_root>packages/neuros-neurofm/src/neuros_neurofm/interpretability</layout_root>
+  <new_modules>
+    <module name="graph_builder.py" summary="Temporal causal graph estimation &amp; perturbation tracing"/>
+    <module name="energy_flow.py" summary="Information/energy landscape, mutual information, entropy production"/>
+    <module name="geometry_topology.py" summary="Latent manifold geometry + persistent homology (TDA)"/>
+    <module name="control_dynamics.py" summary="Koopman operators, controllability/observability, stability"/>
+    <module name="concept_sae.py" summary="Hierarchical sparse autoencoders, concept dictionaries, causal SAE probes"/>
+    <module name="alignment.py" summary="Model↔brain and cross-model alignment (CCA/PLS/RSA), shared axes"/>
+    <module name="meta_dynamics.py" summary="Training-time representational trajectories, gradient attribution over epochs"/>
+    <module name="counterfactuals.py" summary="Counterfactual latent surgery, do-calculus interventions, synthetic lesions"/>
+    <module name="attribution.py" summary="Input/channel/region attributions (IG/DeepLIFT), generative path attribution"/>
+    <module name="reporting.py" summary="Unified report generator producing markdown/HTML with figures and tables"/>
+  </new_modules>
+
+  <dependencies>
+    <pip>
+      <pkg>torch</pkg>
+      <pkg>numpy</pkg>
+      <pkg>scipy</pkg>
+      <pkg>scikit-learn</pkg>
+      <pkg>umap-learn</pkg>
+      <pkg>networkx</pkg>
+      <pkg>pywhy-graphlib</pkg>
+      <pkg>tigramite</pkg>
+      <pkg>hyppo</pkg>
+      <pkg>statsmodels</pkg>
+      <pkg>pot</pkg>
+      <pkg>pyrcca</pkg>
+      <pkg>pingouin</pkg>
+      <pkg>pyriemann</pkg>
+      <pkg>kmapper</pkg>
+      <pkg>gudhi</pkg>
+      <pkg>mlflow</pkg>
+      <pkg>wandb</pkg>
+      <pkg>ray[tune]</pkg>
+    </pip>
+    <notes>Prefer optional imports with clear error messages to keep the base install light. Gate heavy features behind extras: neuros-neurofm[mechint].</notes>
+  </dependencies>
+
+  <data_contracts>
+    <latent_stream>
+      <shape>B x T x D</shape>
+      <fields>
+        <field name="timestamps" type="float32[T]"/>
+        <field name="modality" type="str"/>
+        <field name="layer_id" type="int"/>
+        <field name="mask" type="bool[T]" optional="true"/>
+      </fields>
+      <note>All interpretability modules accept a LatentBatch dict with these keys, plus optional metadata (region_map, channel_map, subject_id, species, task).</note>
+    </latent_stream>
+  </data_contracts>
+
+  <implementations>
+    <file name="graph_builder.py">
+      <tasks>
+        <task>Implement Neural Granger causality on latent time-series with block/channel granularity.</task>
+        <task>Support time-varying causal graphs: sliding windows with lasso/elastic-net regularization; export adjacency over time.</task>
+        <task>Perturbation engine: inject localized latent perturbations; compute causal effect sizes on outputs and alignment metrics.</task>
+        <task>Graph alignment: correlate discovered graphs with anatomical priors (if provided).</task>
+      </tasks>
+      <apis>
+        <api>build_causal_graph(latent: LatentBatch, granularity: {layer,channel}, window: int) -&gt; CausalGraphSeries</api>
+        <api>simulate_perturbation(latent, nodes, magnitude, duration) -&gt; EffectReport</api>
+      </apis>
+    </file>
+
+    <file name="energy_flow.py">
+      <tasks>
+        <task>Estimate mutual information I(X;Z_l), I(Z_l;Y) across layers using MINE or kNN estimators.</task>
+        <task>Approximate energy landscape via score estimation or local quadratic fits; visualize basins.</task>
+        <task>Compute entropy production proxies along trajectories.</task>
+      </tasks>
+    </file>
+
+    <file name="geometry_topology.py">
+      <tasks>
+        <task>Compute manifold curvature and divergence for latent trajectories.</task>
+        <task>Persistent homology (Gudhi): detect loops/holes; compare across species/tasks.</task>
+        <task>UMAP/Isomap embeddings with temporal coloring; export interactive plots.</task>
+      </tasks>
+    </file>
+
+    <file name="control_dynamics.py">
+      <tasks>
+        <task>Local linearization to estimate Koopman operators and eigenmodes.</task>
+        <task>Compute controllability/observability Gramians and indices per latent.</task>
+        <task>Estimate Lyapunov exponents; plot phase portraits and stability spectra.</task>
+      </tasks>
+    </file>
+
+    <file name="concept_sae.py">
+      <tasks>
+        <task>Train sparse autoencoders on hidden states; support multi-layer SAEs.</task>
+        <task>Build feature dictionaries; link features to channels/regions/modalities.</task>
+        <task>Causal SAE probes: reinsert features; measure output/brain-alignment effects.</task>
+      </tasks>
+    </file>
+
+    <file name="alignment.py">
+      <tasks>
+        <task>Model↔brain alignment (CCA/PLS/RSA) with noise ceilings + bootstrap CIs.</task>
+        <task>Cross-model shared-subspace discovery; produce shared axes library.</task>
+        <task>Drift tracking across checkpoints; align to plasticity measures.</task>
+      </tasks>
+    </file>
+
+    <file name="counterfactuals.py">
+      <tasks>
+        <task>Latent surgery: targeted edits to hidden states; regenerate outputs/decodings.</task>
+        <task>Do-calculus interventions: P(Y|do(Z_k=z)); log causal response curves.</task>
+        <task>Synthetic lesions: knock-out heads/blocks/subcircuits; measure compensation.</task>
+      </tasks>
+    </file>
+
+    <file name="attribution.py">
+      <tasks>
+        <task>Integrated Gradients / DeepLIFT for input channels, brain regions, and generative decoders.</task>
+        <task>Generative path attribution: decompose reconstructions into contributing subcircuits.</task>
+      </tasks>
+    </file>
+
+    <file name="meta_dynamics.py">
+      <tasks>
+        <task>Track representational trajectories across training checkpoints.</task>
+        <task>Gradient-flow analytics: which parameters/circuits consolidate over time.</task>
+        <task>Detect emergence/birth of interpretable features.</task>
+      </tasks>
+    </file>
+
+    <file name="reporting.py">
+      <tasks>
+        <task>Produce unified HTML/MD reports with plots/tables for each module; export to MLflow/W&amp;B.</task>
+      </tasks>
+    </file>
+  </implementations>
+
+  <integration>
+    <hooks>
+      <hook>Training loop: register hooks to sample hidden states at configured layers/timesteps; write to object storage as shards.</hook>
+      <hook>Evaluation pipeline: add mech-int runners to eval_registry; produce a per-run interpretability report card.</hook>
+      <hook>FastAPI: /interpret endpoint to trigger selected analyses on uploaded activations or live runs.</hook>
+    </hooks>
+  </integration>
+
+  <configs>
+    <hydra>
+      <file>configs/mechint/default.yaml</file>
+      <content><![CDATA[
+mechint:
+  sample_layers: [2, 6, 10]
+  save_hidden_every_n_steps: 200
+  causal_graph:
+    window: 256
+    alpha: 0.001
+  sae:
+    k_features: 2048
+    l1: 1e-3
+  alignment:
+    method: CCA
+    bootstrap: 200
+  control:
+    koopman_window: 128
+  topology:
+    rips_maxdim: 2
+  counterfactuals:
+    magnitude: 0.5
+    duration: 20
+      ]]></content>
+    </hydra>
+  </configs>
+
+  <tests>
+    <unit>
+      <test>tests/unit/test_mechint_causal_graph.py</test>
+      <test>tests/unit/test_mechint_sae.py</test>
+      <test>tests/unit/test_mechint_alignment.py</test>
+      <test>tests/unit/test_mechint_counterfactuals.py</test>
+    </unit>
+    <integration>
+      <test>tests/test_mechint_end_to_end.py</test>
+    </integration>
+  </tests>
+
+  <ray_jobs>
+    <job name="mechint_eval_job">
+      <entry>python -m neuros_neurofm.evaluation.run_mechint +mechint=default ckpt=LATEST datablob=s3://neurofmx/runs/LATEST/hidden_shards/</entry>
+      <resources>1 GPU, 8 CPU</resources>
+    </job>
+  </ray_jobs>
+
+  <metrics>
+    <metric>Graph causality strength (normalized), stability over time</metric>
+    <metric>Mutual information curves per layer</metric>
+    <metric>Topological features (Betti numbers) across tasks/species</metric>
+    <metric>Controllability/observability indices distribution</metric>
+    <metric>SAE feature causal scores and cross-modal activation patterns</metric>
+    <metric>Alignment (CCA/RSA) with noise-ceiling correction</metric>
+    <metric>Counterfactual effect sizes on decoding/behavior</metric>
+  </metrics>
+
+  <security_and_ethics>
+    <note>Respect dataset licenses and privacy; gate /interpret for protected datasets. Strip PHI from reports.</note>
+  </security_and_ethics>
+
+  <usage_examples>
+    <example>python -m neuros_neurofm.training.train +exp=multimodal_foundation +mechint.save_hidden_every_n_steps=100</example>
+    <example>python -m neuros_neurofm.evaluation.run_mechint task=alignment ckpt=PATH/TO/CKPT data=PATH/TO/HIDDEN</example>
+    <example>curl -X POST http://localhost:8000/interpret -F "task=causal_graph" -F "hidden=@latent.pt"</example>
+  </usage_examples>
+</neurofmx_mech_int_expansion>
+

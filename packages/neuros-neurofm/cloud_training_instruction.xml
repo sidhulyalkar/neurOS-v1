@@ -1,0 +1,687 @@
+<instruction_pack name="neurOS_ORION_cloud_training" version="1.0">
+  <objective>
+    Stand up a reproducible GPU training environment for neurOS/ORION (Mamba-SSM + Perceiver) with:
+    (1) Terraform-provisioned GPU Kubernetes,
+    (2) KubeRay-managed Ray cluster,
+    (3) NCCL/UCX tuned for H100 HGX with NVLink/NVSwitch,
+    (4) S3-compatible checkpoints and metrics,
+    (5) Simple make targets to build/deploy/tear down.
+
+    Primary target: CoreWeave CKS (managed K8s, H100 HGX, official Terraform provider).
+    Alternate target: Crusoe Cloud via Terraform → K3s → KubeRay.
+  </objective>
+
+  <assumptions>
+    - You have container images for training (PyTorch 2.4+/CUDA 12.x, FlashAttention, xFormers, Mamba kernels) published to a registry (GhCR/ECR/DockerHub).
+    - You will supply API keys via environment or a local tfvars file; secrets never committed.
+    - Storage: Use CoreWeave Object Storage (S3-compatible) or Crusoe’s S3-compatible bucket for checkpoints.
+  </assumptions>
+
+  <references>
+    <ref name="CoreWeave Terraform Provider">https://docs.coreweave.com/docs/products/cks/terraform/about</ref>
+    <ref name="CoreWeave provider registry">https://registry.terraform.io/providers/coreweave/coreweave/latest/docs</ref>
+    <ref name="Crusoe Terraform quickstart">https://docs.crusoecloud.com/quickstart/terraform</ref>
+    <ref name="Crusoe TF provider">https://github.com/crusoecloud/terraform-provider-crusoe</ref>
+    <ref name="Crusoe K3s guide">https://www.crusoe.ai/resources/blog/rancher-k3s-on-crusoe-cloud</ref>
+    <ref name="Terraform Kubernetes provider">https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs</ref>
+  </references>
+
+  <repo_layout>
+    <![CDATA[
+    infra/
+      coreweave/
+        main.tf
+        variables.tf
+        outputs.tf
+        terraform.tfvars.example
+      crusoe/
+        main.tf
+        variables.tf
+        outputs.tf
+        cloudinit-k3s.yaml
+        terraform.tfvars.example
+      k8s/
+        00-namespace.yaml
+        01-nvidia-device-plugin.yaml
+        02-csi-s3-secret.yaml
+        03-s3-bucket-pvc.yaml
+        10-kuberay-operator.yaml
+        20-raycluster-orion.yaml
+      makefile
+      README.md
+    ]]>
+  </repo_layout>
+
+  <!-- ===================== -->
+  <!-- 1) COREWEAVE (PRIMARY) -->
+  <!-- ===================== -->
+
+  <terraform_coreweave description="Managed K8s (CKS) + H100 HGX">
+    <files>
+      <file path="infra/coreweave/main.tf"><![CDATA[
+terraform {
+  required_version = ">= 1.6"
+  required_providers {
+    coreweave = {
+      source  = "coreweave/coreweave"
+      version = "~> 0.5"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.33"
+    }
+  }
+}
+
+provider "coreweave" {
+  # Set via ENV: COREWEAVE_API_KEY, COREWEAVE_ACCOUNT_ID
+  # or use variables below (not recommended for commits).
+  api_key     = var.coreweave_api_key
+  account_id  = var.coreweave_account_id
+}
+
+# Create a CKS Kubernetes cluster with H100 HGX-capable node group(s)
+resource "coreweave_cks_cluster" "orion" {
+  name           = var.cluster_name
+  kubernetes_version = var.k8s_version
+  region         = var.region
+
+  # System pool (small)
+  node_pools = [
+    {
+      name        = "system-pool"
+      node_class  = "cpu"
+      replicas    = 3
+      machine_type = "cpu.small"
+    }
+  ]
+
+  # GPU pool (H100 HGX). Example machine_type may vary by region/stock; use CoreWeave docs/catalog.
+  gpu_node_pools = [
+    {
+      name          = "hgx-h100-pool"
+      gpu           = "H100"
+      machine_type  = var.gpu_machine_type   # e.g., "gpu.h100.80gb.hgx"
+      replicas      = var.gpu_replicas       # 1 node with 8x H100 (HGX)
+      preemptible   = false
+      labels = {
+        gpu = "h100"
+        fabric = "nvlink"
+      }
+      taints = [{
+        key = "nvidia.com/gpu"
+        value = "present"
+        effect = "NoSchedule"
+      }]
+    }
+  ]
+
+  # Addon: CoreWeave-managed CSI + NVIDIA drivers are typically enabled by default on CKS.
+  # Keep defaults or enable as needed per docs.
+}
+
+# Export kubeconfig for Kubernetes provider
+data "coreweave_cks_cluster_kubeconfig" "orion" {
+  id = coreweave_cks_cluster.orion.id
+}
+
+provider "kubernetes" {
+  host                   = data.coreweave_cks_cluster_kubeconfig.orion.host
+  cluster_ca_certificate = base64decode(data.coreweave_cks_cluster_kubeconfig.orion.cluster_ca_certificate)
+  token                  = data.coreweave_cks_cluster_kubeconfig.orion.token
+}
+      ]]></file>
+
+      <file path="infra/coreweave/variables.tf"><![CDATA[
+variable "coreweave_api_key" {
+  type        = string
+  sensitive   = true
+  description = "CoreWeave API key (or set COREWEAVE_API_KEY env)"
+  default     = null
+}
+
+variable "coreweave_account_id" {
+  type        = string
+  sensitive   = true
+  description = "CoreWeave account id (or set COREWEAVE_ACCOUNT_ID env)"
+  default     = null
+}
+
+variable "cluster_name" {
+  type        = string
+  default     = "orion-cks"
+}
+
+variable "k8s_version" {
+  type        = string
+  default     = "1.29"
+}
+
+variable "region" {
+  type        = string
+  default     = "ORD" # example; pick per CoreWeave docs
+}
+
+variable "gpu_machine_type" {
+  type        = string
+  default     = "gpu.h100.80gb.hgx"
+}
+
+variable "gpu_replicas" {
+  type        = number
+  default     = 1   # single HGX node (8x H100) to start
+}
+      ]]></file>
+
+      <file path="infra/coreweave/outputs.tf"><![CDATA[
+output "kubeconfig_host" {
+  value = data.coreweave_cks_cluster_kubeconfig.orion.host
+}
+      ]]></file>
+
+      <file path="infra/coreweave/terraform.tfvars.example"><![CDATA[
+cluster_name       = "orion-cks"
+k8s_version        = "1.29"
+region             = "ORD"
+gpu_machine_type   = "gpu.h100.80gb.hgx"
+gpu_replicas       = 1
+# Prefer env vars: COREWEAVE_API_KEY, COREWEAVE_ACCOUNT_ID
+      ]]></file>
+    </files>
+  </terraform_coreweave>
+
+  <!-- ===================== -->
+  <!-- 2) CRUSOE (ALTERNATE) -->
+  <!-- ===================== -->
+
+  <terraform_crusoe description="Provision H100 instances + bootstrap K3s + KubeRay">
+    <files>
+      <file path="infra/crusoe/main.tf"><![CDATA[
+terraform {
+  required_version = ">= 1.6"
+  required_providers {
+    crusoe = {
+      source  = "crusoecloud/crusoe"
+      version = "~> 0.5"
+    }
+  }
+}
+
+provider "crusoe" {
+  # Set via env: CRUSOE_API_TOKEN
+  token = var.crusoe_api_token
+}
+
+variable "crusoe_api_token" {
+  type        = string
+  sensitive   = true
+  default     = null
+}
+
+variable "region" {
+  type    = string
+  default = "us-northcentral" # example; see Crusoe regions
+}
+
+variable "h100_instance_type" {
+  type    = string
+  default = "gpu.h100-80gb.hgx.8x" # example; check Crusoe catalog
+}
+
+variable "node_count" {
+  type    = number
+  default = 1
+}
+
+# Create a security group (SSH + K8s control plane ports as needed)
+resource "crusoe_security_group" "k3s" {
+  name        = "orion-k3s-sg"
+  description = "Security group for K3s cluster nodes"
+  region      = var.region
+
+  ingress {
+    protocol = "tcp"
+    port_range = "22"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Add ports as needed for K8s API (6443) and NodePorts if exposing externally
+  ingress {
+    protocol = "tcp"
+    port_range = "6443"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    protocol = "-1"
+    port_range = "0-65535"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Provision H100 HGX instances and install K3s via cloud-init
+resource "crusoe_instance" "h100_nodes" {
+  count       = var.node_count
+  name        = "orion-h100-${count.index}"
+  region      = var.region
+  type        = var.h100_instance_type
+  image       = "ubuntu-22.04"
+  ssh_key_ids = [] # supply SSH key id(s) or configure later
+  security_group_ids = [crusoe_security_group.k3s.id]
+
+  user_data = file("${path.module}/cloudinit-k3s.yaml")
+}
+
+output "master_public_ip" {
+  value = crusoe_instance.h100_nodes[0].public_ip
+}
+      ]]></file>
+
+      <file path="infra/crusoe/variables.tf"><![CDATA[
+# See main.tf variables
+      ]]></file>
+
+      <file path="infra/crusoe/outputs.tf"><![CDATA[
+output "node_ips" {
+  value = [for n in crusoe_instance.h100_nodes : n.public_ip]
+}
+      ]]></file>
+
+      <file path="infra/crusoe/cloudinit-k3s.yaml"><![CDATA[
+#cloud-config
+package_update: true
+packages:
+  - curl
+  - git
+  - nfs-common
+  - jq
+  - containerd
+write_files:
+  - path: /etc/sysctl.d/90-nccl.conf
+    content: |
+      net.core.rmem_max=134217728
+      net.core.wmem_max=134217728
+      net.core.netdev_max_backlog=250000
+      net.core.somaxconn=4096
+  - path: /etc/profile.d/nccl.sh
+    content: |
+      export NCCL_PROTO=simple
+      export NCCL_P2P_DISABLE=0
+      export NCCL_IB_DISABLE=1        # single node HGX; set 0 if using IB between nodes
+      export NCCL_PXN_DISABLE=0
+      export CUDA_DEVICE_MAX_CONNECTIONS=1
+runcmd:
+  - sysctl --system
+  # Install NVIDIA drivers + container toolkit
+  - distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  - curl -fsSL https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+      sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+      tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  - apt-get update && apt-get install -y nvidia-driver-535 nvidia-container-toolkit
+  - nvidia-ctk runtime configure --runtime=containerd
+  - systemctl restart containerd
+
+  # Install K3s (server on first node; agents on others)
+  - |
+    if hostname | grep -q "\-0$"; then
+      curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik" sh -
+    else
+      MASTER_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 | sed 's/[0-9]\+$ /0/')
+      # In practice, pass MASTER_IP via tf or service discovery. Placeholder joins can be templated.
+    fi
+
+  # Install KubeRay operator later via kubectl after kubeconfig is fetched.
+      ]]></file>
+
+      <file path="infra/crusoe/terraform.tfvars.example"><![CDATA[
+region             = "us-northcentral"
+h100_instance_type = "gpu.h100-80gb.hgx.8x"
+node_count         = 1
+# Prefer env var CRUSOE_API_TOKEN
+      ]]></file>
+    </files>
+  </terraform_crusoe>
+
+  <!-- ===================== -->
+  <!-- 3) KUBERNETES MANIFESTS -->
+  <!-- ===================== -->
+
+  <kubernetes_manifests>
+    <files>
+      <file path="infra/k8s/00-namespace.yaml"><![CDATA[
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orion
+      ]]></file>
+
+      <!-- If provider already injects the NVIDIA device plugin, you can skip this. Safe to apply idempotently. -->
+      <file path="infra/k8s/01-nvidia-device-plugin.yaml"><![CDATA[
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      tolerations:
+      - key: "nvidia.com/gpu"
+        operator: "Exists"
+        effect: "NoSchedule"
+      containers:
+      - image: nvcr.io/nvidia/k8s-device-plugin:v0.16.2
+        name: nvidia-device-plugin-ctr
+        args: ["--fail-on-init-error=false"]
+        securityContext:
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: device-plugin
+          mountPath: /var/lib/kubelet/device-plugins
+      volumes:
+      - name: device-plugin
+        hostPath:
+          path: /var/lib/kubelet/device-plugins
+      ]]></file>
+
+      <!-- S3 creds secret for checkpoints (replace VALUES) -->
+      <file path="infra/k8s/02-csi-s3-secret.yaml"><![CDATA[
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-credentials
+  namespace: orion
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "<REPLACE>"
+  AWS_SECRET_ACCESS_KEY: "<REPLACE>"
+  AWS_ENDPOINT_URL: "https://<S3-ENDPOINT>"   # e.g., https://object.coreweave.cloud
+  AWS_REGION: "us-east-1"
+      ]]></file>
+
+      <!-- Example: simple PVC via hostPath or NFS; for production prefer provider’s CSI/S3 or block storage -->
+      <file path="infra/k8s/03-s3-bucket-pvc.yaml"><![CDATA[
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orion-checkpoints
+  namespace: orion
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: ""
+  # For CoreWeave, prefer their object storage & documented CSI. This PVC is a placeholder if a RWX storage class exists.
+      ]]></file>
+
+      <!-- KubeRay operator (stable). Optionally install via Helm; here is a direct manifest. -->
+      <file path="infra/k8s/10-kuberay-operator.yaml"><![CDATA[
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ray-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kuberay-operator
+  namespace: ray-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: kuberay-operator }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: kuberay-operator }
+    spec:
+      serviceAccountName: kuberay-operator
+      containers:
+      - name: manager
+        image: rayproject/kuberay-operator:v1.1.0
+        imagePullPolicy: IfNotPresent
+        command: ["/manager"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kuberay-operator
+  namespace: ray-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kuberay-operator
+rules:
+- apiGroups: ["ray.io"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["pods","services","endpoints","events","configmaps","secrets","persistentvolumeclaims"]
+  verbs: ["*"]
+- apiGroups: ["apps"]
+  resources: ["deployments","statefulsets","daemonsets","replicasets"]
+  verbs: ["*"]
+- apiGroups: ["batch"]
+  resources: ["jobs","cronjobs"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kuberay-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kuberay-operator
+subjects:
+- kind: ServiceAccount
+  name: kuberay-operator
+  namespace: ray-system
+      ]]></file>
+
+      <!-- RayCluster tuned for 1x HGX node (8x H100). One worker pod per GPU (8 pods), with NCCL vars for NVLink. -->
+      <file path="infra/k8s/20-raycluster-orion.yaml"><![CDATA[
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: orion-ray
+  namespace: orion
+spec:
+  rayVersion: "2.34.0"
+  enableInTreeAutoscaling: false
+
+  headGroupSpec:
+    serviceType: ClusterIP
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+      num-gpus: "0"
+    template:
+      metadata:
+        labels: { role: ray-head }
+      spec:
+        nodeSelector:
+          gpu: "h100"
+        tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        containers:
+        - name: ray-head
+          image: ghcr.io/YOUR_ORG/orion-train:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "8"
+              memory: "32Gi"
+            limits:
+              cpu: "16"
+              memory: "64Gi"
+          env:
+          - name: RAY_memory_monitor_refresh_ms
+            value: "0"
+          - name: NCCL_P2P_DISABLE
+            value: "0"
+          - name: NCCL_IB_DISABLE
+            value: "1"    # single-node NVLink only; set 0 if multi-node with IB
+          - name: CUDA_DEVICE_MAX_CONNECTIONS
+            value: "1"
+          - name: AWS_ENDPOINT_URL
+            valueFrom:
+              secretKeyRef: { name: s3-credentials, key: AWS_ENDPOINT_URL }
+          - name: AWS_REGION
+            valueFrom:
+              secretKeyRef: { name: s3-credentials, key: AWS_REGION }
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef: { name: s3-credentials, key: AWS_ACCESS_KEY_ID }
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef: { name: s3-credentials, key: AWS_SECRET_ACCESS_KEY }
+          ports:
+          - containerPort: 8265 # Ray dashboard
+          volumeMounts:
+          - name: checkpoints
+            mountPath: /mnt/checkpoints
+        volumes:
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: orion-checkpoints
+
+  workerGroupSpecs:
+  - groupName: h100-workers
+    replicas: 8
+    minReplicas: 8
+    maxReplicas: 8
+    rayStartParams:
+      num-gpus: "1"
+    template:
+      metadata:
+        labels: { role: ray-worker }
+      spec:
+        nodeSelector:
+          gpu: "h100"
+        tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        containers:
+        - name: ray-worker
+          image: ghcr.io/YOUR_ORG/orion-train:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+              cpu: "16"
+              memory: "64Gi"
+            requests:
+              nvidia.com/gpu: 1
+              cpu: "8"
+              memory: "48Gi"
+          env:
+          - name: NCCL_P2P_DISABLE
+            value: "0"
+          - name: NCCL_IB_DISABLE
+            value: "1"
+          - name: CUDA_DEVICE_MAX_CONNECTIONS
+            value: "1"
+          volumeMounts:
+          - name: shm
+            mountPath: /dev/shm
+          - name: checkpoints
+            mountPath: /mnt/checkpoints
+        volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "16Gi"
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: orion-checkpoints
+      ]]></file>
+    </files>
+  </kubernetes_manifests>
+
+  <!-- ===================== -->
+  <!-- 4) MAKEFILE + README  -->
+  <!-- ===================== -->
+
+  <makefile path="infra/makefile"><![CDATA[
+SHELL := /bin/bash
+KUBE := kubectl
+K8S_DIR := ./k8s
+
+# —— CoreWeave ————————————————————————————————————————————
+coreweave-init:
+	cd coreweave && terraform init
+
+coreweave-apply:
+	cd coreweave && terraform apply -auto-approve
+
+coreweave-destroy:
+	cd coreweave && terraform destroy -auto-approve
+
+# —— Crusoe ————————————————————————————————————————————————
+crusoe-init:
+	cd crusoe && terraform init
+
+crusoe-apply:
+	cd crusoe && terraform apply -auto-approve
+
+crusoe-destroy:
+	cd crusoe && terraform destroy -auto-approve
+
+# —— Kubernetes common ————————————————————————————————
+k8s-apply:
+	$(KUBE) apply -f $(K8S_DIR)/00-namespace.yaml
+	$(KUBE) apply -f $(K8S_DIR)/01-nvidia-device-plugin.yaml || true
+	$(KUBE) apply -f $(K8S_DIR)/02-csi-s3-secret.yaml
+	$(KUBE) apply -f $(K8S_DIR)/03-s3-bucket-pvc.yaml
+	$(KUBE) apply -f $(K8S_DIR)/10-kuberay-operator.yaml
+	$(KUBE) apply -f $(K8S_DIR)/20-raycluster-orion.yaml
+
+k8s-delete:
+	$(KUBE) delete -f $(K8S_DIR)/20-raycluster-orion.yaml || true
+	$(KUBE) delete -f $(K8S_DIR)/10-kuberay-operator.yaml || true
+	$(KUBE) delete -f $(K8S_DIR)/03-s3-bucket-pvc.yaml || true
+	$(KUBE) delete -f $(K8S_DIR)/02-csi-s3-secret.yaml || true
+	$(KUBE) delete -f $(K8S_DIR)/01-nvidia-device-plugin.yaml || true
+	$(KUBE) delete -f $(K8S_DIR)/00-namespace.yaml || true
+
+ray-status:
+	$(KUBE) -n orion get pods -o wide
+	$(KUBE) -n orion port-forward svc/orion-ray-head-svc 8265:8265
+  ]]></makefile>
+
+  <readme path="infra/README.md"><![CDATA[
+# neurOS/ORION Cloud Training (Terraform + KubeRay)
+
+## Targets
+- **CoreWeave (primary)**: Uses CoreWeave CKS (managed Kubernetes) + official Terraform provider → fastest path to H100 HGX Ray.  
+- **Crusoe (alt)**: Terraform-provisioned H100 HGX → bootstrap K3s + KubeRay.
+
+## Prereqs
+- Terraform >= 1.6
+- kubectl
+- Docker/registry with image `ghcr.io/YOUR_ORG/orion-train:latest`
+- Set provider credentials:
+  - CoreWeave: `export COREWEAVE_API_KEY=... COREWEAVE_ACCOUNT_ID=...`
+  - Crusoe: `export CRUSOE_API_TOKEN=...`
+
+## Quickstart (CoreWeave)
+```bash
+cd infra
+make coreweave-init
+make coreweave-apply
+
+# Write kubeconfig from CoreWeave output or download via portal.
+# Then:
+make k8s-apply
+make ray-status  # dashboard on http://localhost:8265

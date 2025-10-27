@@ -1,0 +1,22 @@
+# Ray Tune Hyperparameter Search Dependencies for NeuroFMX
+# Install with: pip install -r requirements-ray-tune.txt
+
+# Core Ray Tune
+ray[tune]>=2.8.0
+ray[train]>=2.8.0
+
+# Search algorithms
+optuna>=3.0.0  # Bayesian optimization
+
+# Experiment tracking (optional)
+mlflow>=2.8.0
+wandb>=0.15.0
+
+# Visualization
+matplotlib>=3.5.0
+pandas>=1.5.0
+
+# Already in base requirements but listed for completeness:
+# torch>=2.0.0
+# numpy>=1.24.0
+# pyyaml>=6.0
