@@ -63,7 +63,7 @@ class TestSAEIntegration:
 
     def test_hierarchical_sae_training(self, sample_model, sample_data):
         """Test hierarchical SAE training on model activations"""
-        from neuros_neurofm.interpretability.concept_sae import HierarchicalSAE
+        from neuros_mechint.concept_sae import HierarchicalSAE
 
         # Create hierarchical SAE
         hsae = HierarchicalSAE(
@@ -89,7 +89,7 @@ class TestSAEIntegration:
 
     def test_concept_dictionary_building(self, sample_model):
         """Test building concept dictionary with labels"""
-        from neuros_neurofm.interpretability.concept_sae import (
+        from neuros_mechint.concept_sae import (
             HierarchicalSAE, ConceptDictionary
         )
 
@@ -125,7 +125,7 @@ class TestAlignmentIntegration:
 
     def test_cca_alignment(self):
         """Test CCA alignment between representations"""
-        from neuros_neurofm.interpretability.alignment import CCA
+        from neuros_mechint.alignment import CCA
 
         # Create two representations
         X = torch.randn(100, 50)
@@ -149,7 +149,7 @@ class TestAlignmentIntegration:
 
     def test_rsa_comparison(self):
         """Test RSA comparison between layers"""
-        from neuros_neurofm.interpretability.alignment import RSA
+        from neuros_mechint.alignment import RSA
 
         # Create representations
         X1 = torch.randn(50, 100)
@@ -168,7 +168,7 @@ class TestDynamicsIntegration:
 
     def test_koopman_analysis(self):
         """Test Koopman operator estimation"""
-        from neuros_neurofm.interpretability.dynamics import DynamicsAnalyzer
+        from neuros_mechint.dynamics import DynamicsAnalyzer
 
         # Create trajectory (Lorenz system)
         T = 500
@@ -195,7 +195,7 @@ class TestDynamicsIntegration:
 
     def test_lyapunov_exponents(self):
         """Test Lyapunov exponent estimation"""
-        from neuros_neurofm.interpretability.dynamics import DynamicsAnalyzer
+        from neuros_mechint.dynamics import DynamicsAnalyzer
 
         # Stable trajectory
         T = 300
@@ -215,7 +215,7 @@ class TestCounterfactualIntegration:
 
     def test_latent_surgery(self, sample_model, sample_data):
         """Test latent surgery and interventions"""
-        from neuros_neurofm.interpretability.counterfactuals import LatentSurgery
+        from neuros_mechint.counterfactuals import LatentSurgery
 
         # Create surgery tool
         surgery = LatentSurgery(sample_model)
@@ -243,7 +243,7 @@ class TestCounterfactualIntegration:
 
     def test_do_calculus_intervention(self, sample_model, sample_data):
         """Test do-calculus interventions"""
-        from neuros_neurofm.interpretability.counterfactuals import DoCalculusInterventions
+        from neuros_mechint.counterfactuals import DoCalculusInterventions
 
         # Create intervention tool
         do_calc = DoCalculusInterventions(sample_model)
@@ -274,7 +274,7 @@ class TestMetaDynamicsIntegration:
 
     def test_training_phase_detection(self):
         """Test training phase detection"""
-        from neuros_neurofm.interpretability.meta_dynamics import TrainingPhaseDetection
+        from neuros_mechint.meta_dynamics import TrainingPhaseDetection
 
         # Simulate loss curve
         steps = np.arange(1000)
@@ -293,7 +293,7 @@ class TestMetaDynamicsIntegration:
 
     def test_representational_drift(self):
         """Test drift measurement between representations"""
-        from neuros_neurofm.interpretability.meta_dynamics import RepresentationalTrajectory
+        from neuros_mechint.meta_dynamics import RepresentationalTrajectory
 
         # Create trajectory (representations over time)
         trajectory = [
@@ -322,7 +322,7 @@ class TestReportingIntegration:
 
     def test_report_creation(self, temp_output_dir):
         """Test creating a complete mech-int report"""
-        from neuros_neurofm.interpretability.reporting import MechIntReport
+        from neuros_mechint.reporting import MechIntReport
         import matplotlib.pyplot as plt
         import pandas as pd
 
@@ -364,7 +364,7 @@ class TestHooksIntegration:
 
     def test_activation_sampler(self, sample_model, sample_data, temp_output_dir):
         """Test activation sampling during training"""
-        from neuros_neurofm.interpretability.hooks import ActivationSampler
+        from neuros_mechint.hooks import ActivationSampler
 
         # Create sampler
         sampler = ActivationSampler(
@@ -416,7 +416,7 @@ class TestEndToEndWorkflow:
         activation = activations[0]
 
         # 2. Train SAE on activations
-        from neuros_neurofm.interpretability.concept_sae import HierarchicalSAE
+        from neuros_mechint.concept_sae import HierarchicalSAE
 
         hsae = HierarchicalSAE(
             layer_sizes=[activation.shape[1], 512, 2048],
@@ -429,7 +429,7 @@ class TestEndToEndWorkflow:
         assert losses['total'].item() > 0
 
         # 3. Analyze dynamics
-        from neuros_neurofm.interpretability.dynamics import DynamicsAnalyzer
+        from neuros_mechint.dynamics import DynamicsAnalyzer
 
         # Create trajectory
         trajectory = torch.randn(5, 100, activation.shape[1])
@@ -439,7 +439,7 @@ class TestEndToEndWorkflow:
         assert slow_manifold.shape[2] == 3
 
         # 4. Generate report
-        from neuros_neurofm.interpretability.reporting import MechIntReport
+        from neuros_mechint.reporting import MechIntReport
 
         report = MechIntReport(temp_output_dir, title="Full Analysis")
         report.add_section("SAE Analysis", f"Trained SAE with loss: {losses['total'].item():.4f}")
@@ -451,7 +451,7 @@ class TestEndToEndWorkflow:
 
     def test_training_to_evaluation_workflow(self, sample_model, temp_output_dir):
         """Test workflow from training hooks to evaluation"""
-        from neuros_neurofm.interpretability.hooks import MechIntConfig, ActivationSampler
+        from neuros_mechint.hooks import MechIntConfig, ActivationSampler
 
         # 1. Setup config
         config = MechIntConfig(
@@ -490,7 +490,7 @@ class TestCrossModuleIntegration:
 
     def test_sae_to_counterfactual(self, sample_model, sample_data):
         """Test using SAE features for counterfactual analysis"""
-        from neuros_neurofm.interpretability.concept_sae import (
+        from neuros_mechint.concept_sae import (
             HierarchicalSAE, CausalSAEProbe
         )
 
@@ -526,8 +526,8 @@ class TestCrossModuleIntegration:
 
     def test_alignment_to_reporting(self, temp_output_dir):
         """Test alignment analysis to report generation"""
-        from neuros_neurofm.interpretability.alignment import CCA
-        from neuros_neurofm.interpretability.reporting import MechIntReport
+        from neuros_mechint.alignment import CCA
+        from neuros_mechint.reporting import MechIntReport
         import matplotlib.pyplot as plt
 
         # Create representations

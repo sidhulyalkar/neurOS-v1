@@ -59,8 +59,11 @@ datasets = [
     "allensdk>=2.15.0",
     "ONE-api>=2.0.0",  # International Brain Lab
 ]
+mechint = [
+    "neuros-mechint[viz]>=0.1.0",  # Mechanistic interpretability toolbox
+]
 all = [
-    "neuros-neurofm[dev,mamba,training,datasets]",
+    "neuros-neurofm[dev,mamba,training,datasets,mechint]",
 ]
 
 [project.urls]

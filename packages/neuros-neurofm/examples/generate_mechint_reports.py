@@ -17,7 +17,7 @@ import torch.nn as nn
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from neuros_neurofm.interpretability.reporting import (
+from neuros_mechint.reporting import (
     MechIntReport,
     UnifiedMechIntReporter,
     ReportTemplate
@@ -148,7 +148,7 @@ The reporting system supports:
     # Add code snippet
     code = """
 # Example: Computing causal effects
-from neuros_neurofm.interpretability.causal_graphs import CausalGraphAnalyzer
+from neuros_mechint.causal_graphs import CausalGraphAnalyzer
 
 analyzer = CausalGraphAnalyzer(model)
 graph = analyzer.build_causal_graph(data)

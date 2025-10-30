@@ -13,7 +13,7 @@ import torch
 import numpy as np
 from typing import Dict, List
 
-from neuros_neurofm.interpretability.energy_flow import (
+from neuros_mechint.energy_flow import (
     InformationFlowAnalyzer,
     EnergyLandscape,
     EntropyProduction,

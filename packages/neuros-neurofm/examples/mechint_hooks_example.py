@@ -17,7 +17,7 @@ def example_lightning_integration():
 
     try:
         import pytorch_lightning as pl
-        from neuros_neurofm.interpretability import MechIntCallback, MechIntConfig
+        from neuros_mechint import MechIntCallback, MechIntConfig
         from neuros_neurofm.training.lightning_module import NeuroFMXLightningModule
         from neuros_neurofm.models.multimodal_neurofmx import MultiModalNeuroFMX
 
@@ -95,7 +95,7 @@ def example_lightning_integration():
 def example_manual_hook_integration():
     """Example of using MechIntHooks directly in custom training loop."""
 
-    from neuros_neurofm.interpretability import MechIntHooks, MechIntConfig
+    from neuros_mechint import MechIntHooks, MechIntConfig
     from neuros_neurofm.models.multimodal_neurofmx import MultiModalNeuroFMX
 
     print("\n" + "=" * 80)
@@ -169,7 +169,7 @@ def example_manual_hook_integration():
 def example_eval_time_analysis():
     """Example of running comprehensive analysis on saved activations."""
 
-    from neuros_neurofm.interpretability import EvalMechIntRunner, MechIntConfig
+    from neuros_mechint import EvalMechIntRunner, MechIntConfig
     from neuros_neurofm.models.multimodal_neurofmx import MultiModalNeuroFMX
 
     print("\n" + "=" * 80)
@@ -222,7 +222,7 @@ def example_fastapi_integration():
 
     try:
         from fastapi import FastAPI
-        from neuros_neurofm.interpretability import FastAPIIntegrationMixin, MechIntConfig
+        from neuros_mechint import FastAPIIntegrationMixin, MechIntConfig
         from neuros_neurofm.models.multimodal_neurofmx import MultiModalNeuroFMX
 
         print("\n" + "=" * 80)
@@ -281,7 +281,7 @@ def example_fastapi_integration():
 def example_s3_integration():
     """Example of using S3 for activation storage."""
 
-    from neuros_neurofm.interpretability import MechIntConfig, MechIntHooks
+    from neuros_mechint import MechIntConfig, MechIntHooks
 
     print("\n" + "=" * 80)
     print("Example 5: S3 Storage Integration")
@@ -317,7 +317,7 @@ def example_s3_integration():
 def example_custom_sampler():
     """Example of using ActivationSampler directly."""
 
-    from neuros_neurofm.interpretability import ActivationSampler
+    from neuros_mechint import ActivationSampler
     from neuros_neurofm.models.multimodal_neurofmx import MultiModalNeuroFMX
 
     print("\n" + "=" * 80)
@@ -381,7 +381,7 @@ COMPLETE WORKFLOW:
 
 1. TRAINING PHASE
    ---------------
-   from neuros_neurofm.interpretability import MechIntCallback, MechIntConfig
+   from neuros_mechint import MechIntCallback, MechIntConfig
 
    config = MechIntConfig(
        sample_layers=['mamba_backbone.blocks.3', 'popt'],
@@ -403,7 +403,7 @@ COMPLETE WORKFLOW:
 
 2. EVALUATION PHASE
    ----------------
-   from neuros_neurofm.interpretability import EvalMechIntRunner
+   from neuros_mechint import EvalMechIntRunner
 
    runner = EvalMechIntRunner(model=model, config=config)
 
@@ -418,7 +418,7 @@ COMPLETE WORKFLOW:
 
 3. VISUALIZATION PHASE
    -------------------
-   from neuros_neurofm.interpretability import SAEVisualizer
+   from neuros_mechint import SAEVisualizer
 
    # Load trained SAE from results
    sae = results['analyses']['sae']['layer_name']['sae']
@@ -431,7 +431,7 @@ COMPLETE WORKFLOW:
 4. REAL-TIME INFERENCE
    --------------------
    # Start FastAPI server with mech-int endpoints
-   from neuros_neurofm.interpretability import FastAPIIntegrationMixin
+   from neuros_mechint import FastAPIIntegrationMixin
 
    app = create_app(model_path='./model.pt')
    mixin = FastAPIIntegrationMixin(model, config)

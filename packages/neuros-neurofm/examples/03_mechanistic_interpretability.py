@@ -30,7 +30,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 from neuros_neurofm.model import NeuroFMX
-from neuros_neurofm.interpretability import (
+from neuros_mechint import (
     # Sparse autoencoders
     HierarchicalSAE,
     ConceptDictionary,

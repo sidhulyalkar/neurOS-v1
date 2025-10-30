@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from neuros_neurofm.interpretability.reporting import (
+from neuros_mechint.reporting import (
     MechIntReport,
     ReportSection,
     ReportMetric,

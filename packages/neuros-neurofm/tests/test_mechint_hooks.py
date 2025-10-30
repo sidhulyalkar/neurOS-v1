@@ -11,7 +11,7 @@ from pathlib import Path
 import tempfile
 import json
 
-from neuros_neurofm.interpretability.hooks import (
+from neuros_mechint.hooks import (
     MechIntConfig,
     ActivationSampler,
     MechIntHooks,
@@ -477,7 +477,7 @@ def test_eval_runner_export_results(simple_model, temp_dir):
 )
 def test_lightning_callback_import():
     """Test importing Lightning callback."""
-    from neuros_neurofm.interpretability.hooks import MechIntCallback
+    from neuros_mechint.hooks import MechIntCallback
 
     config = MechIntConfig(sample_layers=['layer1'])
     callback = MechIntCallback(config)
@@ -496,7 +496,7 @@ def test_lightning_callback_import():
 )
 def test_fastapi_integration_import():
     """Test importing FastAPI integration."""
-    from neuros_neurofm.interpretability.hooks import FastAPIIntegrationMixin
+    from neuros_mechint.hooks import FastAPIIntegrationMixin
 
     config = MechIntConfig(sample_layers=['layer1'])
 
