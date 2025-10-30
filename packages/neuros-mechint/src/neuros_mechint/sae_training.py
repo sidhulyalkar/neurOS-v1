@@ -23,7 +23,7 @@ from tqdm import tqdm
 import numpy as np
 from collections import defaultdict
 
-from neuros_neurofm.interpretability.sparse_autoencoder import SparseAutoencoder
+from neuros_mechint.sparse_autoencoder import SparseAutoencoder
 
 
 class ActivationCache:

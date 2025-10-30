@@ -656,7 +656,7 @@ class EvalMechIntRunner:
 
     def _run_sae_analysis(self, activations: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Run sparse autoencoder analysis."""
-        from neuros_neurofm.interpretability.sae_training import MultiLayerSAETrainer
+        from neuros_mechint.sae_training import MultiLayerSAETrainer
 
         results = {}
 
@@ -687,7 +687,7 @@ class EvalMechIntRunner:
 
     def _run_neuron_analysis(self, activations: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Run neuron activation analysis."""
-        from neuros_neurofm.interpretability.neuron_analysis import NeuronActivationAnalyzer
+        from neuros_mechint.neuron_analysis import NeuronActivationAnalyzer
 
         results = {}
 
@@ -713,7 +713,7 @@ class EvalMechIntRunner:
 
     def _run_circuit_analysis(self, activations: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Run circuit discovery analysis."""
-        from neuros_neurofm.interpretability.circuit_discovery import CircuitDiscovery
+        from neuros_mechint.circuit_discovery import CircuitDiscovery
 
         # Placeholder for circuit analysis
         results = {
@@ -737,7 +737,7 @@ class EvalMechIntRunner:
 
     def _run_feature_analysis(self, activations: Dict[str, torch.Tensor]) -> Dict[str, Any]:
         """Run feature analysis."""
-        from neuros_neurofm.interpretability.feature_analysis import FeatureClusteringAnalyzer
+        from neuros_mechint.feature_analysis import FeatureClusteringAnalyzer
 
         results = {}
 
@@ -820,7 +820,7 @@ if LIGHTNING_AVAILABLE:
 
         Examples
         --------
-        >>> from neuros_neurofm.interpretability import MechIntCallback
+        >>> from neuros_mechint import MechIntCallback
         >>>
         >>> # Add to trainer
         >>> trainer = pl.Trainer(
@@ -903,7 +903,7 @@ if FASTAPI_AVAILABLE:
         Add to your FastAPI server:
 
         >>> from neuros_neurofm.api.server import create_app
-        >>> from neuros_neurofm.interpretability.hooks import FastAPIIntegrationMixin
+        >>> from neuros_mechint.hooks import FastAPIIntegrationMixin
         >>>
         >>> app = create_app(model_path='./model.pt')
         >>>

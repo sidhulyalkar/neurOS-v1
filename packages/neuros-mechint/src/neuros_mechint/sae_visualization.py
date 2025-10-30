@@ -35,7 +35,7 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
-from neuros_neurofm.interpretability.sparse_autoencoder import SparseAutoencoder
+from neuros_mechint.sparse_autoencoder import SparseAutoencoder
 
 
 class SAEVisualizer:

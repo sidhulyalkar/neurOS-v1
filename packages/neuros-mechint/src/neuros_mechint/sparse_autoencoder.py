@@ -10,7 +10,7 @@ from polysemantic neuron activations.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from tqdm import tqdm
 import numpy as np
 

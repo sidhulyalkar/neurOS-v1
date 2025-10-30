@@ -11,24 +11,24 @@ representations with brain recordings, including:
 
 Examples:
     CCA alignment:
-        >>> from neuros_neurofm.interpretability.alignment import CCA
+        >>> from neuros_mechint.alignment import CCA
         >>> cca = CCA(n_components=10)
         >>> cca.fit(model_activations, brain_recordings)
         >>> model_canonical, brain_canonical = cca.transform(model_activations, brain_recordings)
 
     RSA comparison:
-        >>> from neuros_neurofm.interpretability.alignment import RSA
+        >>> from neuros_mechint.alignment import RSA
         >>> rsa = RSA(metric='correlation', comparison='spearman')
         >>> similarity = rsa.compare(model_activations, brain_recordings)
 
     PLS prediction:
-        >>> from neuros_neurofm.interpretability.alignment import PLS
+        >>> from neuros_mechint.alignment import PLS
         >>> pls = PLS(n_components=20)
         >>> pls.fit(model_activations, brain_recordings)
         >>> predicted_brain = pls.predict(new_model_activations)
 
     Noise ceiling:
-        >>> from neuros_neurofm.interpretability.alignment import NoiseCeiling
+        >>> from neuros_mechint.alignment import NoiseCeiling
         >>> nc = NoiseCeiling(method='split-half')
         >>> ceiling = nc.estimate(brain_recordings_with_repetitions)
 """
@@ -206,7 +206,7 @@ Quick Reference: Model-to-Brain Alignment
 1. LINEAR ALIGNMENT (CCA)
    Use when: You want to find linear transformations that align representations
 
-   from neuros_neurofm.interpretability.alignment import CCA
+   from neuros_mechint.alignment import CCA
    cca = CCA(n_components=10)
    cca.fit(model_acts, brain_acts)
    model_canonical, brain_canonical = cca.transform(model_acts, brain_acts)
@@ -214,14 +214,14 @@ Quick Reference: Model-to-Brain Alignment
 2. GEOMETRY COMPARISON (RSA)
    Use when: You want to compare representational structures without alignment
 
-   from neuros_neurofm.interpretability.alignment import RSA
+   from neuros_mechint.alignment import RSA
    rsa = RSA(metric='correlation', comparison='spearman')
    similarity = rsa.compare(model_acts, brain_acts)
 
 3. PREDICTIVE ALIGNMENT (PLS)
    Use when: You want to predict brain activity from model activations
 
-   from neuros_neurofm.interpretability.alignment import PLS
+   from neuros_mechint.alignment import PLS
    pls = PLS(n_components=20)
    pls.fit(model_acts, brain_acts)
    brain_pred = pls.predict(new_model_acts)
@@ -229,7 +229,7 @@ Quick Reference: Model-to-Brain Alignment
 4. STATISTICAL EVALUATION
    Use when: You need to assess reliability and significance
 
-   from neuros_neurofm.interpretability.alignment import NoiseCeiling, PermutationTest
+   from neuros_mechint.alignment import NoiseCeiling, PermutationTest
 
    # Noise ceiling
    nc = NoiseCeiling(method='split-half')

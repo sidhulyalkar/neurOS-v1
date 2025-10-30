@@ -6,7 +6,7 @@ These priors encourage biologically plausible dynamics (1/f noise, scale-free st
 
 Usage in training:
     >>> from neuros_neurofm.losses import CombinedLoss
-    >>> from neuros_neurofm.interpretability.fractals import SpectralPrior
+    >>> from neuros_mechint.fractals import SpectralPrior
     >>>
     >>> loss_fn = CombinedLoss([
     >>>     MaskedModelingLoss(),

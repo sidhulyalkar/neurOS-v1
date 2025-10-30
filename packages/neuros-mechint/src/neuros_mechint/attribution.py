@@ -32,7 +32,7 @@ import copy
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from neuros_neurofm.interpretability.sparse_autoencoder import SparseAutoencoder
+from neuros_mechint.sparse_autoencoder import SparseAutoencoder
 
 
 class IntegratedGradients:
