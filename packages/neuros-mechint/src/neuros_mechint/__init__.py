@@ -104,20 +104,33 @@ from neuros_mechint.sae_training import (
     SAETrainingPipeline
 )
 
-# SAE Visualization Suite
-from neuros_mechint.sae_visualization import (
-    SAEVisualizer,
-    MultiLayerSAEVisualizer
-)
+# SAE Visualization Suite (optional - requires matplotlib)
+try:
+    from neuros_mechint.sae_visualization import (
+        SAEVisualizer,
+        MultiLayerSAEVisualizer
+    )
+    _HAS_VISUALIZATION = True
+except ImportError:
+    SAEVisualizer = None
+    MultiLayerSAEVisualizer = None
+    _HAS_VISUALIZATION = False
 
 # Feature Analysis Suite
-from neuros_mechint.feature_analysis import (
-    FeatureAttributionAnalyzer,
-    TemporalDynamicsAnalyzer,
-    CausalImportanceAnalyzer,
-    FeatureClusteringAnalyzer,
-    FeatureSteeringAnalyzer
-)
+try:
+    from neuros_mechint.feature_analysis import (
+        FeatureAttributionAnalyzer,
+        TemporalDynamicsAnalyzer,
+        CausalImportanceAnalyzer,
+        FeatureClusteringAnalyzer,
+        FeatureSteeringAnalyzer
+    )
+except ImportError:
+    FeatureAttributionAnalyzer = None
+    TemporalDynamicsAnalyzer = None
+    CausalImportanceAnalyzer = None
+    FeatureClusteringAnalyzer = None
+    FeatureSteeringAnalyzer = None
 
 # Causal Graph Builder Suite
 from neuros_mechint.graph_builder import (
@@ -154,14 +167,21 @@ from neuros_mechint.hooks import (
     FastAPIIntegrationMixin
 )
 
-# Advanced Attribution Methods
-from neuros_mechint.attribution import (
-    IntegratedGradients,
-    DeepLIFT,
-    GradientSHAP,
-    GenerativePathAttribution,
-    visualize_attributions
-)
+# Advanced Attribution Methods (optional - requires matplotlib)
+try:
+    from neuros_mechint.attribution import (
+        IntegratedGradients,
+        DeepLIFT,
+        GradientSHAP,
+        GenerativePathAttribution,
+        visualize_attributions
+    )
+except ImportError:
+    IntegratedGradients = None
+    DeepLIFT = None
+    GradientSHAP = None
+    GenerativePathAttribution = None
+    visualize_attributions = None
 
 # Brain Alignment Suite
 from neuros_mechint.alignment import (
@@ -198,12 +218,17 @@ from neuros_mechint.geometry_topology import (
     CurvatureEstimator,
 )
 
-# Comprehensive Reporting
-from neuros_mechint.reporting import (
-    MechIntReporter,
-    ReportSection,
-    Figure,
-)
+# Comprehensive Reporting (optional - requires matplotlib)
+try:
+    from neuros_mechint.reporting import (
+        MechIntReporter,
+        ReportSection,
+        Figure,
+    )
+except ImportError:
+    MechIntReporter = None
+    ReportSection = None
+    Figure = None
 
 # Fractal Geometry Suite
 from neuros_mechint.fractals import (
