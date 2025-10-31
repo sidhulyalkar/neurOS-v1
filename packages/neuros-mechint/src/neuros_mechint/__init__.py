@@ -353,6 +353,12 @@ try:
         PatchEffect,
         PathPatchingResult,
         PathPatcher,
+        CircuitComparison,
+        MultiCircuitAnalysis,
+        CircuitComparator,
+        MotifInstance,
+        MotifAnalysis,
+        MotifDetector,
     )
 except ImportError:
     LatentCircuitModel = None
@@ -370,6 +376,12 @@ except ImportError:
     PatchEffect = None
     PathPatchingResult = None
     PathPatcher = None
+    CircuitComparison = None
+    MultiCircuitAnalysis = None
+    CircuitComparator = None
+    MotifInstance = None
+    MotifAnalysis = None
+    MotifDetector = None
 
 # Biophysical Modeling Suite (optional)
 try:
@@ -604,6 +616,12 @@ __all__ = [
     'PatchEffect',
     'PathPatchingResult',
     'PathPatcher',
+    'CircuitComparison',
+    'MultiCircuitAnalysis',
+    'CircuitComparator',
+    'MotifInstance',
+    'MotifAnalysis',
+    'MotifDetector',
 
     # Biophysical Modeling Suite
     'SurrogateGradient',

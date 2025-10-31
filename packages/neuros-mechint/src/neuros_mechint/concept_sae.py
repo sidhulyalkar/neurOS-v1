@@ -405,6 +405,13 @@ class CausalSAEProbe:
             # Encode with SAE
             features = self.hsae.encode_level(original, level)
 
+            # Modify specific feature if in range; otherwise skip safely
+            if feature_id < 0 or feature_id >= features.shape[1]:
+                # Feature index out of range for this encoded tensor; skip intervention
+                # Return original activations so model behavior is unchanged for this call
+                intervention_applied = True
+                return original
+
             # Modify specific feature
             features[:, feature_id] *= magnitude
 
@@ -457,11 +464,56 @@ class CausalSAEProbe:
             baseline_output = self.model(input_data)
         baseline_score = metric(baseline_output, target)
 
-        # Get number of features at this level
-        num_features = self.hsae.layer_sizes[level + 1]
+        # Determine actual number of features by probing a single forward pass
+        # and encoding the activations at the specified layer. This avoids
+        # relying on potentially out-of-sync `layer_sizes` metadata.
+        # Capture the raw activations from the target module.
+        try:
+            target_module = dict(self.model.named_modules())[layer_name]
+        except KeyError:
+            raise KeyError(f"Layer name '{layer_name}' not found in model.named_modules()")
+
+        activations_holder = {'acts': None}
+
+        def _capture_hook(module, inputs, output):
+            # Store a detached copy for inspection
+            activations_holder['acts'] = output.detach()
+
+        handle = target_module.register_forward_hook(_capture_hook)
+        with torch.no_grad():
+            _ = self.model(input_data)
+        handle.remove()
+
+        if activations_holder['acts'] is None:
+            raise RuntimeError(f"Could not capture activations for layer '{layer_name}'")
+
+        # Encode activations to obtain feature dimensionality
+        with torch.no_grad():
+            sample_acts = activations_holder['acts']
+            # The SAE encoder/Linear will operate on the last dimension, so we can
+            # pass the tensor directly (works for shapes like (B, D) or (B, S, D)).
+            sample_feats = self.hsae.encode_level(sample_acts, level)
+
+        # Prefer to read dictionary size directly from the SAE encoder if available
+        num_features = None
+        try:
+            encoder_module = self.hsae.saes[level]['encoder']
+            # nn.Linear has out_features attribute
+            if hasattr(encoder_module, 'out_features'):
+                num_features = int(encoder_module.out_features)
+            else:
+                # Fallback to weight shape (out_features, in_features)
+                num_features = int(encoder_module.weight.shape[0])
+        except Exception:
+            # Final fallback: use observed sample_feats
+            num_features = int(sample_feats.shape[-1])
 
         if features_to_test is None:
             features_to_test = range(num_features)
+
+        # Ensure features_to_test is a cleaned list of valid integers
+        features_to_test = [int(f) for f in features_to_test]
+        features_to_test = [f for f in features_to_test if 0 <= f < num_features]
 
         importance_scores = {}
 

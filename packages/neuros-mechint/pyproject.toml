@@ -60,6 +60,7 @@ dev = [
 viz = [
     "matplotlib>=3.7.0",
     "seaborn>=0.12.0",
+    "bokeh>=3.8.0",
     "networkx>=3.0",
     "plotly>=5.14.0",
     "umap-learn>=0.5.3",

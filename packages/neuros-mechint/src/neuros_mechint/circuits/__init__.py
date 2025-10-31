@@ -42,11 +42,24 @@ from .path_patching import (
     PathPatcher,
 )
 
+# Circuit Comparison for Cross-Model Analysis
+from .circuit_comparator import (
+    CircuitComparison,
+    MultiCircuitAnalysis,
+    CircuitComparator,
+)
+
+# Motif Detection for Recurring Patterns
+from .motif_detection import (
+    MotifInstance,
+    MotifAnalysis,
+    MotifDetector,
+)
+
 # Circuit extraction module - additional components to be implemented
 # from .circuit_extraction import (
 #     CircuitExtractor,
 #     EICircuitDiagram,
-#     MotifFinder,
 # )
 
 __all__ = [
@@ -70,8 +83,15 @@ __all__ = [
     'PatchEffect',
     'PathPatchingResult',
     'PathPatcher',
+    # Circuit Comparison
+    'CircuitComparison',
+    'MultiCircuitAnalysis',
+    'CircuitComparator',
+    # Motif Detection
+    'MotifInstance',
+    'MotifAnalysis',
+    'MotifDetector',
     # Circuit Extraction (not yet implemented)
     # 'CircuitExtractor',
     # 'EICircuitDiagram',
-    # 'MotifFinder',
 ]
