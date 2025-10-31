@@ -159,6 +159,11 @@ try:
         LANDAUER_LIMIT,
         LandauerAnalysis,
         LandauerAnalyzer,
+        SteadyStateMetrics,
+        NESSAnalysis,
+        NESSAnalyzer,
+        FluctuationTheoremResult,
+        FluctuationTheoremAnalyzer,
     )
 except ImportError:
     MutualInformationEstimate = None
@@ -174,6 +179,11 @@ except ImportError:
     LANDAUER_LIMIT = None
     LandauerAnalysis = None
     LandauerAnalyzer = None
+    SteadyStateMetrics = None
+    NESSAnalysis = None
+    NESSAnalyzer = None
+    FluctuationTheoremResult = None
+    FluctuationTheoremAnalyzer = None
 
 # Training/Evaluation Hooks
 from neuros_mechint.hooks import (
@@ -340,6 +350,9 @@ try:
         Edge,
         Circuit,
         AutomatedCircuitDiscovery,
+        PatchEffect,
+        PathPatchingResult,
+        PathPatcher,
     )
 except ImportError:
     LatentCircuitModel = None
@@ -354,6 +367,9 @@ except ImportError:
     Edge = None
     Circuit = None
     AutomatedCircuitDiscovery = None
+    PatchEffect = None
+    PathPatchingResult = None
+    PathPatcher = None
 
 # Biophysical Modeling Suite (optional)
 try:
@@ -487,6 +503,11 @@ __all__ = [
     'LANDAUER_LIMIT',
     'LandauerAnalysis',
     'LandauerAnalyzer',
+    'SteadyStateMetrics',
+    'NESSAnalysis',
+    'NESSAnalyzer',
+    'FluctuationTheoremResult',
+    'FluctuationTheoremAnalyzer',
 
     # Training/Evaluation Hooks
     'MechIntConfig',
@@ -580,6 +601,9 @@ __all__ = [
     'Edge',
     'Circuit',
     'AutomatedCircuitDiscovery',
+    'PatchEffect',
+    'PathPatchingResult',
+    'PathPatcher',
 
     # Biophysical Modeling Suite
     'SurrogateGradient',

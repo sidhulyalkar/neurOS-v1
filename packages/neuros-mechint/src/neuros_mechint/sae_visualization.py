@@ -36,7 +36,10 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 try:
-    from bokeh.plotting import figure, output_file, save
+    # Avoid importing `output_file` which mutates the active Bokeh document and can
+    # conflict with `output_notebook()`/`show()`; we'll use `save(..., filename=...)`
+    # to write HTML without switching the active document.
+    from bokeh.plotting import figure, save
     from bokeh.layouts import column, row
     from bokeh.io import export_png
     BOKEH_AVAILABLE = True
@@ -770,8 +773,7 @@ class MultiLayerSAEVisualizer:
         # Save HTML
         out_path = self.output_dir / 'sparsity_comparison.html'
         try:
-            output_file(str(out_path), title='Sparsity Comparison')
-            save(layout)
+                save(layout, filename=str(out_path))
         except Exception:
             # If saving fails, continue (e.g., no webdriver for export)
             pass
@@ -824,8 +826,7 @@ class MultiLayerSAEVisualizer:
 
         out_path = self.output_dir / 'reconstruction_comparison.html'
         try:
-            output_file(str(out_path), title='Reconstruction Comparison')
-            save(p)
+                save(p, filename=str(out_path))
         except Exception:
             pass
 
@@ -862,8 +863,7 @@ class MultiLayerSAEVisualizer:
         layout = row(*panels)
         out_path = self.output_dir / 'feature_frequency_distributions.html'
         try:
-            output_file(str(out_path), title='Feature Frequency Distributions')
-            save(layout)
+                save(layout, filename=str(out_path))
         except Exception:
             pass
 

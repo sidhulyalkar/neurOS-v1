@@ -35,6 +35,13 @@ from .acdc import (
     AutomatedCircuitDiscovery,
 )
 
+# Path Patching for Causal Circuit Discovery
+from .path_patching import (
+    PatchEffect,
+    PathPatchingResult,
+    PathPatcher,
+)
+
 # Circuit extraction module - additional components to be implemented
 # from .circuit_extraction import (
 #     CircuitExtractor,
@@ -59,6 +66,10 @@ __all__ = [
     'Edge',
     'Circuit',
     'AutomatedCircuitDiscovery',
+    # Path Patching
+    'PatchEffect',
+    'PathPatchingResult',
+    'PathPatcher',
     # Circuit Extraction (not yet implemented)
     # 'CircuitExtractor',
     # 'EICircuitDiagram',

@@ -71,6 +71,19 @@ from .landauer import (
     LandauerAnalyzer,
 )
 
+# Import NESS (Non-Equilibrium Steady State) components
+from .ness import (
+    SteadyStateMetrics,
+    NESSAnalysis,
+    NESSAnalyzer,
+)
+
+# Import Fluctuation Theorems components
+from .fluctuation_theorems import (
+    FluctuationTheoremResult,
+    FluctuationTheoremAnalyzer,
+)
+
 __all__ = [
     # Data structures (from energy_flow.py)
     'MutualInformationEstimate',
@@ -92,4 +105,13 @@ __all__ = [
     'LANDAUER_LIMIT',
     'LandauerAnalysis',
     'LandauerAnalyzer',
+
+    # NESS analysis (from ness.py)
+    'SteadyStateMetrics',
+    'NESSAnalysis',
+    'NESSAnalyzer',
+
+    # Fluctuation theorems (from fluctuation_theorems.py)
+    'FluctuationTheoremResult',
+    'FluctuationTheoremAnalyzer',
 ]
