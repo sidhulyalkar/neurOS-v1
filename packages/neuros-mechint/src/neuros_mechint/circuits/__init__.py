@@ -28,11 +28,12 @@ from .feature_viz import (
     ActivationMaximization,
 )
 
-from .circuit_extraction import (
-    CircuitExtractor,
-    EICircuitDiagram,
-    MotifFinder,
-)
+# Circuit extraction module not yet implemented
+# from .circuit_extraction import (
+#     CircuitExtractor,
+#     EICircuitDiagram,
+#     MotifFinder,
+# )
 
 __all__ = [
     # Latent RNN
@@ -47,8 +48,8 @@ __all__ = [
     'FeatureVisualizer',
     'OptimalStimulus',
     'ActivationMaximization',
-    # Circuit Extraction
-    'CircuitExtractor',
-    'EICircuitDiagram',
-    'MotifFinder',
+    # Circuit Extraction (not yet implemented)
+    # 'CircuitExtractor',
+    # 'EICircuitDiagram',
+    # 'MotifFinder',
 ]

@@ -144,28 +144,45 @@ from neuros_mechint.graph_builder import (
 )
 
 # Energy Flow and Information Landscape Suite
-from neuros_mechint.energy_flow import (
-    MutualInformationEstimate,
-    InformationPlane,
-    EnergyFunction,
-    Basin,
-    EntropyProductionEstimate,
-    MINENetwork,
-    InformationFlowAnalyzer,
-    EnergyLandscape,
-    EntropyProduction,
-    compute_information_plane_trajectory
-)
+try:
+    from neuros_mechint.energy_flow import (
+        MutualInformationEstimate,
+        InformationPlane,
+        EnergyFunction,
+        Basin,
+        EntropyProductionEstimate,
+        MINENetwork,
+        InformationFlowAnalyzer,
+        EnergyLandscape,
+        EntropyProduction,
+        compute_information_plane_trajectory
+    )
+except ImportError:
+    MutualInformationEstimate = None
+    InformationPlane = None
+    EnergyFunction = None
+    Basin = None
+    EntropyProductionEstimate = None
+    MINENetwork = None
+    InformationFlowAnalyzer = None
+    EnergyLandscape = None
+    EntropyProduction = None
+    compute_information_plane_trajectory = None
 
 # Training/Evaluation Hooks
 from neuros_mechint.hooks import (
     MechIntConfig,
     ActivationSampler,
     MechIntHooks,
-    EvalMechIntRunner,
-    MechIntCallback,
-    FastAPIIntegrationMixin
+    EvalMechIntRunner
 )
+try:
+    from neuros_mechint.hooks import MechIntCallback, FastAPIIntegrationMixin
+except ImportError:
+    MechIntCallback = None
+    FastAPIIntegrationMixin = None
+
+
 
 # Advanced Attribution Methods (optional - requires matplotlib)
 try:
@@ -183,40 +200,87 @@ except ImportError:
     GenerativePathAttribution = None
     visualize_attributions = None
 
-# Brain Alignment Suite
-from neuros_mechint.alignment import (
-    CCAAlignment,
-    RSAAlignment,
-    ProcrustesAlignment,
-)
+# Brain Alignment Suite (optional - requires sklearn)
+try:
+    from neuros_mechint.alignment import (
+        CCA,
+        RegularizedCCA,
+        KernelCCA,
+        TimeVaryingCCA,
+        RSA,
+        RepresentationalDissimilarityMatrix,
+        HierarchicalRSA,
+        PLS,
+        CrossValidatedPLS,
+        NoiseCeiling,
+        BootstrapCI,
+        PermutationTest,
+    )
+except ImportError:
+    CCA = None
+    RegularizedCCA = None
+    KernelCCA = None
+    TimeVaryingCCA = None
+    RSA = None
+    RepresentationalDissimilarityMatrix = None
+    HierarchicalRSA = None
+    PLS = None
+    CrossValidatedPLS = None
+    NoiseCeiling = None
+    BootstrapCI = None
+    PermutationTest = None
 
-# Dynamics Analysis
-from neuros_mechint.dynamics import (
-    DynamicsAnalyzer,
-    KoopmanOperator,
-    LyapunovAnalyzer,
-)
+# Dynamics Analysis (optional - requires matplotlib)
+try:
+    from neuros_mechint.dynamics import (
+        DynamicsAnalyzer,
+    )
+except ImportError:
+    DynamicsAnalyzer = None
 
 # Counterfactual Interventions
-from neuros_mechint.counterfactuals import (
-    LatentSurgery,
-    DoCalculusEngine,
-    SyntheticLesion,
-)
+try:
+    from neuros_mechint.counterfactuals import (
+        LatentSurgery,
+        DoCalculusInterventions,
+        SyntheticLesions,
+        CounterfactualResult,
+    )
+except ImportError:
+    LatentSurgery = None
+    DoCalculusInterventions = None
+    SyntheticLesions = None
+    CounterfactualResult = None
 
-# Meta-Dynamics (Training Trajectory Analysis)
-from neuros_mechint.meta_dynamics import (
-    MetaDynamicsTracker,
-    CheckpointComparison,
-    TrainingPhase,
-)
+# Meta-Dynamics (Training Trajectory Analysis - optional)
+try:
+    from neuros_mechint.meta_dynamics import (
+        TrainingPhase,
+        RepresentationalTrajectory,
+        TrainingPhaseDetection,
+        GradientAttribution,
+    )
+except ImportError:
+    TrainingPhase = None
+    RepresentationalTrajectory = None
+    TrainingPhaseDetection = None
+    GradientAttribution = None
 
-# Geometry and Topology
-from neuros_mechint.geometry_topology import (
-    ManifoldAnalyzer,
-    TopologyAnalyzer,
-    CurvatureEstimator,
-)
+# Geometry and Topology (optional - requires scipy)
+try:
+    from neuros_mechint.geometry_topology import (
+        ManifoldGeometry,
+        TopologicalAnalysis,
+        ManifoldVisualization,
+        PersistenceResults,
+        ManifoldMetrics,
+    )
+except ImportError:
+    ManifoldGeometry = None
+    TopologicalAnalysis = None
+    ManifoldVisualization = None
+    PersistenceResults = None
+    ManifoldMetrics = None
 
 # Comprehensive Reporting (optional - requires matplotlib)
 try:
@@ -255,47 +319,83 @@ from neuros_mechint.fractals import (
     CausalScaleAblation,
 )
 
-# Circuit Inference Suite
-from neuros_mechint.circuits import (
-    LatentCircuitModel,
-    CircuitFitter,
-    RecurrentDynamicsAnalyzer,
-    DUNLModel,
-    MixedSelectivityAnalyzer,
-    FactorDecomposition,
-    FeatureVisualizer,
-    OptimalStimulus,
-    ActivationMaximization,
-)
+# Circuit Inference Suite (optional)
+try:
+    from neuros_mechint.circuits import (
+        LatentCircuitModel,
+        CircuitFitter,
+        RecurrentDynamicsAnalyzer,
+        DUNLModel,
+        MixedSelectivityAnalyzer,
+        FactorDecomposition,
+        FeatureVisualizer,
+        OptimalStimulus,
+        ActivationMaximization,
+    )
+except ImportError:
+    LatentCircuitModel = None
+    CircuitFitter = None
+    RecurrentDynamicsAnalyzer = None
+    DUNLModel = None
+    MixedSelectivityAnalyzer = None
+    FactorDecomposition = None
+    FeatureVisualizer = None
+    OptimalStimulus = None
+    ActivationMaximization = None
 
-# Biophysical Modeling Suite
-from neuros_mechint.biophysical import (
-    SurrogateGradient,
-    LeakyIntegrateFireNeuron,
-    IzhikevichNeuron,
-    HodgkinHuxleyNeuron,
-    SpikingNeuralNetwork,
-    DalesLawConstraint,
-    DalesLinear,
-    EINetworkClassifier,
-    RecurrentDalesNetwork,
-    DalesLossRegularizer,
-)
+# Biophysical Modeling Suite (optional)
+try:
+    from neuros_mechint.biophysical import (
+        SurrogateGradient,
+        LeakyIntegrateFireNeuron,
+        IzhikevichNeuron,
+        HodgkinHuxleyNeuron,
+        SpikingNeuralNetwork,
+        DalesLawConstraint,
+        DalesLinear,
+        EINetworkClassifier,
+        RecurrentDalesNetwork,
+        DalesLossRegularizer,
+    )
+except ImportError:
+    SurrogateGradient = None
+    LeakyIntegrateFireNeuron = None
+    IzhikevichNeuron = None
+    HodgkinHuxleyNeuron = None
+    SpikingNeuralNetwork = None
+    DalesLawConstraint = None
+    DalesLinear = None
+    EINetworkClassifier = None
+    RecurrentDalesNetwork = None
+    DalesLossRegularizer = None
 
 # Causal Interventions Suite
-from neuros_mechint.interventions import (
-    ActivationPatcher,
-    ResidualStreamPatcher,
-    AttentionPatcher,
-    MLPPatcher,
-    NeuronAblation,
-    LayerAblation,
-    ComponentAblation,
-    AblationStudy,
-    PathAnalyzer,
-    InformationFlow,
-    CausalGraph as InterventionCausalGraph,  # Alias to avoid conflict
-)
+try:
+    from neuros_mechint.interventions import (
+        ActivationPatcher,
+        ResidualStreamPatcher,
+        AttentionPatcher,
+        MLPPatcher,
+        NeuronAblation,
+        LayerAblation,
+        ComponentAblation,
+        AblationStudy,
+        PathAnalyzer,
+        InformationFlow,
+        CausalGraph as InterventionCausalGraph,  # Alias to avoid conflict
+    )
+except ImportError:
+    ActivationPatcher = None
+    ResidualStreamPatcher = None
+    AttentionPatcher = None
+    MLPPatcher = None
+    NeuronAblation = None
+    LayerAblation = None
+    ComponentAblation = None
+    AblationStudy = None
+    PathAnalyzer = None
+    InformationFlow = None
+    InterventionCausalGraph = None
 
 __all__ = [
     # Version
@@ -365,29 +465,40 @@ __all__ = [
     'visualize_attributions',
 
     # Brain Alignment
-    'CCAAlignment',
-    'RSAAlignment',
-    'ProcrustesAlignment',
+    'CCA',
+    'RegularizedCCA',
+    'KernelCCA',
+    'TimeVaryingCCA',
+    'RSA',
+    'RepresentationalDissimilarityMatrix',
+    'HierarchicalRSA',
+    'PLS',
+    'CrossValidatedPLS',
+    'NoiseCeiling',
+    'BootstrapCI',
+    'PermutationTest',
 
     # Dynamics Analysis
     'DynamicsAnalyzer',
-    'KoopmanOperator',
-    'LyapunovAnalyzer',
 
     # Counterfactual Interventions
     'LatentSurgery',
-    'DoCalculusEngine',
-    'SyntheticLesion',
+    'DoCalculusInterventions',
+    'SyntheticLesions',
+    'CounterfactualResult',
 
     # Meta-Dynamics
-    'MetaDynamicsTracker',
-    'CheckpointComparison',
     'TrainingPhase',
+    'RepresentationalTrajectory',
+    'TrainingPhaseDetection',
+    'GradientAttribution',
 
     # Geometry and Topology
-    'ManifoldAnalyzer',
-    'TopologyAnalyzer',
-    'CurvatureEstimator',
+    'ManifoldGeometry',
+    'TopologicalAnalysis',
+    'ManifoldVisualization',
+    'PersistenceResults',
+    'ManifoldMetrics',
 
     # Reporting
     'MechIntReporter',

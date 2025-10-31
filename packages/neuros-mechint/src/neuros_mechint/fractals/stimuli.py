@@ -371,7 +371,7 @@ class FractalPatterns:
         return torch.stack(fractals, dim=0)
 
 
-class Fractal TimeSeries:
+class FractalTimeSeries:
     """
     Combined fractal time series generator with multiple methods.
 
