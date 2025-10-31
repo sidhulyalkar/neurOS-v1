@@ -60,31 +60,27 @@ Status: PLACEHOLDER - Using parent-level dynamics.py for now
 # Import is handled at package level in neuros_mechint/__init__.py
 # which imports directly from neuros_mechint.dynamics (the .py file)
 
-__all__ = []  # Empty until refactored
+# Partial activation: Import completed modules
+from .neural_ode import FlowFieldAnalysis, ODETrajectory, NeuralODEIntegrator
+from .slow_features import SlowFeatureResult, SlowFeatureAnalyzer
 
-# When refactoring is complete, uncomment these imports:
+__all__ = [
+    # Neural ODE components
+    'FlowFieldAnalysis',
+    'ODETrajectory',
+    'NeuralODEIntegrator',
+    # Slow feature components
+    'SlowFeatureResult',
+    'SlowFeatureAnalyzer',
+]
+
+# When full refactoring is complete, add these imports:
 # from .koopman import KoopmanOperator, DMD
 # from .lyapunov import LyapunovAnalyzer
 # from .fixed_points import FixedPointFinder
 # from .manifold import ManifoldAnalyzer
 # from .phase_space import PhaseSpaceAnalyzer
-# from .neural_ode import NeuralODEIntegrator
-# from .slow_features import SlowFeatureAnalyzer
 # from .granger import GrangerCausality
 # from .bifurcation import BifurcationDetector
 # from .perturbation import PerturbationAnalyzer
 # from .analyzer import DynamicsAnalyzer
-#
-# __all__ = [
-#     'KoopmanOperator', 'DMD',
-#     'LyapunovAnalyzer',
-#     'FixedPointFinder',
-#     'ManifoldAnalyzer',
-#     'PhaseSpaceAnalyzer',
-#     'NeuralODEIntegrator',
-#     'SlowFeatureAnalyzer',
-#     'GrangerCausality',
-#     'BifurcationDetector',
-#     'PerturbationAnalyzer',
-#     'DynamicsAnalyzer',
-# ]

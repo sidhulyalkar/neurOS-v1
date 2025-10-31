@@ -164,6 +164,12 @@ try:
         NESSAnalyzer,
         FluctuationTheoremResult,
         FluctuationTheoremAnalyzer,
+        LayerEnergetics,
+        EnergyCascadeResult,
+        EnergyCascadeAnalyzer,
+        HamiltonianComponents,
+        HamiltonianDecompositionResult,
+        HamiltonianDecomposer,
     )
 except ImportError:
     MutualInformationEstimate = None
@@ -184,6 +190,20 @@ except ImportError:
     NESSAnalyzer = None
     FluctuationTheoremResult = None
     FluctuationTheoremAnalyzer = None
+    LayerEnergetics = None
+    EnergyCascadeResult = None
+    EnergyCascadeAnalyzer = None
+    HamiltonianComponents = None
+    HamiltonianDecompositionResult = None
+    HamiltonianDecomposer = None
+
+# Enhanced Visualization Suite (optional - requires bokeh)
+try:
+    from neuros_mechint.visualization import (
+        EnhancedVisualizer,
+    )
+except ImportError:
+    EnhancedVisualizer = None
 
 # Training/Evaluation Hooks
 from neuros_mechint.hooks import (
@@ -250,9 +270,19 @@ except ImportError:
 try:
     from neuros_mechint.dynamics import (
         DynamicsAnalyzer,
+        FlowFieldAnalysis,
+        ODETrajectory,
+        NeuralODEIntegrator,
+        SlowFeatureResult,
+        SlowFeatureAnalyzer,
     )
 except ImportError:
     DynamicsAnalyzer = None
+    FlowFieldAnalysis = None
+    ODETrajectory = None
+    NeuralODEIntegrator = None
+    SlowFeatureResult = None
+    SlowFeatureAnalyzer = None
 
 # Counterfactual Interventions
 try:
@@ -520,6 +550,15 @@ __all__ = [
     'NESSAnalyzer',
     'FluctuationTheoremResult',
     'FluctuationTheoremAnalyzer',
+    'LayerEnergetics',
+    'EnergyCascadeResult',
+    'EnergyCascadeAnalyzer',
+    'HamiltonianComponents',
+    'HamiltonianDecompositionResult',
+    'HamiltonianDecomposer',
+
+    # Enhanced Visualization
+    'EnhancedVisualizer',
 
     # Training/Evaluation Hooks
     'MechIntConfig',
@@ -552,6 +591,11 @@ __all__ = [
 
     # Dynamics Analysis
     'DynamicsAnalyzer',
+    'FlowFieldAnalysis',
+    'ODETrajectory',
+    'NeuralODEIntegrator',
+    'SlowFeatureResult',
+    'SlowFeatureAnalyzer',
 
     # Counterfactual Interventions
     'LatentSurgery',

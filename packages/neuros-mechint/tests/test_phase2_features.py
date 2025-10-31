@@ -462,6 +462,232 @@ def test_pipeline():
         return False
 
 
+# ==================== TEST: NEURAL ODE ====================
+
+def test_neural_ode():
+    """Test Neural ODE integrator for continuous dynamics."""
+    try:
+        print("\n" + "="*80)
+        print("TEST: Neural ODE Integrator")
+        print("="*80)
+
+        from neuros_mechint.dynamics import NeuralODEIntegrator
+
+        # Simple velocity model (dx/dt = -x for damped oscillator)
+        class VelocityField(nn.Module):
+            def forward(self, x):
+                return -0.1 * x
+
+        model = VelocityField()
+        integrator = NeuralODEIntegrator(model, dt=0.1, method='euler')
+
+        # Initial state
+        initial_state = torch.randn(5, 10)
+
+        print(f"Initial state shape: {initial_state.shape}")
+
+        # Integrate trajectory
+        result = integrator.integrate_trajectory(
+            initial_state=initial_state,
+            time_span=(0, 10),
+            n_points=50
+        )
+
+        print(f"✓ Trajectory shape: {result.trajectory.shape}")
+        print(f"✓ Times shape: {result.times.shape}")
+        print(f"✓ Final state norm: {result.trajectory[-1].norm().item():.4f}")
+
+        # Analyze flow field
+        flow_result = integrator.analyze_flow_field(
+            state_space_bounds=(-2, 2),
+            n_points=10
+        )
+
+        print(f"✓ Flow field shape: {flow_result.flow_field.shape}")
+        print(f"✓ Fixed points found: {len(flow_result.fixed_points)}")
+
+        print("\n✅ NEURAL ODE TEST PASSED")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ NEURAL ODE TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# ==================== TEST: SLOW FEATURES ====================
+
+def test_slow_features():
+    """Test Slow Feature Analysis for temporal hierarchies."""
+    try:
+        print("\n" + "="*80)
+        print("TEST: Slow Feature Analysis")
+        print("="*80)
+
+        from neuros_mechint.dynamics import SlowFeatureAnalyzer
+
+        analyzer = SlowFeatureAnalyzer(
+            expansion_degree=2,
+            whitening=True,
+            verbose=False
+        )
+
+        # Create synthetic temporal data with slow and fast components
+        n_timesteps = 200
+        t = np.linspace(0, 10, n_timesteps)
+
+        # Slow component (low frequency)
+        slow = np.sin(0.5 * t)
+        # Fast component (high frequency)
+        fast = np.sin(10 * t)
+
+        # Mix components
+        activations = np.column_stack([
+            slow + 0.1 * fast,
+            0.5 * slow + 0.3 * fast,
+            fast + 0.05 * slow
+        ])
+
+        print(f"Activation timeseries shape: {activations.shape}")
+
+        # Analyze
+        result = analyzer.analyze_timeseries(
+            activations=activations,
+            n_slow_features=2
+        )
+
+        print(f"✓ Extracted {result.n_features} slow features")
+        print(f"✓ Delta values: {result.delta_values}")
+        print(f"✓ Explained slowness: {result.explained_slowness_ratio}")
+        print(f"✓ Characteristic times: {result.characteristic_times}")
+
+        # Check that slowest feature has smallest delta value
+        assert result.delta_values[0] < result.delta_values[1], "Slowest feature should have smallest delta"
+
+        print("\n✅ SLOW FEATURES TEST PASSED")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ SLOW FEATURES TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# ==================== TEST: ENERGY CASCADES ====================
+
+def test_energy_cascades():
+    """Test Energy Cascade analysis through network layers."""
+    try:
+        print("\n" + "="*80)
+        print("TEST: Energy Cascade Analysis")
+        print("="*80)
+
+        from neuros_mechint.energy_flow import EnergyCascadeAnalyzer
+
+        model = SimpleTestModel()
+        analyzer = EnergyCascadeAnalyzer(
+            model=model,
+            energy_metric='variance',
+            track_spectrum=True,
+            verbose=False
+        )
+
+        # Test inputs
+        inputs = torch.randn(32, 10)
+
+        print(f"Input shape: {inputs.shape}")
+
+        # Analyze cascade
+        result = analyzer.analyze_cascade(inputs=inputs)
+
+        print(f"✓ Analyzed {len(result.layer_energetics)} layers")
+        print(f"✓ Total input energy: {result.total_input_energy:.4f}")
+        print(f"✓ Total dissipation: {result.total_dissipation:.4f}")
+        print(f"✓ Energy balance: {result.energy_balance:.6f}")
+        print(f"✓ Cascade exponent: {result.cascade_exponent}")
+
+        # Check energy conservation (balance should be close to 0)
+        assert abs(result.energy_balance) < result.total_input_energy * 0.5, "Energy not conserved"
+
+        # Check layer energetics
+        for i, layer_e in enumerate(result.layer_energetics):
+            print(f"  Layer {i} ({layer_e.layer_name}):")
+            print(f"    - Dissipation: {layer_e.dissipation:.4f}")
+            print(f"    - Transfer efficiency: {layer_e.transfer_efficiency:.4f}")
+
+        print("\n✅ ENERGY CASCADES TEST PASSED")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ ENERGY CASCADES TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# ==================== TEST: HAMILTONIAN DECOMPOSITION ====================
+
+def test_hamiltonian_decomposition():
+    """Test Hamiltonian decomposition of network dynamics."""
+    try:
+        print("\n" + "="*80)
+        print("TEST: Hamiltonian Decomposition")
+        print("="*80)
+
+        from neuros_mechint.energy_flow import HamiltonianDecomposer
+
+        # Simple dynamical system (velocity field)
+        class SimpleVelocityField(nn.Module):
+            def forward(self, x):
+                # Mix of conservative (rotation) and dissipative (damping)
+                return 0.5 * torch.cat([x[:, 1:2], -x[:, 0:1]], dim=1) - 0.1 * x
+
+        model = SimpleVelocityField()
+        decomposer = HamiltonianDecomposer(
+            model=model,
+            dt=0.01,
+            method='helmholtz',
+            verbose=False
+        )
+
+        # Initial states
+        initial_states = torch.randn(5, 2)
+
+        print(f"Initial states shape: {initial_states.shape}")
+
+        # Decompose dynamics
+        result = decomposer.decompose_dynamics(
+            initial_states=initial_states,
+            n_timesteps=100,
+            compute_lyapunov=False
+        )
+
+        print(f"✓ Hamiltonian fraction: {result.hamiltonian_fraction:.3f}")
+        print(f"✓ Dissipation fraction: {result.dissipation_fraction:.3f}")
+        print(f"✓ States shape: {result.states.shape}")
+        print(f"✓ Conservative field shape: {result.components.conservative_field.shape}")
+        print(f"✓ Dissipative field shape: {result.components.dissipative_field.shape}")
+
+        # Check that fractions sum to approximately 1
+        total_fraction = result.hamiltonian_fraction + result.dissipation_fraction
+        assert 0.8 < total_fraction < 1.2, f"Fractions should sum to ~1, got {total_fraction}"
+
+        # Check divergence (should be negative for dissipative systems)
+        mean_divergence = result.components.divergence.mean()
+        print(f"✓ Mean divergence: {mean_divergence:.6f}")
+
+        print("\n✅ HAMILTONIAN DECOMPOSITION TEST PASSED")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ HAMILTONIAN DECOMPOSITION TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 # ==================== MAIN TEST RUNNER ====================
 
 def run_all_tests():
@@ -476,6 +702,10 @@ def run_all_tests():
         ("Fluctuation Theorems", test_fluctuation_theorems),
         ("MechInt Database", test_database),
         ("MechInt Pipeline", test_pipeline),
+        ("Neural ODE", test_neural_ode),
+        ("Slow Features", test_slow_features),
+        ("Energy Cascades", test_energy_cascades),
+        ("Hamiltonian Decomposition", test_hamiltonian_decomposition),
     ]
 
     results = {}

@@ -84,6 +84,20 @@ from .fluctuation_theorems import (
     FluctuationTheoremAnalyzer,
 )
 
+# Import Energy Cascades components
+from .energy_cascades import (
+    LayerEnergetics,
+    EnergyCascadeResult,
+    EnergyCascadeAnalyzer,
+)
+
+# Import Hamiltonian Decomposition components
+from .hamiltonian import (
+    HamiltonianComponents,
+    HamiltonianDecompositionResult,
+    HamiltonianDecomposer,
+)
+
 __all__ = [
     # Data structures (from energy_flow.py)
     'MutualInformationEstimate',
@@ -114,4 +128,14 @@ __all__ = [
     # Fluctuation theorems (from fluctuation_theorems.py)
     'FluctuationTheoremResult',
     'FluctuationTheoremAnalyzer',
+
+    # Energy cascades (from energy_cascades.py)
+    'LayerEnergetics',
+    'EnergyCascadeResult',
+    'EnergyCascadeAnalyzer',
+
+    # Hamiltonian decomposition (from hamiltonian.py)
+    'HamiltonianComponents',
+    'HamiltonianDecompositionResult',
+    'HamiltonianDecomposer',
 ]
