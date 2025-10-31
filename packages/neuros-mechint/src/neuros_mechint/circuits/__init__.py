@@ -28,7 +28,14 @@ from .feature_viz import (
     ActivationMaximization,
 )
 
-# Circuit extraction module not yet implemented
+# Automated Circuit Discovery (ACDC)
+from .acdc import (
+    Edge,
+    Circuit,
+    AutomatedCircuitDiscovery,
+)
+
+# Circuit extraction module - additional components to be implemented
 # from .circuit_extraction import (
 #     CircuitExtractor,
 #     EICircuitDiagram,
@@ -48,6 +55,10 @@ __all__ = [
     'FeatureVisualizer',
     'OptimalStimulus',
     'ActivationMaximization',
+    # ACDC (Automated Circuit Discovery)
+    'Edge',
+    'Circuit',
+    'AutomatedCircuitDiscovery',
     # Circuit Extraction (not yet implemented)
     # 'CircuitExtractor',
     # 'EICircuitDiagram',

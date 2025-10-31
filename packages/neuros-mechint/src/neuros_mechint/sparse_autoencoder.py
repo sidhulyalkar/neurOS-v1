@@ -115,6 +115,62 @@ class SparseAutoencoder(nn.Module):
         else:
             return reconstruction, total_loss
 
+    def train_on_raw_activations(
+        self,
+        activations: torch.Tensor,
+        num_epochs: int = 100,
+        batch_size: int = 128,
+        learning_rate: float = 1e-3,
+        device: str = 'cuda'
+    ) -> List[float]:
+        """
+        Train SAE directly on provided activation vectors.
+
+        Args:
+            activations: Tensor of activation vectors (N, latent_dim)
+            num_epochs: Number of training epochs
+            batch_size: Batch size for training
+            learning_rate: Learning rate
+            device: Device to train on
+
+        Returns:
+            losses: List of average losses per epoch
+        """
+        self.to(device)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+        
+        # Create dataset and dataloader
+        dataset = torch.utils.data.TensorDataset(activations)
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=batch_size, shuffle=True
+        )
+        
+        losses = []
+        
+        for epoch in range(num_epochs):
+            epoch_losses = []
+            
+            for (batch,) in dataloader:  # Note comma to unpack the tuple
+                batch = batch.to(device)
+                
+                # Forward pass
+                reconstruction, loss = self(batch)
+                
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                epoch_losses.append(loss.item())
+            
+            avg_loss = sum(epoch_losses) / len(epoch_losses)
+            losses.append(avg_loss)
+            
+            if epoch % 10 == 0:
+                print(f"Epoch {epoch}/{num_epochs}: Loss = {avg_loss:.6f}")
+        
+        return losses
+
     def train_on_activations(
         self,
         model: nn.Module,
@@ -211,11 +267,29 @@ class SparseAutoencoder(nn.Module):
         Returns:
             features: (batch, dictionary_size) feature activations
         """
+        # Ensure activations are on the same device as the encoder weights
+        # and return features on CPU by default to avoid device-mismatch
+        # when the caller keeps activations on CPU (common in analysis code).
         with torch.no_grad():
+            # Determine encoder device (works if model has parameters)
+            try:
+                encoder_device = next(self.encoder.parameters()).device
+            except StopIteration:
+                # Fallback to current default device
+                encoder_device = torch.device('cpu')
+
+            # Move inputs to encoder device if needed
+            activations_device = activations.device
+            if activations_device != encoder_device:
+                activations = activations.to(encoder_device)
+
             pre_act = self.encoder(activations)
             features = F.relu(pre_act)
 
-        return features
+            # Move features to CPU for downstream analysis/plotting convenience
+            features_cpu = features.cpu()
+
+        return features_cpu
 
     def interpret_feature(
         self,

@@ -155,7 +155,10 @@ try:
         InformationFlowAnalyzer,
         EnergyLandscape,
         EntropyProduction,
-        compute_information_plane_trajectory
+        compute_information_plane_trajectory,
+        LANDAUER_LIMIT,
+        LandauerAnalysis,
+        LandauerAnalyzer,
     )
 except ImportError:
     MutualInformationEstimate = None
@@ -168,6 +171,9 @@ except ImportError:
     EnergyLandscape = None
     EntropyProduction = None
     compute_information_plane_trajectory = None
+    LANDAUER_LIMIT = None
+    LandauerAnalysis = None
+    LandauerAnalyzer = None
 
 # Training/Evaluation Hooks
 from neuros_mechint.hooks import (
@@ -331,6 +337,9 @@ try:
         FeatureVisualizer,
         OptimalStimulus,
         ActivationMaximization,
+        Edge,
+        Circuit,
+        AutomatedCircuitDiscovery,
     )
 except ImportError:
     LatentCircuitModel = None
@@ -342,6 +351,9 @@ except ImportError:
     FeatureVisualizer = None
     OptimalStimulus = None
     ActivationMaximization = None
+    Edge = None
+    Circuit = None
+    AutomatedCircuitDiscovery = None
 
 # Biophysical Modeling Suite (optional)
 try:
@@ -397,6 +409,30 @@ except ImportError:
     InformationFlow = None
     InterventionCausalGraph = None
 
+# Unified Result Data Structures (always available - no dependencies)
+from neuros_mechint.results import (
+    ResultProtocol,
+    MechIntResult,
+    CircuitResult,
+    DynamicsResult,
+    InformationResult,
+    AlignmentResult,
+    FractalResult,
+    ResultCollection,
+)
+
+# Database for Result Storage and Caching
+from neuros_mechint.database import (
+    MechIntDatabase,
+)
+
+# Standardized Pipeline for Workflow Automation
+from neuros_mechint.pipeline import (
+    PipelineConfig,
+    AnalysisStage,
+    MechIntPipeline,
+)
+
 __all__ = [
     # Version
     '__version__',
@@ -448,6 +484,9 @@ __all__ = [
     'EnergyLandscape',
     'EntropyProduction',
     'compute_information_plane_trajectory',
+    'LANDAUER_LIMIT',
+    'LandauerAnalysis',
+    'LandauerAnalyzer',
 
     # Training/Evaluation Hooks
     'MechIntConfig',
@@ -538,6 +577,9 @@ __all__ = [
     'FeatureVisualizer',
     'OptimalStimulus',
     'ActivationMaximization',
+    'Edge',
+    'Circuit',
+    'AutomatedCircuitDiscovery',
 
     # Biophysical Modeling Suite
     'SurrogateGradient',
@@ -563,4 +605,22 @@ __all__ = [
     'PathAnalyzer',
     'InformationFlow',
     'InterventionCausalGraph',
+
+    # Unified Result Data Structures
+    'ResultProtocol',
+    'MechIntResult',
+    'CircuitResult',
+    'DynamicsResult',
+    'InformationResult',
+    'AlignmentResult',
+    'FractalResult',
+    'ResultCollection',
+
+    # Database
+    'MechIntDatabase',
+
+    # Pipeline
+    'PipelineConfig',
+    'AnalysisStage',
+    'MechIntPipeline',
 ]
