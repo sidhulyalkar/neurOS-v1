@@ -35,6 +35,14 @@ try:
 except ImportError:
     PLOTLY_AVAILABLE = False
 
+try:
+    from bokeh.plotting import figure, output_file, save
+    from bokeh.layouts import column, row
+    from bokeh.io import export_png
+    BOKEH_AVAILABLE = True
+except Exception:
+    BOKEH_AVAILABLE = False
+
 from neuros_mechint.sparse_autoencoder import SparseAutoencoder
 
 
@@ -683,6 +691,183 @@ class MultiLayerSAEVisualizer:
     def get_visualizer(self, layer_name: str) -> SAEVisualizer:
         """Get visualizer for specific layer."""
         return self.visualizers[layer_name]
+
+    def _compute_features_from_activations(self, activations_by_layer: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """Compute SAE feature activations for each layer from raw activations.
+
+        Returns dict mapping layer_name -> feature activations (torch.Tensor)
+        """
+        features_by_layer = {}
+        for layer_name, acts in activations_by_layer.items():
+            sae = self.saes.get(layer_name)
+            if sae is None:
+                continue
+            try:
+                # SAE is expected to return CPU tensors for feature activations
+                feats = sae.get_feature_activations(acts)
+                features_by_layer[layer_name] = feats
+            except Exception:
+                # Fallback: move activations to SAE device then compute
+                try:
+                    device = next(sae.encoder.parameters()).device
+                    feats = sae.get_feature_activations(acts.to(device)).cpu()
+                    features_by_layer[layer_name] = feats
+                except Exception:
+                    continue
+        return features_by_layer
+
+    def plot_sparsity_comparison(self, activations_by_layer: Dict[str, torch.Tensor], use_bokeh: bool = False):
+        """Plot sparsity and related statistics across layers.
+
+        If use_bokeh=True and Bokeh is available, returns a Bokeh layout and saves an HTML. Otherwise uses matplotlib and
+        delegates to plot_layer_comparison.
+        """
+        features_by_layer = self._compute_features_from_activations(activations_by_layer)
+
+        if not use_bokeh or not BOKEH_AVAILABLE:
+            # Reuse existing matplotlib-based comparison
+            return self.plot_layer_comparison(features_by_layer)
+
+        # Compute stats
+        layer_names = list(features_by_layer.keys())
+        mean_l0 = []
+        mean_activation = []
+        dead_features = []
+        dict_sizes = []
+
+        for name in layer_names:
+            feats = features_by_layer[name].cpu().numpy()
+            mean_l0.append((feats > 0).sum(axis=1).mean())
+            mean_activation.append(feats.mean())
+            activation_freq = (feats > 0).mean(axis=0)
+            dead_features.append(int((activation_freq == 0).sum()))
+            dict_sizes.append(getattr(self.saes[name], 'dictionary_size', feats.shape[1]))
+
+        # Create Bokeh figures
+        figs = []
+        p1 = figure(x_range=layer_names, title='Mean L0 Sparsity by Layer', height=300, width=600)
+        p1.vbar(x=layer_names, top=mean_l0, width=0.6, color='navy')
+        p1.xaxis.major_label_orientation = 1
+        figs.append(p1)
+
+        p2 = figure(x_range=layer_names, title='Mean Activation by Layer', height=300, width=600)
+        p2.vbar(x=layer_names, top=mean_activation, width=0.6, color='green')
+        p2.xaxis.major_label_orientation = 1
+        figs.append(p2)
+
+        p3 = figure(x_range=layer_names, title='Dead Features by Layer', height=300, width=600)
+        p3.vbar(x=layer_names, top=dead_features, width=0.6, color='red')
+        p3.xaxis.major_label_orientation = 1
+        figs.append(p3)
+
+        p4 = figure(x_range=layer_names, title='Dictionary Size by Layer', height=300, width=600)
+        p4.vbar(x=layer_names, top=dict_sizes, width=0.6, color='orange')
+        p4.xaxis.major_label_orientation = 1
+        figs.append(p4)
+
+        layout = column(row(figs[0], figs[1]), row(figs[2], figs[3]))
+
+        # Save HTML
+        out_path = self.output_dir / 'sparsity_comparison.html'
+        try:
+            output_file(str(out_path), title='Sparsity Comparison')
+            save(layout)
+        except Exception:
+            # If saving fails, continue (e.g., no webdriver for export)
+            pass
+
+        return layout
+
+    def plot_reconstruction_comparison(self, activations_by_layer: Dict[str, torch.Tensor], use_bokeh: bool = False):
+        """Compare reconstruction quality (explained variance) across layers.
+
+        activations_by_layer: dict mapping layer name -> activations (torch.Tensor)
+        """
+        explained = {}
+        for name, acts in activations_by_layer.items():
+            sae = self.saes.get(name)
+            if sae is None:
+                continue
+            try:
+                device = next(sae.encoder.parameters()).device
+                acts_device = acts.to(device)
+                with torch.no_grad():
+                    recon, _ = sae(acts_device)
+                    mse = F.mse_loss(recon, acts_device).item()
+                    var = acts_device.var().item()
+                    explained[name] = float(1 - mse / var) if var > 0 else 0.0
+            except Exception:
+                explained[name] = 0.0
+
+        layer_names = list(explained.keys())
+        values = [explained[n] for n in layer_names]
+
+        if not use_bokeh or not BOKEH_AVAILABLE:
+            # Matplotlib bar chart
+            fig, ax = plt.subplots(figsize=(8, 4))
+            ax.bar(layer_names, values, color='teal', alpha=0.8)
+            ax.set_ylabel('Explained Variance')
+            ax.set_title('Reconstruction Quality by Layer')
+            ax.set_ylim(0, 1)
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
+            save_path = self.output_dir / 'reconstruction_comparison.png'
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            return fig
+
+        # Bokeh bar chart
+        p = figure(x_range=layer_names, title='Reconstruction Quality by Layer', height=400, width=800)
+        p.vbar(x=layer_names, top=values, width=0.6, color='teal')
+        p.y_range.start = 0
+        p.y_range.end = 1
+        p.xaxis.major_label_orientation = 1
+
+        out_path = self.output_dir / 'reconstruction_comparison.html'
+        try:
+            output_file(str(out_path), title='Reconstruction Comparison')
+            save(p)
+        except Exception:
+            pass
+
+        return p
+
+    def plot_feature_frequency_distributions(self, activations_by_layer: Dict[str, torch.Tensor], use_bokeh: bool = False):
+        """Plot distribution of feature activation frequencies for each layer."""
+        features_by_layer = self._compute_features_from_activations(activations_by_layer)
+
+        if not use_bokeh or not BOKEH_AVAILABLE:
+            # Matplotlib: multiple histograms
+            fig, ax = plt.subplots(figsize=(10, 5))
+            for name, feats in features_by_layer.items():
+                freq = (feats.cpu().numpy() > 0).mean(axis=0)
+                ax.hist(freq, bins=50, alpha=0.4, label=name)
+            ax.set_xlabel('Activation Frequency')
+            ax.set_ylabel('Count')
+            ax.set_title('Feature Activation Frequency Distributions')
+            ax.legend()
+            plt.tight_layout()
+            save_path = self.output_dir / 'feature_frequency_distributions.png'
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            return fig
+
+        # Bokeh: multiple histogram panels
+        panels = []
+        for name, feats in features_by_layer.items():
+            freq = (feats.cpu().numpy() > 0).mean(axis=0)
+            hist, edges = np.histogram(freq, bins=40)
+            p = figure(title=f'Feature Frequency - {name}', height=300, width=350)
+            p.quad(top=hist, bottom=0, left=edges[:-1], right=edges[1:], fill_alpha=0.6)
+            panels.append(p)
+
+        layout = row(*panels)
+        out_path = self.output_dir / 'feature_frequency_distributions.html'
+        try:
+            output_file(str(out_path), title='Feature Frequency Distributions')
+            save(layout)
+        except Exception:
+            pass
+
+        return layout
 
 
 # Example usage
