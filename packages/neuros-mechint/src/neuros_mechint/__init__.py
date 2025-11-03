@@ -144,66 +144,18 @@ from neuros_mechint.graph_builder import (
 )
 
 # Energy Flow and Information Landscape Suite
-try:
-    from neuros_mechint.energy_flow import (
-        MutualInformationEstimate,
-        InformationPlane,
-        EnergyFunction,
-        Basin,
-        EntropyProductionEstimate,
-        MINENetwork,
-        InformationFlowAnalyzer,
-        EnergyLandscape,
-        EntropyProduction,
-        compute_information_plane_trajectory,
-        LANDAUER_LIMIT,
-        LandauerAnalysis,
-        LandauerAnalyzer,
-        SteadyStateMetrics,
-        NESSAnalysis,
-        NESSAnalyzer,
-        FluctuationTheoremResult,
-        FluctuationTheoremAnalyzer,
-        LayerEnergetics,
-        EnergyCascadeResult,
-        EnergyCascadeAnalyzer,
-        HamiltonianComponents,
-        HamiltonianDecompositionResult,
-        HamiltonianDecomposer,
-    )
-except ImportError:
-    MutualInformationEstimate = None
-    InformationPlane = None
-    EnergyFunction = None
-    Basin = None
-    EntropyProductionEstimate = None
-    MINENetwork = None
-    InformationFlowAnalyzer = None
-    EnergyLandscape = None
-    EntropyProduction = None
-    compute_information_plane_trajectory = None
-    LANDAUER_LIMIT = None
-    LandauerAnalysis = None
-    LandauerAnalyzer = None
-    SteadyStateMetrics = None
-    NESSAnalysis = None
-    NESSAnalyzer = None
-    FluctuationTheoremResult = None
-    FluctuationTheoremAnalyzer = None
-    LayerEnergetics = None
-    EnergyCascadeResult = None
-    EnergyCascadeAnalyzer = None
-    HamiltonianComponents = None
-    HamiltonianDecompositionResult = None
-    HamiltonianDecomposer = None
-
-# Enhanced Visualization Suite (optional - requires bokeh)
-try:
-    from neuros_mechint.visualization import (
-        EnhancedVisualizer,
-    )
-except ImportError:
-    EnhancedVisualizer = None
+from neuros_mechint.energy_flow import (
+    MutualInformationEstimate,
+    InformationPlane,
+    EnergyFunction,
+    Basin,
+    EntropyProductionEstimate,
+    MINENetwork,
+    InformationFlowAnalyzer,
+    EnergyLandscape,
+    EntropyProduction,
+    compute_information_plane_trajectory
+)
 
 # Training/Evaluation Hooks
 from neuros_mechint.hooks import (
@@ -212,6 +164,8 @@ from neuros_mechint.hooks import (
     MechIntHooks,
     EvalMechIntRunner
 )
+
+# Optional components for hooks (requires pytorch-lightning and fastapi)
 try:
     from neuros_mechint.hooks import MechIntCallback, FastAPIIntegrationMixin
 except ImportError:
@@ -236,97 +190,40 @@ except ImportError:
     GenerativePathAttribution = None
     visualize_attributions = None
 
-# Brain Alignment Suite (optional - requires sklearn)
-try:
-    from neuros_mechint.alignment import (
-        CCA,
-        RegularizedCCA,
-        KernelCCA,
-        TimeVaryingCCA,
-        RSA,
-        RepresentationalDissimilarityMatrix,
-        HierarchicalRSA,
-        PLS,
-        CrossValidatedPLS,
-        NoiseCeiling,
-        BootstrapCI,
-        PermutationTest,
-    )
-except ImportError:
-    CCA = None
-    RegularizedCCA = None
-    KernelCCA = None
-    TimeVaryingCCA = None
-    RSA = None
-    RepresentationalDissimilarityMatrix = None
-    HierarchicalRSA = None
-    PLS = None
-    CrossValidatedPLS = None
-    NoiseCeiling = None
-    BootstrapCI = None
-    PermutationTest = None
+# Brain Alignment Suite
+from neuros_mechint.alignment import (
+    CCA,
+    RSA,
+    PLS,
+)
 
-# Dynamics Analysis (optional - requires matplotlib)
-try:
-    from neuros_mechint.dynamics import (
-        DynamicsAnalyzer,
-        FlowFieldAnalysis,
-        ODETrajectory,
-        NeuralODEIntegrator,
-        SlowFeatureResult,
-        SlowFeatureAnalyzer,
-    )
-except ImportError:
-    DynamicsAnalyzer = None
-    FlowFieldAnalysis = None
-    ODETrajectory = None
-    NeuralODEIntegrator = None
-    SlowFeatureResult = None
-    SlowFeatureAnalyzer = None
+# Dynamics Analysis
+from neuros_mechint.dynamics import (
+    DynamicsAnalyzer,
+    KoopmanOperator,
+    LyapunovAnalyzer,
+)
 
 # Counterfactual Interventions
-try:
-    from neuros_mechint.counterfactuals import (
-        LatentSurgery,
-        DoCalculusInterventions,
-        SyntheticLesions,
-        CounterfactualResult,
-    )
-except ImportError:
-    LatentSurgery = None
-    DoCalculusInterventions = None
-    SyntheticLesions = None
-    CounterfactualResult = None
+from neuros_mechint.counterfactuals import (
+    LatentSurgery,
+    DoCalculusEngine,
+    SyntheticLesion,
+)
 
-# Meta-Dynamics (Training Trajectory Analysis - optional)
-try:
-    from neuros_mechint.meta_dynamics import (
-        TrainingPhase,
-        RepresentationalTrajectory,
-        TrainingPhaseDetection,
-        GradientAttribution,
-    )
-except ImportError:
-    TrainingPhase = None
-    RepresentationalTrajectory = None
-    TrainingPhaseDetection = None
-    GradientAttribution = None
+# Meta-Dynamics (Training Trajectory Analysis)
+from neuros_mechint.meta_dynamics import (
+    MetaDynamicsTracker,
+    CheckpointComparison,
+    TrainingPhase,
+)
 
-# Geometry and Topology (optional - requires scipy)
-try:
-    from neuros_mechint.geometry_topology import (
-        ManifoldGeometry,
-        TopologicalAnalysis,
-        ManifoldVisualization,
-        PersistenceResults,
-        ManifoldMetrics,
-    )
-except ImportError:
-    ManifoldGeometry = None
-    TopologicalAnalysis = None
-    ManifoldVisualization = None
-    PersistenceResults = None
-    ManifoldMetrics = None
+# Geometry and Topology
+from neuros_mechint.geometry_topology import (
+    ManifoldAnalyzer,
+    TopologyAnalyzer,
+    CurvatureEstimator,
+)
 
 # Comprehensive Reporting (optional - requires matplotlib)
 try:
@@ -365,130 +262,46 @@ from neuros_mechint.fractals import (
     CausalScaleAblation,
 )
 
-# Circuit Inference Suite (optional)
-try:
-    from neuros_mechint.circuits import (
-        LatentCircuitModel,
-        CircuitFitter,
-        RecurrentDynamicsAnalyzer,
-        DUNLModel,
-        MixedSelectivityAnalyzer,
-        FactorDecomposition,
-        FeatureVisualizer,
-        OptimalStimulus,
-        ActivationMaximization,
-        Edge,
-        Circuit,
-        AutomatedCircuitDiscovery,
-        PatchEffect,
-        PathPatchingResult,
-        PathPatcher,
-        CircuitComparison,
-        MultiCircuitAnalysis,
-        CircuitComparator,
-        MotifInstance,
-        MotifAnalysis,
-        MotifDetector,
-    )
-except ImportError:
-    LatentCircuitModel = None
-    CircuitFitter = None
-    RecurrentDynamicsAnalyzer = None
-    DUNLModel = None
-    MixedSelectivityAnalyzer = None
-    FactorDecomposition = None
-    FeatureVisualizer = None
-    OptimalStimulus = None
-    ActivationMaximization = None
-    Edge = None
-    Circuit = None
-    AutomatedCircuitDiscovery = None
-    PatchEffect = None
-    PathPatchingResult = None
-    PathPatcher = None
-    CircuitComparison = None
-    MultiCircuitAnalysis = None
-    CircuitComparator = None
-    MotifInstance = None
-    MotifAnalysis = None
-    MotifDetector = None
+# Circuit Inference Suite
+from neuros_mechint.circuits import (
+    LatentCircuitModel,
+    CircuitFitter,
+    RecurrentDynamicsAnalyzer,
+    DUNLModel,
+    MixedSelectivityAnalyzer,
+    FactorDecomposition,
+    FeatureVisualizer,
+    OptimalStimulus,
+    ActivationMaximization,
+)
 
-# Biophysical Modeling Suite (optional)
-try:
-    from neuros_mechint.biophysical import (
-        SurrogateGradient,
-        LeakyIntegrateFireNeuron,
-        IzhikevichNeuron,
-        HodgkinHuxleyNeuron,
-        SpikingNeuralNetwork,
-        DalesLawConstraint,
-        DalesLinear,
-        EINetworkClassifier,
-        RecurrentDalesNetwork,
-        DalesLossRegularizer,
-    )
-except ImportError:
-    SurrogateGradient = None
-    LeakyIntegrateFireNeuron = None
-    IzhikevichNeuron = None
-    HodgkinHuxleyNeuron = None
-    SpikingNeuralNetwork = None
-    DalesLawConstraint = None
-    DalesLinear = None
-    EINetworkClassifier = None
-    RecurrentDalesNetwork = None
-    DalesLossRegularizer = None
+# Biophysical Modeling Suite
+from neuros_mechint.biophysical import (
+    SurrogateGradient,
+    LeakyIntegrateFireNeuron,
+    IzhikevichNeuron,
+    HodgkinHuxleyNeuron,
+    SpikingNeuralNetwork,
+    DalesLawConstraint,
+    DalesLinear,
+    EINetworkClassifier,
+    RecurrentDalesNetwork,
+    DalesLossRegularizer,
+)
 
 # Causal Interventions Suite
-try:
-    from neuros_mechint.interventions import (
-        ActivationPatcher,
-        ResidualStreamPatcher,
-        AttentionPatcher,
-        MLPPatcher,
-        NeuronAblation,
-        LayerAblation,
-        ComponentAblation,
-        AblationStudy,
-        PathAnalyzer,
-        InformationFlow,
-        CausalGraph as InterventionCausalGraph,  # Alias to avoid conflict
-    )
-except ImportError:
-    ActivationPatcher = None
-    ResidualStreamPatcher = None
-    AttentionPatcher = None
-    MLPPatcher = None
-    NeuronAblation = None
-    LayerAblation = None
-    ComponentAblation = None
-    AblationStudy = None
-    PathAnalyzer = None
-    InformationFlow = None
-    InterventionCausalGraph = None
-
-# Unified Result Data Structures (always available - no dependencies)
-from neuros_mechint.results import (
-    ResultProtocol,
-    MechIntResult,
-    CircuitResult,
-    DynamicsResult,
-    InformationResult,
-    AlignmentResult,
-    FractalResult,
-    ResultCollection,
-)
-
-# Database for Result Storage and Caching
-from neuros_mechint.database import (
-    MechIntDatabase,
-)
-
-# Standardized Pipeline for Workflow Automation
-from neuros_mechint.pipeline import (
-    PipelineConfig,
-    AnalysisStage,
-    MechIntPipeline,
+from neuros_mechint.interventions import (
+    ActivationPatcher,
+    ResidualStreamPatcher,
+    AttentionPatcher,
+    MLPPatcher,
+    NeuronAblation,
+    LayerAblation,
+    ComponentAblation,
+    AblationStudy,
+    PathAnalyzer,
+    InformationFlow,
+    CausalGraph as InterventionCausalGraph,  # Alias to avoid conflict
 )
 
 __all__ = [
@@ -542,23 +355,6 @@ __all__ = [
     'EnergyLandscape',
     'EntropyProduction',
     'compute_information_plane_trajectory',
-    'LANDAUER_LIMIT',
-    'LandauerAnalysis',
-    'LandauerAnalyzer',
-    'SteadyStateMetrics',
-    'NESSAnalysis',
-    'NESSAnalyzer',
-    'FluctuationTheoremResult',
-    'FluctuationTheoremAnalyzer',
-    'LayerEnergetics',
-    'EnergyCascadeResult',
-    'EnergyCascadeAnalyzer',
-    'HamiltonianComponents',
-    'HamiltonianDecompositionResult',
-    'HamiltonianDecomposer',
-
-    # Enhanced Visualization
-    'EnhancedVisualizer',
 
     # Training/Evaluation Hooks
     'MechIntConfig',
@@ -576,45 +372,29 @@ __all__ = [
     'visualize_attributions',
 
     # Brain Alignment
-    'CCA',
-    'RegularizedCCA',
-    'KernelCCA',
-    'TimeVaryingCCA',
-    'RSA',
-    'RepresentationalDissimilarityMatrix',
-    'HierarchicalRSA',
-    'PLS',
-    'CrossValidatedPLS',
-    'NoiseCeiling',
-    'BootstrapCI',
-    'PermutationTest',
+    'CCAAlignment',
+    'RSAAlignment',
+    'ProcrustesAlignment',
 
     # Dynamics Analysis
     'DynamicsAnalyzer',
-    'FlowFieldAnalysis',
-    'ODETrajectory',
-    'NeuralODEIntegrator',
-    'SlowFeatureResult',
-    'SlowFeatureAnalyzer',
+    'KoopmanOperator',
+    'LyapunovAnalyzer',
 
     # Counterfactual Interventions
     'LatentSurgery',
-    'DoCalculusInterventions',
-    'SyntheticLesions',
-    'CounterfactualResult',
+    'DoCalculusEngine',
+    'SyntheticLesion',
 
     # Meta-Dynamics
+    'MetaDynamicsTracker',
+    'CheckpointComparison',
     'TrainingPhase',
-    'RepresentationalTrajectory',
-    'TrainingPhaseDetection',
-    'GradientAttribution',
 
     # Geometry and Topology
-    'ManifoldGeometry',
-    'TopologicalAnalysis',
-    'ManifoldVisualization',
-    'PersistenceResults',
-    'ManifoldMetrics',
+    'ManifoldAnalyzer',
+    'TopologyAnalyzer',
+    'CurvatureEstimator',
 
     # Reporting
     'MechIntReporter',
@@ -654,18 +434,6 @@ __all__ = [
     'FeatureVisualizer',
     'OptimalStimulus',
     'ActivationMaximization',
-    'Edge',
-    'Circuit',
-    'AutomatedCircuitDiscovery',
-    'PatchEffect',
-    'PathPatchingResult',
-    'PathPatcher',
-    'CircuitComparison',
-    'MultiCircuitAnalysis',
-    'CircuitComparator',
-    'MotifInstance',
-    'MotifAnalysis',
-    'MotifDetector',
 
     # Biophysical Modeling Suite
     'SurrogateGradient',
@@ -691,22 +459,4 @@ __all__ = [
     'PathAnalyzer',
     'InformationFlow',
     'InterventionCausalGraph',
-
-    # Unified Result Data Structures
-    'ResultProtocol',
-    'MechIntResult',
-    'CircuitResult',
-    'DynamicsResult',
-    'InformationResult',
-    'AlignmentResult',
-    'FractalResult',
-    'ResultCollection',
-
-    # Database
-    'MechIntDatabase',
-
-    # Pipeline
-    'PipelineConfig',
-    'AnalysisStage',
-    'MechIntPipeline',
 ]
