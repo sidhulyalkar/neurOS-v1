@@ -6,28 +6,34 @@ I've created a **comprehensive educational resource** for learning mechanistic i
 
 ### ✅ Complete & Ready to Use
 
-1. **[README.md](README.md)** - Your learning roadmap
-   - Complete overview of all 10 notebooks
+1. **[README.md](README.md)** - Your complete learning roadmap
+   - Overview of all **16 notebooks** (Phase 1 + Phase 2)
    - Recommended learning paths for different audiences
    - Time estimates and prerequisites
    - Quick reference tables
 
-2. **[01_introduction_and_quickstart.ipynb](01_introduction_and_quickstart.ipynb)** - Perfect starting point!
-   - What mechanistic interpretability is and why it matters
-   - Hands-on SAE training example
-   - Hands-on activation patching example
-   - Overview of all library capabilities
-   - ~30-45 minutes to complete
+2. **Phase 1 Notebooks (01-10)** - Foundation & Core Techniques
+   - **01**: Introduction and Quickstart (~30-45 min)
+   - **02**: Sparse Autoencoders (~60-90 min)
+   - **03**: Causal Interventions (~60-90 min)
+   - **04**: Fractal Analysis (~75-120 min)
+   - **05**: Brain Alignment (~90-120 min)
+   - **06**: Dynamical Systems (~90-120 min)
+   - **07**: Circuit Extraction (~75-120 min)
+   - **08**: Biophysical Modeling (~90-120 min)
+   - **09**: Information Theory (~90-120 min)
+   - **10**: Advanced Topics (~120+ min)
 
-3. **[02_sparse_autoencoders.ipynb](02_sparse_autoencoders.ipynb)** - Deep dive into feature discovery
-   - The polysemanticity problem explained
-   - Complete SAE training from scratch
-   - Multi-layer and hierarchical SAEs
-   - Causal interventions with SAE features
-   - ~60-90 minutes to complete
+3. **Phase 2 Notebooks (11-16)** - Advanced Discovery & Infrastructure
+   - **11**: Path Patching & ACDC (~60-90 min)
+   - **12**: Thermodynamic Analysis (~90-120 min)
+   - **13**: Circuit Comparison & Motifs (~60-90 min)
+   - **14**: Neural ODE & Slow Features (~75-90 min)
+   - **15**: Energy Cascades & Hamiltonian (~75-90 min)
+   - **16**: Pipeline & Database (~45-60 min)
 
 4. **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** - Detailed guide for notebooks 03-10
-   - Complete code examples for all remaining notebooks
+   - Complete code examples for Phase 1 advanced notebooks
    - Conceptual explanations
    - Key equations and techniques
    - Ready-to-run code snippets
@@ -49,65 +55,81 @@ jupyter notebook 01_introduction_and_quickstart.ipynb
 4. Browse IMPLEMENTATION_GUIDE.md for advanced topics (30 min)
 ```
 
-### Full Course (1-2 Weeks)
-1. **Week 1**: Notebooks 01-02 + build your own SAE project
-2. **Week 2**: Use IMPLEMENTATION_GUIDE.md to implement notebooks 03-05
-3. **Week 3**: Advanced topics (notebooks 06-10) based on your interests
-4. **Week 4**: Apply to your own research!
+### Full Course (2-3 Weeks)
+1. **Week 1**: Foundation (Notebooks 01-03) + build your own SAE/patching project
+2. **Week 2**: Advanced Phase 1 (Notebooks 04-10) based on your interests
+3. **Week 3**: Phase 2 Circuit Discovery (Notebooks 11, 13) + Thermodynamics (Notebooks 12, 15)
+4. **Week 4**: Phase 2 Dynamics & Infrastructure (Notebooks 14, 16) + apply to your research!
 
 ## 📚 What Each Resource Covers
 
-### Notebooks 01-02 (Full Detail)
-These are **complete, production-ready** notebooks with:
+### Phase 1 Notebooks (01-10)
+**Complete, production-ready** notebooks with:
 - Comprehensive explanations
 - Working code examples
 - Visualizations
 - Exercises
-- References to papers
+- References to seminal papers
+
+Covers:
+- **01-02**: Foundation (SAEs, activation patching)
+- **03-05**: Causal interventions, fractals, brain alignment
+- **06-07**: Dynamical systems, circuit extraction
+- **08-10**: Biophysical models, information theory, advanced topics
+
+### Phase 2 Notebooks (11-16)
+**Advanced, cutting-edge** techniques with:
+- Automated circuit discovery algorithms
+- Thermodynamic and energy analysis
+- Continuous-time dynamics
+- Large-scale experiment infrastructure
+
+Covers:
+- **11**: Path Patching & Automated Circuit Discovery (ACDC)
+- **12**: Landauer's Principle, NESS, Fluctuation Theorems
+- **13**: Circuit Comparator, Motif Detection
+- **14**: Neural ODEs, Slow Feature Analysis
+- **15**: Energy Cascades, Hamiltonian Decomposition
+- **16**: MechIntDatabase, MechIntPipeline workflows
 
 ### Implementation Guide (Notebooks 03-10)
-This **detailed guide** provides:
-- Complete code examples you can copy and run
+This **detailed guide** provides code examples for Phase 1 advanced notebooks:
+- Complete code you can copy and run
 - Conceptual explanations
 - Mathematical foundations
 - Best practices
-- Key papers to read
-
-The guide covers:
-- **03**: Causal Interventions & Circuit Discovery
-- **04**: Fractal Analysis & Biological Realism
-- **05**: Brain Alignment (CCA, RSA, PLS)
-- **06**: Dynamical Systems Analysis
-- **07**: Circuit Extraction
-- **08**: Biophysical Modeling
-- **09**: Information Theory
-- **10**: Advanced Topics
 
 ## 🎓 Learning Paths by Audience
 
 ### For Neuroscientists
-```
-01 → 02 → 04 (Fractals) → 05 (Brain Alignment) → 08 (Biophysical)
-```
-Focus on biological realism and comparing models to brains.
+**Phase 1**: `01 → 02 → 04 (Fractals) → 05 (Brain Alignment) → 08 (Biophysical)`
+**Phase 2**: `12 (Thermodynamics) → 15 (Energy) → 14 (Neural ODEs)`
+
+Focus on biological realism, energy costs, and comparing models to brains.
 
 ### For AI Researchers
-```
-01 → 02 → 03 (Interventions) → 06 (Dynamics) → 07 (Circuits)
-```
-Focus on understanding model internals and circuits.
+**Phase 1**: `01 → 02 → 03 (Interventions) → 06 (Dynamics) → 07 (Circuits)`
+**Phase 2**: `11 (ACDC) → 13 (Comparison) → 16 (Infrastructure)`
+
+Focus on automated circuit discovery and large-scale analysis workflows.
 
 ### For ML Engineers
-```
-01 → 02 → 04 (Fractals) → 10 (Advanced)
-```
-Focus on practical tools for training and monitoring.
+**Phase 1**: `01 → 02 → 04 (Fractals) → 10 (Advanced)`
+**Phase 2**: `16 (Pipeline) → 12 (Thermodynamics) → 15 (Energy)`
+
+Focus on practical tools, energy efficiency, and production workflows.
+
+### For Circuit Discovery Researchers
+**Phase 1**: `01 → 02 → 03 → 07`
+**Phase 2**: `11 (ACDC) → 13 (Motifs) → 16 (Infrastructure)`
+
+Deep dive into automated circuit discovery and comparison methods.
 
 ### For Students
-```
-01 → 02 → 03 → 05 → 06
-```
-Build strong foundations in core techniques.
+**Phase 1**: `01 → 02 → 03 → 05 → 06`
+**Phase 2**: `11 → 12 → 14`
+
+Build strong foundations in core techniques, then explore Phase 2 methods.
 
 ## 💡 What Makes This Special
 
@@ -126,13 +148,11 @@ Unique emphasis on:
 - Comparisons to real neural data
 
 ### 3. Comprehensive
-Covers **95+ classes** from the library:
-- Sparse autoencoders
-- Causal interventions
-- Fractal metrics
-- Brain alignment
-- Dynamical systems
-- And much more!
+Covers **110+ classes** from the library:
+- **Phase 1**: SAEs, causal interventions, fractals, brain alignment, dynamics
+- **Phase 2**: ACDC, path patching, thermodynamics, Neural ODEs, energy cascades
+- Complete infrastructure for large-scale experiments
+- Database and pipeline management
 
 ### 4. Pedagogical
 Designed for learning:
@@ -164,10 +184,11 @@ Designed for learning:
 ## 📖 Additional Resources
 
 ### In This Folder
-- [README.md](README.md) - Learning path and overview
-- [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) - Detailed code examples
-- [01_introduction_and_quickstart.ipynb](01_introduction_and_quickstart.ipynb) - Start here!
-- [02_sparse_autoencoders.ipynb](02_sparse_autoencoders.ipynb) - Deep dive into SAEs
+- [README.md](README.md) - Complete learning path (16 notebooks)
+- [IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md) - Detailed code examples (Phase 1)
+- [PHASE2_GUIDE.md](PHASE2_GUIDE.md) - Comprehensive Phase 2 guide (coming soon!)
+- **Notebooks 01-10**: Phase 1 foundation and core techniques
+- **Notebooks 11-16**: Phase 2 advanced discovery and infrastructure
 
 ### Library Documentation
 - [Main README](../README.md) - Library overview
@@ -188,9 +209,9 @@ Found this helpful? Ways to contribute:
 - 🔬 Share your research using these tools
 - 💬 Help others in discussions
 
-## 🎯 Your Goal
+## 🎯 Your Goals
 
-By the end of this series, you should be able to:
+### After Phase 1 (Notebooks 01-10), you should be able to:
 1. ✅ Explain what mechanistic interpretability is
 2. ✅ Train SAEs to find interpretable features
 3. ✅ Use activation patching to find circuits
@@ -198,6 +219,15 @@ By the end of this series, you should be able to:
 5. ✅ Align model representations with brain data
 6. ✅ Analyze neural dynamics
 7. ✅ Apply these techniques to your own research
+
+### After Phase 2 (Notebooks 11-16), you should be able to:
+1. ✅ Run automated circuit discovery (ACDC) on any model
+2. ✅ Compare circuits across different architectures
+3. ✅ Analyze thermodynamic costs (Landauer bounds, entropy production)
+4. ✅ Decompose dynamics into conservative vs dissipative components
+5. ✅ Use Neural ODEs for continuous-time analysis
+6. ✅ Set up large-scale experiment pipelines
+7. ✅ Manage results with MechIntDatabase
 
 ## 🌟 Make This a Standard
 
