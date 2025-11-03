@@ -128,6 +128,83 @@ The notebooks are designed to be followed sequentially, building from foundation
 - **Prerequisites**: All previous notebooks
 - **Time**: 120+ minutes
 
+---
+
+## 🔥 Phase 2: Advanced Circuit Discovery & Thermodynamics
+
+Phase 2 extends the library with cutting-edge circuit discovery algorithms, thermodynamic analysis, continuous-time dynamics, and comprehensive infrastructure for large-scale experiments.
+
+### 🕸️ Circuit Discovery & Comparison
+
+#### [11_path_patching_and_acdc.ipynb](11_path_patching_and_acdc.ipynb)
+**What you'll learn**: Automated circuit discovery through systematic ablation
+- Path patching methodology for direct/indirect effects
+- Automated Circuit Discovery (ACDC) algorithm
+- Iterative edge pruning and importance ranking
+- Circuit visualization with NetworkX
+- Applications to attention heads and MLPs in transformers
+- **Prerequisites**: Notebooks 01-03, 07
+- **Time**: 60-90 minutes
+
+#### [13_circuit_comparison_and_motifs.ipynb](13_circuit_comparison_and_motifs.ipynb)
+**What you'll learn**: Comparing circuits across models and detecting structural patterns
+- Training multiple architectures on same task
+- Pairwise circuit comparison metrics
+- Structural similarity and motif detection
+- Statistical significance via Z-scores
+- Identifying universal vs architecture-specific circuits
+- **Prerequisites**: Notebooks 01-03, 07, 11
+- **Time**: 60-90 minutes
+
+### ⚡ Thermodynamics & Energy Analysis
+
+#### [12_thermodynamic_analysis.ipynb](12_thermodynamic_analysis.ipynb)
+**What you'll learn**: Physical limits and energy costs of neural computation
+- Landauer's Principle: minimum energy per bit erased
+- Non-Equilibrium Steady States (NESS) in RNNs
+- Fluctuation Theorems: Crooks, Jarzynski, FDT, Integral FT
+- Entropy production and reversibility
+- Per-layer thermodynamic cost analysis
+- **Prerequisites**: Notebooks 01-03, 06, 09
+- **Time**: 90-120 minutes
+
+#### [15_energy_cascades_and_hamiltonian.ipynb](15_energy_cascades_and_hamiltonian.ipynb)
+**What you'll learn**: Energy flow through layers and conservative vs dissipative dynamics
+- Energy cascade analysis with spectral entropy
+- Kolmogorov cascade theory in neural networks
+- Hamiltonian decomposition (Helmholtz method)
+- Conservative vs dissipative force fields
+- Phase space volume and divergence analysis
+- Energy conservation verification
+- **Prerequisites**: Notebooks 06, 09, 12
+- **Time**: 75-90 minutes
+
+### 🌊 Continuous-Time Dynamics
+
+#### [14_neural_ode_and_slow_features.ipynb](14_neural_ode_and_slow_features.ipynb)
+**What you'll learn**: Treating networks as continuous dynamical systems
+- Neural ODE integration methods (Euler, RK4, dopri5)
+- Flow field analysis and phase portraits
+- Slow Feature Analysis (SFA) for temporal hierarchies
+- Fixed point detection in continuous time
+- Applications to oscillatory and damped systems
+- **Prerequisites**: Notebooks 06, 09
+- **Time**: 75-90 minutes
+
+### 🗄️ Infrastructure & Workflows
+
+#### [16_pipeline_and_database.ipynb](16_pipeline_and_database.ipynb)
+**What you'll learn**: Organizing and automating large-scale experiments
+- MechIntDatabase: hybrid HDF5 + SQLite storage
+- Content-based deduplication with SHA256 hashing
+- Tag-based experiment organization and queries
+- MechIntPipeline: configurable multi-stage workflows
+- Pipeline modes: quick, standard, comprehensive
+- Checkpoint and recovery for long-running analyses
+- Custom analysis stages and report generation
+- **Prerequisites**: Notebooks 01-15 (overview of all techniques)
+- **Time**: 45-60 minutes
+
 ## How to Use These Notebooks
 
 ### Installation
@@ -160,11 +237,13 @@ pip install neuros-mechint[all]
 
 **For neuroscientists**: After the foundation (01-03), focus on notebooks 04, 05, and 08 for biological realism and brain alignment.
 
-**For AI researchers**: After the foundation, dive into notebooks 06, 07, and 09 for advanced dynamical systems and information theory.
+**For AI researchers**: After the foundation, dive into notebooks 06, 07, and 09 for advanced dynamical systems and information theory. Then explore Phase 2 thermodynamics (12, 15).
 
-**For practitioners**: Notebooks 02, 03, and 10 will help you integrate these techniques into your workflow.
+**For practitioners**: Notebooks 02, 03, and 10 will help you integrate these techniques into your workflow. Notebook 16 shows how to scale analyses.
 
-**For researchers**: Complete the entire series to master all techniques.
+**For circuit discovery**: Complete 01-03, 07, then move to Phase 2 notebooks 11-13 for automated discovery and comparison.
+
+**For researchers**: Complete the entire series (01-16) to master all techniques. Phase 2 notebooks (11-16) cover cutting-edge research methods.
 
 ### Interactive Learning
 
@@ -188,6 +267,7 @@ Each notebook includes:
 
 This library implements techniques from leading research:
 
+**Phase 1 (Notebooks 01-10)**:
 - **Sparse Autoencoders**: Anthropic's "Towards Monosemanticity" (2023)
 - **Circuit Discovery**: Elhage et al. "A Mathematical Framework" (2021)
 - **Fractal Analysis**: Higuchi (1988), Peng et al. (1994)
@@ -196,6 +276,16 @@ This library implements techniques from leading research:
 - **Dynamical Systems**: Sussillo & Barak (2013)
 - **Information Theory**: Tishby & Zaslavsky (2015)
 - **Biophysical Models**: Izhikevich (2003), Hodgkin & Huxley (1952)
+
+**Phase 2 (Notebooks 11-16)**:
+- **ACDC**: Conmy et al. "Towards Automated Circuit Discovery" (2023)
+- **Path Patching**: Wang et al. "Interpretability in the Wild" (2023)
+- **Landauer's Principle**: Landauer (1961), Bennett (1982, 2003)
+- **Fluctuation Theorems**: Crooks (1999), Jarzynski (1997)
+- **Neural ODEs**: Chen et al. "Neural Ordinary Differential Equations" (2018)
+- **Slow Feature Analysis**: Wiskott & Sejnowski (2002)
+- **Hamiltonian Mechanics**: Goldstein et al. "Classical Mechanics" (2002)
+- **Energy Cascades**: Kolmogorov (1941), Richardson (1922)
 
 ## Contributing
 
@@ -233,6 +323,12 @@ By learning and using these tools, you're joining a community working to underst
 | Biophysical Models | Realistic neurons | `SpikingNeuralNetwork`, `DalesLinear` | 08 |
 | Information Theory | Information flow | `InformationFlowAnalyzer`, `EnergyLandscape` | 09 |
 | Meta-dynamics | Training analysis | `MetaDynamicsTracker` | 10 |
+| **Path Patching** | **Direct/indirect effects** | `PathPatcher`, `AutomatedCircuitDiscovery` | **11** |
+| **Thermodynamics** | **Energy costs** | `LandauerAnalyzer`, `NESSAnalyzer`, `FluctuationTheoremAnalyzer` | **12** |
+| **Circuit Comparison** | **Cross-model analysis** | `CircuitComparator`, `MotifDetector` | **13** |
+| **Neural ODEs** | **Continuous dynamics** | `NeuralODEIntegrator`, `SlowFeatureAnalyzer` | **14** |
+| **Energy Cascades** | **Energy flow** | `EnergyCascadeAnalyzer`, `HamiltonianDecomposer` | **15** |
+| **Infrastructure** | **Experiment management** | `MechIntDatabase`, `MechIntPipeline` | **16** |
 
 ### Common Workflows
 
@@ -255,6 +351,22 @@ By learning and using these tools, you're joining a community working to underst
 1. Find fixed points (Notebook 06)
 2. Extract latent circuits (Notebook 07)
 3. Map energy landscape (Notebook 09)
+
+**Automated circuit discovery** (Phase 2):
+1. Run ACDC algorithm (Notebook 11)
+2. Detect structural motifs (Notebook 13)
+3. Compare across model variants (Notebook 13)
+
+**Thermodynamic analysis** (Phase 2):
+1. Compute Landauer bounds (Notebook 12)
+2. Analyze energy cascades (Notebook 15)
+3. Decompose Hamiltonian structure (Notebook 15)
+
+**Large-scale experiment** (Phase 2):
+1. Configure MechIntPipeline (Notebook 16)
+2. Run comprehensive analysis on multiple models
+3. Query results from MechIntDatabase (Notebook 16)
+4. Generate comparative reports
 
 ## Let's Begin!
 
