@@ -67,6 +67,27 @@ from .metrics import (
     CrossValidatedMetric
 )
 
+# Cross-species alignment
+from .cross_species import (
+    ProcrustesAlignment,
+    ConservedSpecificDecomposition,
+    HomologyMapping,
+    PhylogeneticDistance,
+    CrossSpeciesRSA,
+    EvolutionaryTrendAnalysis,
+    CrossSpeciesAlignment,
+)
+
+# Temporal alignment
+from .temporal import (
+    DynamicTimeWarping,
+    InterSubjectSynchronization,
+    TimeResolvedCCA,
+    TemporalReceptiveField,
+    PhasePrecession,
+    TemporalAlignmentResult,
+)
+
 __all__ = [
     # CCA
     'CCA',
@@ -93,6 +114,23 @@ __all__ = [
     'PermutationTest',
     'NormalizedScore',
     'CrossValidatedMetric',
+
+    # Cross-species
+    'ProcrustesAlignment',
+    'ConservedSpecificDecomposition',
+    'HomologyMapping',
+    'PhylogeneticDistance',
+    'CrossSpeciesRSA',
+    'EvolutionaryTrendAnalysis',
+    'CrossSpeciesAlignment',
+
+    # Temporal
+    'DynamicTimeWarping',
+    'InterSubjectSynchronization',
+    'TimeResolvedCCA',
+    'TemporalReceptiveField',
+    'PhasePrecession',
+    'TemporalAlignmentResult',
 ]
 
 

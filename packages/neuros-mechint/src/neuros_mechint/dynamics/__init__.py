@@ -1,86 +1,212 @@
 """
-Dynamical Systems Analysis Module for NeuroS-MechInt (FUTURE STRUCTURE).
+Dynamical Systems Analysis Module for NeuroS-MechInt
 
-⚠️ CURRENTLY A PLACEHOLDER ⚠️
+This module provides comprehensive tools for analyzing dynamical systems,
+including spectral, geometric, topological, and information-theoretic methods.
 
-This directory will contain modular dynamical systems components.
-For now, use: from neuros_mechint.dynamics import DynamicsAnalyzer
+## Quick Start:
 
-## Planned Organization (Post-Refactor):
-
-### Core Operators:
-- koopman.py: KoopmanOperator, DMD (Dynamic Mode Decomposition)
-- lyapunov.py: LyapunovAnalyzer (stability/chaos quantification)
-- fixed_points.py: FixedPointFinder (attractor detection)
-- manifold.py: ManifoldAnalyzer (geometry and curvature)
-- phase_space.py: PhaseSpaceAnalyzer (phase portraits)
-
-### Advanced Operators:
-- neural_ode.py: NeuralODEIntegrator (continuous-time dynamics)
-- slow_features.py: SlowFeatureAnalyzer (extract slow modes)
-- granger.py: GrangerCausality (temporal causal graphs)
-- bifurcation.py: BifurcationDetector (critical transitions)
-- perturbation.py: PerturbationAnalyzer (response analysis)
-
-### Unified Interface:
-- analyzer.py: DynamicsAnalyzer (combines all operators)
-
-## Usage (Current):
+### Unified Interface (Recommended):
 ```python
 from neuros_mechint.dynamics import DynamicsAnalyzer
 
 analyzer = DynamicsAnalyzer(dt=0.01)
-results = analyzer.estimate_koopman_operator(trajectories)
+
+# Run all analyses
+results = analyzer.run_all_analyses(trajectories)
+
+# Or individual analyses
+koopman = analyzer.estimate_koopman_operator(trajectories)
+lyapunov = analyzer.compute_lyapunov_exponents(trajectories)
+manifold = analyzer.analyze_manifold(trajectories)
 ```
 
-## Usage (Future):
+### Individual Operators:
 ```python
 from neuros_mechint.dynamics import (
     KoopmanOperator,
     LyapunovAnalyzer,
     FixedPointFinder,
-    DynamicsAnalyzer  # Unified interface
+    ManifoldAnalyzer,
+    PhaseSpaceAnalyzer
 )
 
-# Individual operators
-koopman = KoopmanOperator()
-koopman.fit(trajectories)
+# Create and use individual operators
+koopman = KoopmanOperator(dt=0.01)
+result = koopman.fit(trajectories, method="standard")
 
-# Or unified interface
-analyzer = DynamicsAnalyzer()
-results = analyzer.run_all_analyses(trajectories)
+lyapunov = LyapunovAnalyzer(dt=0.01)
+result = lyapunov.compute_exponents(trajectories)
 ```
 
+## Module Organization:
+
+### Core Operators:
+- `KoopmanOperator`: Koopman operator theory and DMD variants
+- `LyapunovAnalyzer`: Lyapunov exponents and stability analysis
+- `FixedPointFinder`: Fixed point detection and classification
+- `ManifoldAnalyzer`: Manifold geometry and topology
+- `PhaseSpaceAnalyzer`: Phase space structure and attractors
+
+### Advanced Operators:
+- `GrangerCausality`: Temporal causal relationships
+- `BifurcationDetector`: Bifurcation and critical transition detection
+- `PerturbationAnalyzer`: Perturbation response and sensitivity
+- `NeuralODEIntegrator`: Neural ODE integration
+- `SlowFeatureAnalyzer`: Slow feature extraction
+
+### Novel Methods:
+- `RecurrenceAnalyzer`: Recurrence plots and RQA
+- `TransferOperator`: Transfer operator and Perron-Frobenius methods
+- `SynchronizationAnalyzer`: Synchronization in coupled systems
+- `InformationAnalyzer`: Information-theoretic measures
+
+### Additional Tools:
+- `OptimalTransport`: Wasserstein distances and optimal transport
+- `SpectralAnalyzer`: Spectral analysis and wavelets
+- `ReservoirComputing`: Echo state networks and reservoir methods
+
 Author: NeuroS Team
-Date: 2025-10-30
-Status: PLACEHOLDER - Using parent-level dynamics.py for now
+Date: 2025-01-03
 """
 
-# This file intentionally left mostly empty
-# Import is handled at package level in neuros_mechint/__init__.py
-# which imports directly from neuros_mechint.dynamics (the .py file)
+# ==================== Unified Interface ====================
+from .analyzer import DynamicsAnalyzer
 
-# Partial activation: Import completed modules
-from .neural_ode import FlowFieldAnalysis, ODETrajectory, NeuralODEIntegrator
-from .slow_features import SlowFeatureResult, SlowFeatureAnalyzer
+# ==================== Core Operators ====================
+from .koopman import KoopmanOperator, KoopmanResult
+from .lyapunov import (
+    LyapunovAnalyzer,
+    LyapunovResult,
+    LyapunovFunctionResult
+)
+from .fixed_points import (
+    FixedPointFinder,
+    FixedPoint,
+    PeriodicOrbit,
+    FixedPointResult
+)
+from .manifold import ManifoldAnalyzer, ManifoldResult
+from .phase_space import (
+    PhaseSpaceAnalyzer,
+    PhaseSpaceResult,
+    PoincareSection,
+    AttractorResult
+)
 
+# ==================== Advanced Operators ====================
+from .granger import (
+    GrangerCausality,
+    GrangerResult,
+    CausalGraph
+)
+from .bifurcation import (
+    BifurcationDetector,
+    BifurcationResult,
+    BifurcationPoint,
+    EarlyWarningSignals
+)
+from .perturbation import (
+    PerturbationAnalyzer,
+    PerturbationResponse,
+    SensitivityResult,
+    RobustnessResult
+)
+from .neural_ode import (
+    NeuralODEIntegrator,
+    FlowFieldAnalysis,
+    ODETrajectory
+)
+from .slow_features import (
+    SlowFeatureAnalyzer,
+    SlowFeatureResult
+)
+
+# ==================== Novel Methods ====================
+from .recurrence import RecurrenceAnalyzer, RecurrenceResult
+from .transfer_operator import (
+    TransferOperator,
+    TransferOperatorResult,
+    TransitionPath
+)
+from .synchronization import (
+    SynchronizationAnalyzer,
+    SynchronizationResult,
+    PhaseResult
+)
+from .information import (
+    InformationAnalyzer,
+    InformationResult,
+    InformationDecomposition
+)
+
+# ==================== Additional Tools ====================
+from .optimal_transport import OptimalTransport, OptimalTransportResult
+from .spectral import SpectralAnalyzer, SpectralResult
+from .reservoir import ReservoirComputing, ReservoirResult
+
+# ==================== Public API ====================
 __all__ = [
-    # Neural ODE components
+    # Unified Interface
+    'DynamicsAnalyzer',
+
+    # Core Operators
+    'KoopmanOperator',
+    'KoopmanResult',
+    'LyapunovAnalyzer',
+    'LyapunovResult',
+    'LyapunovFunctionResult',
+    'FixedPointFinder',
+    'FixedPoint',
+    'PeriodicOrbit',
+    'FixedPointResult',
+    'ManifoldAnalyzer',
+    'ManifoldResult',
+    'PhaseSpaceAnalyzer',
+    'PhaseSpaceResult',
+    'PoincareSection',
+    'AttractorResult',
+
+    # Advanced Operators
+    'GrangerCausality',
+    'GrangerResult',
+    'CausalGraph',
+    'BifurcationDetector',
+    'BifurcationResult',
+    'BifurcationPoint',
+    'EarlyWarningSignals',
+    'PerturbationAnalyzer',
+    'PerturbationResponse',
+    'SensitivityResult',
+    'RobustnessResult',
+    'NeuralODEIntegrator',
     'FlowFieldAnalysis',
     'ODETrajectory',
-    'NeuralODEIntegrator',
-    # Slow feature components
-    'SlowFeatureResult',
     'SlowFeatureAnalyzer',
+    'SlowFeatureResult',
+
+    # Novel Methods
+    'RecurrenceAnalyzer',
+    'RecurrenceResult',
+    'TransferOperator',
+    'TransferOperatorResult',
+    'TransitionPath',
+    'SynchronizationAnalyzer',
+    'SynchronizationResult',
+    'PhaseResult',
+    'InformationAnalyzer',
+    'InformationResult',
+    'InformationDecomposition',
+
+    # Additional Tools
+    'OptimalTransport',
+    'OptimalTransportResult',
+    'SpectralAnalyzer',
+    'SpectralResult',
+    'ReservoirComputing',
+    'ReservoirResult',
 ]
 
-# When full refactoring is complete, add these imports:
-# from .koopman import KoopmanOperator, DMD
-# from .lyapunov import LyapunovAnalyzer
-# from .fixed_points import FixedPointFinder
-# from .manifold import ManifoldAnalyzer
-# from .phase_space import PhaseSpaceAnalyzer
-# from .granger import GrangerCausality
-# from .bifurcation import BifurcationDetector
-# from .perturbation import PerturbationAnalyzer
-# from .analyzer import DynamicsAnalyzer
+# Version info
+__version__ = '2.0.0'
+__author__ = 'NeuroS Team'
