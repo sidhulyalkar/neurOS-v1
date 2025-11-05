@@ -1,301 +1,345 @@
-# neuros-mechint: Mechanistic Interpretability Toolbox
+# neuros-mechint: Mechanistic Interpretability Toolkit
 
-**World's most comprehensive mechanistic interpretability suite for neural networks.**
+**The world's most comprehensive mechanistic interpretability suite for neural networks.**
 
-neuros-mechint is a standalone Python package providing cutting-edge tools for understanding, analyzing, and interpreting neural networks through the lens of mechanistic interpretability, fractal geometry, circuit discovery, biophysical modeling, and causal interventions.
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Status: Active Development](https://img.shields.io/badge/status-active%20development-brightgreen.svg)]()
 
-## 🎯 Key Features
+## 🎯 Overview
 
-### 🔬 Core Interpretability
-- **Neuron Activation Analysis**: Track and visualize neuron firing patterns
-- **Circuit Discovery**: Find computational circuits via interventions
-- **Sparse Autoencoders**: Decompose features with SAEs and hierarchical SAEs
-- **Feature Attribution**: Advanced attribution methods (Integrated Gradients, DeepLIFT, SHAP)
+`neuros-mechint` provides a unified framework for understanding how neural networks compute. From sparse autoencoders to thermodynamic analysis, from circuit discovery to biophysical modeling—everything you need for mechanistic interpretability research.
 
-### 📐 Fractal Geometry Suite
-- **Temporal Fractals**: Higuchi FD, DFA, Hurst exponent, spectral slope
-- **Graph Fractals**: Box-covering algorithm for network fractality
-- **Multifractal Analysis**: Complete multifractal spectrum
-- **Fractal Regularizers**: Train with biologically-plausible fractal priors
-- **Fractal Stimuli**: Generate fBm, colored noise, cascades
-- **Real-time Probes**: Track fractal dimension during training
+### Key Features
 
-### 🔍 Circuit Inference
-- **Latent RNN Extraction**: Minimal computational circuits (Langdon & Engel 2025)
-- **DUNL Sparse Coding**: Mixed selectivity decomposition
-- **Feature Visualization**: Activation maximization with biological constraints
-- **Dynamics Analysis**: Fixed points, stability, dimensionality
+- **🔬 Sparse Autoencoders**: Decompose polysemantic neurons into interpretable features
+- **⚡ Circuit Discovery**: Extract minimal computational circuits via ACDC and path patching
+- **🌊 Energy Flow Analysis**: Thermodynamics of computation, Landauer's principle, NESS
+- **🧠 Brain Alignment**: Compare model representations to neural recordings (CCA, RSA, Procrustes)
+- **📊 Fractal Analysis**: Scale-free dynamics, 1/f noise, temporal fractals
+- **🔄 Dynamical Systems**: Koopman operators, Lyapunov exponents, Neural ODEs
+- **🎭 Counterfactuals**: Causal interventions, latent surgery, do-calculus
+- **🏗️ Topology & Geometry**: Manifold analysis, persistent homology, curvature
 
-### 🧠 Biophysical Modeling
-- **Spiking Networks**: LIF, Izhikevich, Hodgkin-Huxley neurons
-- **Surrogate Gradients**: Differentiable spike backpropagation
-- **Dale's Law**: E/I neuron separation enforcement
-- **Biological Constraints**: Train with biophysical realism
-
-### ⚡ Causal Interventions
-- **Activation Patching**: Causal tracing at any layer/position
-- **Ablation Studies**: Hierarchical neuron/layer/component ablation
-- **Path Analysis**: Information flow and computational paths
-- **Causal Graphs**: Build and visualize causal computation graphs
-
-### 🧬 Brain Alignment
-- **CCA**: Canonical Correlation Analysis
-- **RSA**: Representational Similarity Analysis
-- **Procrustes Alignment**: Align representations across models/brains
-
-### 🌊 Dynamics & Geometry
-- **Koopman Operators**: Linearize nonlinear dynamics
-- **Lyapunov Exponents**: Chaos and stability analysis
-- **Manifold Geometry**: Curvature, dimensionality, topology
-- **Persistent Homology**: Topological data analysis
-
-### 📊 Information Theory
-- **Information Flow**: Mutual information estimation (MINE)
-- **Energy Landscapes**: Basin detection and transitions
-- **Entropy Production**: Measure dissipation during computation
-
-### 📈 Meta-Dynamics
-- **Training Trajectories**: Track feature emergence and drift
-- **Phase Transitions**: Detect critical points in training
-- **Representational Drift**: Monitor stability over time
-
-## 🚀 Installation
+## 📦 Installation
 
 ```bash
-# Basic installation
+# From source (recommended for development)
+git clone https://github.com/your-org/neurOS-v1.git
+cd neurOS-v1/packages/neuros-mechint
+pip install -e .
+
+# Or via pip (when published)
 pip install neuros-mechint
-
-# With visualization tools
-pip install neuros-mechint[viz]
-
-# With notebook support
-pip install neuros-mechint[notebooks]
-
-# Full installation (all extras)
-pip install neuros-mechint[all]
-
-# Development installation
-git clone https://github.com/neuros-ai/neuros-mechint
-cd neuros-mechint
-pip install -e ".[dev]"
 ```
 
-## 📚 Quick Start
+### Requirements
 
-### Fractal Analysis
+- Python 3.8+
+- PyTorch 2.0+
+- NumPy, SciPy, scikit-learn
+- Matplotlib, seaborn (visualization)
+- Optional: ripser (topology), persim (persistence diagrams)
+
+## 🚀 Quick Start
 
 ```python
-from neuros_mechint.fractals import HiguchiFractalDimension, SpectralPrior
 import torch
+from neuros_mechint import SparseAutoencoder
+from neuros_mechint.circuits import AutomatedCircuitDiscovery
+from neuros_mechint.energy_flow import LandauerAnalyzer
 
-# Compute fractal dimension
-fractal = HiguchiFractalDimension(k_max=10)
-signal = torch.randn(32, 1000)  # Batch of signals
-fd = fractal.compute(signal)
-print(f"Fractal Dimension: {fd.mean():.3f} ± {fd.std():.3f}")
+# 1. Sparse Autoencoder Analysis
+model = ... # Your PyTorch model
+activations = ... # Collect activations
 
-# Add fractal regularization to training
-regularizer = SpectralPrior(target_beta=1.0, weight=0.01)
-activations = model.get_activations(inputs)
-fractal_loss = regularizer(activations)
-total_loss = task_loss + fractal_loss
+sae = SparseAutoencoder(input_dim=512, latent_dim=2048, sparsity=0.05)
+sae_result = sae.train(activations, epochs=100)
+features = sae.encode(activations)  # Interpretable features
+
+# 2. Circuit Discovery
+acdc = AutomatedCircuitDiscovery(model, importance_threshold=0.01)
+circuit = acdc.discover_circuit(inputs, targets)
+print(f"Discovered circuit: {len(circuit.edges)} edges")
+
+# 3. Thermodynamic Analysis
+landauer = LandauerAnalyzer(model, temperature=300)
+result = landauer.analyze_forward_pass(inputs)
+print(f"Bits erased: {result.total_bits_erased:.0f}")
+print(f"Minimum energy: {result.minimum_energy_joules:.2e} J")
 ```
 
-### Circuit Discovery
+## 📚 Documentation & Examples
 
-```python
-from neuros_mechint.circuits import LatentCircuitModel, CircuitFitter
+### 22 Comprehensive Jupyter Notebooks
 
-# Extract minimal circuit from neural responses
-circuit = LatentCircuitModel(n_latent=10, n_observed=100, enforce_dales=True)
-fitter = CircuitFitter(circuit, learning_rate=1e-3)
+We provide extensive tutorial notebooks covering all aspects of mechanistic interpretability:
 
-# Fit circuit to data
-results = fitter.fit(neural_responses, stimuli, n_epochs=1000)
+**Foundation (Notebooks 1-6)**
+- 01: Introduction and Quickstart
+- 02: Sparse Autoencoders
+- 03: Causal Interventions
+- 04: Fractal Analysis
+- 05: Brain Alignment
+- 06: Dynamical Systems
 
-# Analyze dynamics
-from neuros_mechint.circuits import RecurrentDynamicsAnalyzer
-analyzer = RecurrentDynamicsAnalyzer()
-dynamics = analyzer.analyze(results)
-print(f"Fixed points: {len(dynamics['fixed_points'])}")
+**Advanced Analysis (Notebooks 7-16)**
+- 07: Circuit Extraction & Latent Models
+- 08: Biophysical Modeling
+- 09: Information Theory
+- 10: Advanced Topics (Meta-dynamics, Geometry)
+- 11: Path Patching & ACDC
+- 12: Thermodynamic Analysis
+- 13: Circuit Comparison & Motifs
+- 14: Neural ODEs & Slow Features
+- 15: Energy Cascades & Hamiltonian
+- 16: Pipeline & Database Integration
+
+**Specialized Topics (Notebooks 17-22)**
+- 17: Advanced Biophysical Modeling
+- 18: Intervention Strategies
+- 19: Cross-Species Alignment
+- 20: Temporal Dynamics
+- 21: Criticality Analysis
+- 22: Multifractal Analysis
+
+### Running the Notebooks
+
+```bash
+cd examples/
+jupyter lab
+# Open 01_introduction_and_quickstart.ipynb to begin
 ```
 
-### Causal Interventions
+## 🧩 Module Overview
+
+### Core Modules
 
 ```python
-from neuros_mechint.interventions import ActivationPatcher, AblationStudy
+neuros_mechint/
+├── sae/                          # Sparse autoencoder analysis
+├── circuits/                     # Circuit discovery & analysis
+├── energy_flow/                  # Thermodynamics & energy analysis
+├── dynamics/                     # Dynamical systems analysis
+├── alignment/                    # Brain-model alignment
+├── fractals/                     # Fractal & scale-free analysis
+├── biophysical/                  # Biophysical neuron models
+├── interventions/                # Causal interventions
+├── counterfactuals/              # Counterfactual analysis
+├── meta_dynamics/                # Training trajectory analysis
+├── geometry_topology/            # Manifold & topology analysis
+└── visualization/                # Visualization tools
+```
 
-# Activation patching
-patcher = ActivationPatcher(model)
-result = patcher.patch(
-    clean_input, corrupted_input,
-    patches=[PatchSpec(layer_name='layer_6', component='residual')],
-    metric_fn=accuracy_fn
+### Key Classes
+
+**Sparse Autoencoders**
+```python
+from neuros_mechint.sae import SparseAutoencoder, SAETrainer, SAEVisualizer
+```
+
+**Circuit Discovery**
+```python
+from neuros_mechint.circuits import (
+    AutomatedCircuitDiscovery,  # ACDC algorithm
+    PathPatcher,                 # Activation patching
+    CircuitComparator,          # Compare circuits
+    MotifDetector              # Find recurring patterns
 )
-print(f"Recovery: {result['recovery_score']:.3f}")
-
-# Hierarchical ablation study
-study = AblationStudy(model)
-results = study.hierarchical_ablation(
-    input_data, layer_names=['layer_4', 'layer_6', 'layer_8'],
-    metric_fn=accuracy_fn, ablate_components=True
-)
-print(study.summarize(results))
 ```
 
-### Spiking Networks
+**Thermodynamics**
+```python
+from neuros_mechint.energy_flow import (
+    LandauerAnalyzer,           # Landauer's principle
+    NESSAnalyzer,               # Non-equilibrium steady states
+    FluctuationTheoremAnalyzer, # Fluctuation theorems
+    EnergyCascadeAnalyzer,      # Energy flow through layers
+    HamiltonianDecomposer       # Conservative vs dissipative
+)
+```
+
+**Dynamics**
+```python
+from neuros_mechint.dynamics import (
+    NeuralODEIntegrator,        # Continuous-time dynamics
+    SlowFeatureAnalyzer,        # Temporal hierarchies
+    KoopmanAnalyzer,           # Koopman operator
+    LyapunovAnalyzer           # Stability analysis
+)
+```
+
+**Brain Alignment**
+```python
+from neuros_mechint.alignment import (
+    CCAAlignment,               # Canonical correlation
+    RSAAnalyzer,               # Representational similarity
+    ProcrustesAlignment        # Orthogonal alignment
+)
+```
+
+## 🎓 Research Applications
+
+### Interpretability Research
+- Understand how transformers process language
+- Discover computational circuits in vision models
+- Map features to human-interpretable concepts
+
+### Neuroscience
+- Compare artificial and biological neural networks
+- Design better brain-computer interfaces
+- Test theories of neural computation
+
+### Safety & Alignment
+- Detect deceptive or unintended behaviors
+- Verify model reasoning
+- Build more transparent AI systems
+
+### Architecture Design
+- Design networks with desired computational properties
+- Optimize for energy efficiency
+- Create biologically-inspired architectures
+
+## 📊 Results & Database
+
+Store and compare analysis results:
 
 ```python
-from neuros_mechint.biophysical import LeakyIntegrateFireNeuron, DalesLinear
+from neuros_mechint.database import MechIntDatabase
 
-# LIF neuron layer
-lif = LeakyIntegrateFireNeuron(n_neurons=256, tau=10.0, threshold=1.0)
-spikes, voltages = lif(input_current, dt=1.0)
+db = MechIntDatabase(root_dir="./results")
 
-# Linear layer with Dale's law
-ei_layer = DalesLinear(in_features=256, out_features=128, ei_ratio=0.8)
-output = ei_layer(input)  # Automatically enforces E/I separation
+# Store analysis
+result_id = db.store(circuit_result, tags=["gpt2", "layer3", "acdc"])
+
+# Query results
+results = db.query(tags=["acdc"], method="ACDC")
+
+# Compare across experiments
+comparison = db.compare_results([id1, id2, id3])
 ```
 
-### Sparse Autoencoders
+## 🔬 Advanced Features
 
+### Thermodynamics of Computation
 ```python
-from neuros_mechint.sae import SparseAutoencoder, MultiLayerSAETrainer
+# Landauer's Principle: minimum energy per bit erased
+landauer = LandauerAnalyzer(model)
+result = landauer.analyze_forward_pass(inputs)
 
-# Single SAE
-sae = SparseAutoencoder(n_inputs=768, n_features=4096, sparsity=0.05)
+# Non-Equilibrium Steady States
+ness = NESSAnalyzer(model)
+steady_state = ness.analyze_steady_state(inputs)
 
-# Train SAEs on multiple layers
-trainer = MultiLayerSAETrainer(
-    model=model,
-    layer_names=['layer_6', 'layer_8', 'layer_10'],
-    n_features=4096,
-)
-sae_results = trainer.train(dataloader, n_epochs=10)
+# Fluctuation Theorems
+ft = FluctuationTheoremAnalyzer(model)
+crooks = ft.test_crooks_theorem(forward_data, reverse_data)
 ```
 
-## 🎓 Tutorials
+### Counterfactual Interventions
+```python
+from neuros_mechint.counterfactuals import LatentSurgery, SyntheticLesions
 
-Comprehensive tutorials are available in the `tutorials/` directory:
+# Modify specific neurons
+surgery = LatentSurgery(model)
+original, intervened = surgery.intervene(x, "layer2", neuron_idx=42, value=1.0)
 
-1. **Fractal Analysis**: Measure and regularize fractal properties
-2. **Circuit Discovery**: Extract interpretable circuits
-3. **Causal Interventions**: Patch and ablate for causal understanding
-4. **Biophysical Constraints**: Train with Dale's law and spiking neurons
-5. **End-to-End**: Combine all techniques
+# Identify critical components
+lesion = SyntheticLesions(model)
+critical_neurons = lesion.identify_critical_neurons(x, "layer3")
+```
 
-See [tutorials/README.md](tutorials/README.md) for details.
+### Meta-Dynamics
+```python
+from neuros_mechint.meta_dynamics import RepresentationalTrajectory
 
-## 📖 Documentation
-
-Full documentation is available at: https://neuros-mechint.readthedocs.io
-
-- **API Reference**: Complete API documentation
-- **User Guide**: In-depth explanations of concepts
-- **Examples**: Real-world usage examples
-- **Theory**: Scientific foundations
-
-## 🧪 Examples
-
-Check out the `examples/` directory for:
-- Analyzing transformer attention patterns
-- Discovering circuits in language models
-- Training with fractal regularization
-- Biophysical constraints in CNNs
-- Multi-model brain alignment
-
-## 🔬 Scientific Foundations
-
-neuros-mechint implements methods from cutting-edge research:
-
-- **Langdon & Engel (2025)**: Latent circuit extraction
-- **Higuchi (1988)**: Fractal dimension estimation
-- **Peng et al. (1994)**: Detrended fluctuation analysis
-- **Izhikevich (2003)**: Simple spiking neuron model
-- **Elhage et al. (2021)**: Transformer circuits
-- **Nanda et al. (2023)**: Sparse autoencoders
-- And many more...
-
-## 🤝 Use Cases
-
-### Research
-- Understand neural coding in foundation models
-- Test neuroscience hypotheses with biophysical constraints
-- Discover computational motifs in deep networks
-- Align model representations with brain activity
-
-### Production
-- Interpretable AI for safety-critical applications
-- Real-time monitoring of model behavior
-- Debugging and validation of neural networks
-- Feature engineering guided by mechanistic insights
-
-### Education
-- Teaching deep learning interpretability
-- Demonstrating fractal properties in neural systems
-- Hands-on circuit discovery exercises
-- Biophysical modeling workshops
-
-## 🔌 Integration
-
-neuros-mechint is designed to work with:
-- **Any PyTorch model**: Just pass your `nn.Module`
-- **Hugging Face Transformers**: Seamless integration
-- **neuros-foundation**: Built-in support for neurOS models
-- **Custom architectures**: Flexible hooks and callbacks
-
-## 🌟 Why neuros-mechint?
-
-1. **Comprehensive**: Most complete interpretability toolkit available
-2. **Cutting-edge**: Implements latest research (2024-2025)
-3. **Production-ready**: 100% type hints, tested, documented
-4. **Flexible**: Works with any PyTorch model
-5. **Novel**: Unique fractal and biophysical tools
-6. **Open source**: MIT license, community-driven
-
-## 🛣️ Roadmap
-
-- [ ] Additional neuron models (AdEx, QuadraticIF)
-- [ ] Synaptic plasticity (STDP, STP)
-- [ ] Multi-scale analysis (LFP generation, Virtual Brain)
-- [ ] Distributed training support
-- [ ] JAX backend
-- [ ] Browser-based visualization tools
+# Track representations during training
+trajectory = RepresentationalTrajectory(checkpoints, data)
+phases = trajectory.detect_phases()  # Fitting vs compression
+```
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-## 📄 License
+### Development Setup
 
-MIT License - see [LICENSE](LICENSE) for details.
+```bash
+# Clone repository
+git clone https://github.com/your-org/neurOS-v1.git
+cd neurOS-v1/packages/neuros-mechint
 
-## 📧 Contact
+# Install in editable mode with dev dependencies
+pip install -e ".[dev]"
 
-- **Website**: https://neuros.ai
-- **Email**: team@neuros.ai
-- **Twitter**: @neuros_ai
-- **Discord**: https://discord.gg/neuros
+# Run tests
+pytest tests/
 
-## 🙏 Acknowledgments
+# Check code quality
+black src/
+flake8 src/
+mypy src/
+```
 
-Built with support from the mechanistic interpretability community and neuroscience researchers worldwide.
+## 📖 Citation
 
-## 📚 Citation
-
-If you use neuros-mechint in your research, please cite:
+If you use `neuros-mechint` in your research, please cite:
 
 ```bibtex
 @software{neuros_mechint2025,
-  title = {neuros-mechint: Mechanistic Interpretability Toolbox for Neural Networks},
+  title = {neuros-mechint: Comprehensive Mechanistic Interpretability Toolkit},
   author = {neurOS Team},
   year = {2025},
-  url = {https://github.com/neuros-ai/neuros-mechint},
-  version = {0.1.0}
+  url = {https://github.com/your-org/neurOS-v1}
 }
 ```
 
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🌟 Acknowledgments
+
+Built on foundational work from:
+- Anthropic's mechanistic interpretability research
+- OpenAI's sparse autoencoder work
+- The Distill.pub team's visualization techniques
+- Computational neuroscience community
+
+## 📬 Contact & Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-org/neurOS-v1/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-org/neurOS-v1/discussions)
+- **Email**: neuros@example.com
+
 ---
 
-**Created with Claude Code**
-https://claude.com/claude-code
+## 🗺️ Roadmap
+
+See [CHANGELOG.md](CHANGELOG.md) for version history and [docs/planning/](docs/planning/) for future plans.
+
+### Current Status: Phase 2 Complete ✅
+
+- ✅ Core SAE, circuits, alignment, fractals
+- ✅ Thermodynamics & energy flow analysis
+- ✅ Advanced dynamics (Neural ODEs, slow features)
+- ✅ Counterfactuals & causal interventions
+- ✅ 22 comprehensive tutorial notebooks
+- ✅ Complete API documentation
+- ⏳ Package reorganization (planned)
+- ⏳ Performance optimization (planned)
+- ⏳ Extended test coverage (planned)
+
+### Future Enhancements
+
+- Real-time analysis dashboard
+- Integration with popular frameworks (HuggingFace, PyTorch Lightning)
+- Cloud-based analysis pipeline
+- Multi-GPU support for large models
+- Extended model zoo with pre-trained analyzers
+
+---
+
+**Built with ❤️ by the neurOS team**
+
+*Making neural networks interpretable, one circuit at a time.*

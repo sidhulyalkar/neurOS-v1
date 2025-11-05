@@ -27,6 +27,7 @@ from .dales_law import (
     DalesLawConstraint,
     DalesLinear,
     EINetworkClassifier,
+    RecurrentDalesNetwork,
 )
 
 # Extended Neuron Models
@@ -99,6 +100,7 @@ __all__ = [
     'DalesLawConstraint',
     'DalesLinear',
     'EINetworkClassifier',
+    'RecurrentDalesNetwork',
 
     # Extended Neuron Models
     'AdExNeuron',

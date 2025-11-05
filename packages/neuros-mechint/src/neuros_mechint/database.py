@@ -55,6 +55,12 @@ from neuros_mechint.results import (
     FractalResult,
     ResultCollection,
 )
+from neuros_mechint.results_extended import (
+    BiophysicalResult,
+    InterventionResult,
+    CriticalityResult,
+    MultifractalResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +279,10 @@ class MechIntDatabase:
             'InformationResult': InformationResult,
             'AlignmentResult': AlignmentResult,
             'FractalResult': FractalResult,
+            'BiophysicalResult': BiophysicalResult,
+            'InterventionResult': InterventionResult,
+            'CriticalityResult': CriticalityResult,
+            'MultifractalResult': MultifractalResult,
         }.get(result_type, MechIntResult)
 
         return result_class.load(file_path)
@@ -577,6 +587,258 @@ class MechIntDatabase:
         self._log(f"Exported collection with {len(results)} results to {output_path}")
 
         return collection
+
+    def query_biophysical(
+        self,
+        neuron_type: Optional[str] = None,
+        has_metabolic: bool = False,
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Query biophysical modeling results.
+
+        Args:
+            neuron_type: Filter by neuron type (e.g., 'pyramidal', 'interneuron')
+            has_metabolic: Only return results with metabolic data
+            limit: Maximum number of results
+
+        Returns:
+            List of result IDs
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        query = "SELECT result_id FROM results WHERE result_type = 'BiophysicalResult'"
+        params = []
+
+        if neuron_type:
+            query += " AND metadata_json LIKE ?"
+            params.append(f'%"neuron_type": "{neuron_type}"%')
+
+        if has_metabolic:
+            query += " AND metadata_json LIKE ?"
+            params.append('%"atp_levels"%')
+
+        query += " ORDER BY timestamp DESC"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, params)
+        result_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        return result_ids
+
+    def query_interventions(
+        self,
+        intervention_type: Optional[str] = None,
+        min_effect_size: Optional[float] = None,
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Query intervention results.
+
+        Args:
+            intervention_type: Filter by type ('optogenetics', 'pharmacology', 'stimulation')
+            min_effect_size: Minimum effect size
+            limit: Maximum number of results
+
+        Returns:
+            List of result IDs
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        query = "SELECT result_id FROM results WHERE result_type = 'InterventionResult'"
+        params = []
+
+        if intervention_type:
+            query += " AND metadata_json LIKE ?"
+            params.append(f'%"intervention_type": "{intervention_type}"%')
+
+        # Note: For effect_size filtering, we'd need to parse metrics_json
+        # This is a simplified version
+
+        query += " ORDER BY timestamp DESC"
+
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, params)
+        result_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        return result_ids
+
+    def query_criticality(
+        self,
+        near_critical: bool = False,
+        threshold: float = 0.1,
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Query criticality analysis results.
+
+        Args:
+            near_critical: Only return results near criticality (|σ - 1| < threshold)
+            threshold: Threshold for criticality proximity
+            limit: Maximum number of results
+
+        Returns:
+            List of result IDs
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        query = "SELECT result_id, metrics_json FROM results WHERE result_type = 'CriticalityResult'"
+
+        cursor.execute(query)
+        rows = cursor.fetchall()
+
+        result_ids = []
+        for result_id, metrics_json in rows:
+            if near_critical:
+                # Parse metrics to check branching parameter
+                try:
+                    metrics = json.loads(metrics_json)
+                    branching = metrics.get('branching_parameter', 0)
+                    if abs(branching - 1.0) < threshold:
+                        result_ids.append(result_id)
+                except:
+                    continue
+            else:
+                result_ids.append(result_id)
+
+            if limit and len(result_ids) >= limit:
+                break
+
+        conn.close()
+
+        self._log(f"Found {len(result_ids)} criticality results")
+        return result_ids
+
+    def query_multifractal(
+        self,
+        analysis_method: Optional[str] = None,
+        is_multifractal: Optional[bool] = None,
+        min_width: Optional[float] = None,
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Query multifractal analysis results.
+
+        Args:
+            analysis_method: Filter by method ('mfdfa', 'wtmm')
+            is_multifractal: Filter by multifractality
+            min_width: Minimum multifractal width Δα
+            limit: Maximum number of results
+
+        Returns:
+            List of result IDs
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        query = "SELECT result_id, metadata_json, metrics_json FROM results WHERE result_type = 'MultifractalResult'"
+
+        cursor.execute(query)
+        rows = cursor.fetchall()
+
+        result_ids = []
+        for result_id, metadata_json, metrics_json in rows:
+            try:
+                metadata = json.loads(metadata_json)
+                metrics = json.loads(metrics_json)
+
+                # Check analysis method
+                if analysis_method and metadata.get('analysis_method') != analysis_method:
+                    continue
+
+                # Check multifractality
+                if is_multifractal is not None:
+                    if metadata.get('is_multifractal') != is_multifractal:
+                        continue
+
+                # Check width
+                if min_width is not None:
+                    width = metrics.get('multifractal_width', 0)
+                    if width < min_width:
+                        continue
+
+                result_ids.append(result_id)
+
+                if limit and len(result_ids) >= limit:
+                    break
+
+            except:
+                continue
+
+        conn.close()
+
+        self._log(f"Found {len(result_ids)} multifractal results")
+        return result_ids
+
+    def get_analysis_summary(self) -> Dict[str, Any]:
+        """
+        Get comprehensive summary of all analyses in database.
+
+        Returns:
+            Dictionary with statistics for each analysis type
+        """
+        stats = self.get_stats()
+
+        summary = {
+            'total_results': stats['total_results'],
+            'total_size_gb': stats['total_size_gb'],
+            'by_method': stats['by_method'],
+            'by_type': stats['by_type'],
+        }
+
+        # Add specialized counts
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        # Biophysical: count with metabolic data
+        cursor.execute("""
+            SELECT COUNT(*) FROM results
+            WHERE result_type = 'BiophysicalResult'
+            AND metadata_json LIKE '%atp_levels%'
+        """)
+        summary['biophysical_with_metabolic'] = cursor.fetchone()[0]
+
+        # Interventions: count by type
+        for int_type in ['optogenetics', 'pharmacology', 'stimulation']:
+            cursor.execute(f"""
+                SELECT COUNT(*) FROM results
+                WHERE result_type = 'InterventionResult'
+                AND metadata_json LIKE '%"intervention_type": "{int_type}"%'
+            """)
+            summary[f'interventions_{int_type}'] = cursor.fetchone()[0]
+
+        # Criticality: count near critical
+        cursor.execute("SELECT metrics_json FROM results WHERE result_type = 'CriticalityResult'")
+        near_critical_count = 0
+        for row in cursor.fetchall():
+            try:
+                metrics = json.loads(row[0])
+                if abs(metrics.get('branching_parameter', 0) - 1.0) < 0.1:
+                    near_critical_count += 1
+            except:
+                pass
+        summary['criticality_near_critical'] = near_critical_count
+
+        # Multifractal: count confirmed multifractal
+        cursor.execute("""
+            SELECT COUNT(*) FROM results
+            WHERE result_type = 'MultifractalResult'
+            AND metadata_json LIKE '%"is_multifractal": true%'
+        """)
+        summary['multifractal_confirmed'] = cursor.fetchone()[0]
+
+        conn.close()
+
+        return summary
 
 
 __all__ = [

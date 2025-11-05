@@ -63,7 +63,9 @@ class PipelineConfig:
 
     # Which analyses to run
     enabled_analyses: Set[str] = field(default_factory=lambda: {
-        "sae", "circuits", "info_flow", "dynamics", "fractals"
+        "sae", "circuits", "info_flow", "dynamics", "fractals",
+        "biophysical", "interventions", "alignment", "criticality",
+        "multifractal", "temporal"
     })
 
     # Parallelization
@@ -308,6 +310,354 @@ class MechIntPipeline:
                 fractal_dimension=avg_fd
             )
 
+        # Biophysical Modeling
+        def run_biophysical(inputs: torch.Tensor, **kwargs) -> MechIntResult:
+            from neuros_mechint.biophysical import (
+                MultiCompartmentNeuron, PrefabNeurons,
+                STDP, MetabolicConstraint, ATPDynamics
+            )
+
+            # Create biophysically realistic neuron
+            neuron = PrefabNeurons.pyramidal_cell(soma_area=1000.0)
+
+            # Simulate with inputs
+            dt = kwargs.get('dt', 0.1)
+            duration = kwargs.get('duration', 100.0)
+            n_steps = int(duration / dt)
+
+            # Simple current injection
+            current = torch.zeros(n_steps)
+            current[int(n_steps*0.2):int(n_steps*0.8)] = kwargs.get('current_amplitude', 500.0)
+
+            # Simulate
+            voltages = neuron.simulate(current, n_steps, dt)
+
+            # Add metabolic analysis
+            atp = ATPDynamics()
+            spike_times = torch.where(voltages[:-1] < -20.0 and voltages[1:] >= -20.0)[0] * dt
+            atp_levels = []
+
+            for t in range(n_steps):
+                spike_occurred = (t * dt) in spike_times
+                atp.update(spike_occurred, dt)
+                atp_levels.append(atp.ATP)
+
+            return MechIntResult(
+                method="Biophysical",
+                data={
+                    'voltages': voltages.cpu().numpy(),
+                    'atp_levels': np.array(atp_levels),
+                    'spike_times': spike_times.cpu().numpy()
+                },
+                metadata={'neuron_type': 'pyramidal', 'duration': duration, 'dt': dt},
+                metrics={
+                    'spike_count': len(spike_times),
+                    'mean_voltage': float(voltages.mean()),
+                    'final_atp': atp_levels[-1]
+                }
+            )
+
+        # Interventions (Optogenetics/Pharmacology/Stimulation)
+        def run_interventions(inputs: torch.Tensor, **kwargs) -> MechIntResult:
+            from neuros_mechint.interventions import ChR2, Drugs, DBS
+
+            intervention_type = kwargs.get('intervention', 'optogenetics')
+
+            if intervention_type == 'optogenetics':
+                # ChR2 stimulation
+                opsin = ChR2(g_max=1000.0, wavelength_peak=470.0)
+
+                # Create light pulse
+                dt = kwargs.get('dt', 0.1)
+                duration = kwargs.get('duration', 100.0)
+                n_steps = int(duration / dt)
+
+                light_intensity = torch.zeros(n_steps)
+                pulse_start = int(n_steps * 0.3)
+                pulse_end = int(n_steps * 0.7)
+                light_intensity[pulse_start:pulse_end] = kwargs.get('light_power', 10.0)
+
+                # Simulate photocurrent
+                photocurrents = []
+                V = kwargs.get('V_init', -70.0)
+
+                for intensity in light_intensity:
+                    I_photo = opsin.photocurrent(V, intensity, dt)
+                    photocurrents.append(float(I_photo))
+
+                result_data = {
+                    'light_intensity': light_intensity.cpu().numpy(),
+                    'photocurrent': np.array(photocurrents),
+                    'opsin': 'ChR2'
+                }
+
+            elif intervention_type == 'pharmacology':
+                # Drug dose-response
+                drug = Drugs.TTX()
+                doses = kwargs.get('doses', np.logspace(-2, 2, 20))
+
+                responses = []
+                for dose in doses:
+                    response = drug.dose_response(dose)
+                    responses.append(response)
+
+                result_data = {
+                    'doses': doses,
+                    'responses': np.array(responses),
+                    'drug': 'TTX',
+                    'EC50': drug.EC50
+                }
+
+            else:  # stimulation
+                # DBS-like stimulation
+                dbs = DBS(
+                    frequency=kwargs.get('frequency', 130.0),
+                    amplitude=kwargs.get('amplitude', 3.0),
+                    pulse_width=kwargs.get('pulse_width', 0.06)
+                )
+
+                duration = kwargs.get('duration', 100.0)
+                dt = kwargs.get('dt', 0.01)
+                n_steps = int(duration / dt)
+                time = torch.arange(n_steps) * dt
+
+                currents = []
+                for t in time:
+                    current = dbs.stimulate(float(t))
+                    currents.append(current)
+
+                result_data = {
+                    'time': time.cpu().numpy(),
+                    'current': np.array(currents),
+                    'frequency': dbs.frequency
+                }
+
+            return MechIntResult(
+                method="Interventions",
+                data=result_data,
+                metadata={'intervention_type': intervention_type},
+                metrics={'intervention': intervention_type}
+            )
+
+        # Cross-Species Alignment
+        def run_alignment(inputs: torch.Tensor, **kwargs) -> AlignmentResult:
+            from neuros_mechint.alignment import ProcrustesAlignment, DynamicTimeWarping
+
+            alignment_type = kwargs.get('alignment_type', 'procrustes')
+
+            # Get activations from two "species" (or two layers/models)
+            activations1 = self._get_activations(inputs, kwargs.get('layer1', 'layer_2'))
+            activations2 = self._get_activations(inputs, kwargs.get('layer2', 'layer_3'))
+
+            if alignment_type == 'procrustes':
+                aligner = ProcrustesAlignment()
+                aligned, disparity = aligner.align(
+                    activations1.cpu().numpy(),
+                    activations2.cpu().numpy()
+                )
+
+                result_data = {
+                    'source': activations1.cpu().numpy(),
+                    'target': activations2.cpu().numpy(),
+                    'aligned': aligned,
+                    'transformation': aligner.R
+                }
+                metrics = {'disparity': float(disparity), 'scale': float(aligner.scale)}
+
+            else:  # DTW
+                dtw = DynamicTimeWarping()
+
+                # Use temporal sequences
+                seq1 = activations1.cpu().numpy()
+                seq2 = activations2.cpu().numpy()
+
+                distance, path = dtw.compute(seq1, seq2)
+
+                result_data = {
+                    'sequence1': seq1,
+                    'sequence2': seq2,
+                    'alignment_path': path,
+                    'distance_matrix': dtw.cost_matrix
+                }
+                metrics = {'dtw_distance': float(distance)}
+
+            return AlignmentResult(
+                method="Alignment",
+                data=result_data,
+                metadata={'alignment_type': alignment_type},
+                metrics=metrics,
+                alignment_matrix=aligner.R if alignment_type == 'procrustes' else dtw.cost_matrix,
+                similarity_score=1.0 / (1.0 + metrics.get('disparity', metrics.get('dtw_distance', 1.0)))
+            )
+
+        # Criticality Detection
+        def run_criticality(inputs: torch.Tensor, **kwargs) -> MechIntResult:
+            from neuros_mechint.fractals import NeuronalAvalanche, BranchingProcess
+
+            # Get neural activity
+            activations = self._get_activations(inputs, kwargs.get('layer_name', 'layer_3'))
+
+            # Convert to binary spikes (threshold at mean + 2*std)
+            activity = activations.cpu().numpy()
+            threshold = activity.mean() + 2 * activity.std()
+            spikes = (activity > threshold).astype(float)
+
+            # Detect avalanches
+            avalanche_detector = NeuronalAvalanche(threshold=kwargs.get('threshold', 2.0))
+            avalanches = avalanche_detector.detect_avalanches(spikes)
+
+            # Analyze sizes and durations
+            sizes = [av['size'].sum() for av in avalanches]
+            durations = [av['duration'] for av in avalanches]
+
+            # Fit power law to sizes
+            if len(sizes) > 10:
+                from scipy.stats import linregress
+                log_sizes = np.log10(np.array(sizes) + 1)
+                counts, bins = np.histogram(log_sizes, bins=20)
+                counts = counts[counts > 0]
+                bin_centers = (bins[:-1] + bins[1:])[counts > 0] / 2
+
+                if len(counts) > 2:
+                    slope, intercept, r_value, _, _ = linregress(bin_centers, np.log10(counts))
+                    power_law_exponent = -slope
+                else:
+                    power_law_exponent = None
+                    r_value = None
+            else:
+                power_law_exponent = None
+                r_value = None
+
+            # Branching parameter
+            bp = BranchingProcess()
+            branching_param = bp.estimate_branching_parameter(spikes)
+
+            return MechIntResult(
+                method="Criticality",
+                data={
+                    'avalanches': avalanches,
+                    'sizes': np.array(sizes),
+                    'durations': np.array(durations),
+                    'spikes': spikes
+                },
+                metadata={'threshold': kwargs.get('threshold', 2.0)},
+                metrics={
+                    'n_avalanches': len(avalanches),
+                    'mean_size': float(np.mean(sizes)) if sizes else 0,
+                    'power_law_exponent': float(power_law_exponent) if power_law_exponent else 0,
+                    'branching_parameter': float(branching_param),
+                    'r_squared': float(r_value**2) if r_value else 0
+                }
+            )
+
+        # Multifractal Analysis
+        def run_multifractal(inputs: torch.Tensor, **kwargs) -> FractalResult:
+            from neuros_mechint.fractals import (
+                MultifractalDetrendedFluctuationAnalysis,
+                WaveletMultifractal
+            )
+
+            # Get activations
+            activations = self._get_activations(inputs, kwargs.get('layer_name', 'layer_3'))
+            signal = activations[0].cpu().numpy()  # Use first sample
+
+            analysis_type = kwargs.get('analysis_type', 'mfdfa')
+
+            if analysis_type == 'mfdfa':
+                # MF-DFA
+                mfdfa = MultifractalDetrendedFluctuationAnalysis(
+                    q_values=kwargs.get('q_values', np.arange(-5, 6, 1)),
+                    scales=kwargs.get('scales', np.logspace(1, 3, 20).astype(int))
+                )
+
+                result = mfdfa.analyze(signal)
+
+                result_data = {
+                    'fluctuations': result['fluctuations'],
+                    'hurst_exponents': result['hurst_exponents'],
+                    'singularity_spectrum': result.get('singularity_spectrum', {}),
+                    'q_values': mfdfa.q_values,
+                    'scales': mfdfa.scales
+                }
+
+                metrics = {
+                    'multifractal_width': float(result.get('multifractal_width', 0)),
+                    'mean_hurst': float(np.mean(result['hurst_exponents']))
+                }
+
+            else:  # WTMM
+                wtmm = WaveletMultifractal(
+                    n_scales=kwargs.get('n_scales', 20),
+                    q_values=kwargs.get('q_values', np.arange(-5, 6, 1))
+                )
+
+                result = wtmm.analyze(signal)
+
+                result_data = {
+                    'partition_functions': result.get('partition_functions'),
+                    'scaling_exponents': result.get('scaling_exponents'),
+                    'singularity_spectrum': result.get('singularity_spectrum', {})
+                }
+
+                metrics = {
+                    'multifractal_width': float(result.get('multifractal_width', 0))
+                }
+
+            return FractalResult(
+                method="Multifractal",
+                data=result_data,
+                metadata={'analysis_type': analysis_type, 'layer': kwargs.get('layer_name', 'layer_3')},
+                metrics=metrics,
+                fractal_dimension=metrics.get('mean_hurst', 0.5)
+            )
+
+        # Temporal Dynamics
+        def run_temporal(inputs: torch.Tensor, **kwargs) -> MechIntResult:
+            from neuros_mechint.alignment import (
+                InterSubjectSynchronization,
+                TimeResolvedCCA
+            )
+
+            # Get temporal activations from multiple "subjects" (batch samples)
+            activations = self._get_activations(inputs, kwargs.get('layer_name', 'layer_3'))
+
+            if len(activations) < 2:
+                # Need at least 2 samples for ISC
+                return MechIntResult(
+                    method="Temporal",
+                    data={},
+                    metadata={'error': 'Need at least 2 samples for temporal analysis'},
+                    metrics={}
+                )
+
+            # Inter-subject synchronization
+            isc = InterSubjectSynchronization()
+            isc_values = isc.compute(activations.cpu().numpy())
+
+            # Time-resolved CCA between first two samples
+            if len(activations) >= 2:
+                trcca = TimeResolvedCCA(window_size=kwargs.get('window_size', 10))
+                correlations = trcca.compute(
+                    activations[0].cpu().numpy(),
+                    activations[1].cpu().numpy()
+                )
+            else:
+                correlations = np.array([])
+
+            return MechIntResult(
+                method="Temporal",
+                data={
+                    'isc_values': isc_values,
+                    'trcca_correlations': correlations,
+                    'activations': activations.cpu().numpy()
+                },
+                metadata={'layer': kwargs.get('layer_name', 'layer_3')},
+                metrics={
+                    'mean_isc': float(np.mean(isc_values)),
+                    'mean_correlation': float(np.mean(correlations)) if len(correlations) > 0 else 0
+                }
+            )
+
         # Register stages
         if "sae" in self.config.enabled_analyses:
             self.register_stage("sae", run_sae, priority=1)
@@ -323,6 +673,25 @@ class MechIntPipeline:
 
         if "fractals" in self.config.enabled_analyses:
             self.register_stage("fractals", run_fractals, priority=1)
+
+        # New stages
+        if "biophysical" in self.config.enabled_analyses:
+            self.register_stage("biophysical", run_biophysical, priority=2, result_type=MechIntResult)
+
+        if "interventions" in self.config.enabled_analyses:
+            self.register_stage("interventions", run_interventions, priority=1, result_type=MechIntResult)
+
+        if "alignment" in self.config.enabled_analyses:
+            self.register_stage("alignment", run_alignment, priority=2, result_type=AlignmentResult)
+
+        if "criticality" in self.config.enabled_analyses:
+            self.register_stage("criticality", run_criticality, priority=2, result_type=MechIntResult)
+
+        if "multifractal" in self.config.enabled_analyses:
+            self.register_stage("multifractal", run_multifractal, priority=1, result_type=FractalResult)
+
+        if "temporal" in self.config.enabled_analyses:
+            self.register_stage("temporal", run_temporal, priority=1, result_type=MechIntResult)
 
     def register_stage(
         self,

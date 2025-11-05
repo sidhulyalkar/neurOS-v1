@@ -12,7 +12,7 @@ References:
 
 import torch
 import torch.nn as nn
-from typing import Optional, Tuple, Callable
+from typing import Optional, Tuple, Callable, Dict
 from dataclasses import dataclass
 import numpy as np
 

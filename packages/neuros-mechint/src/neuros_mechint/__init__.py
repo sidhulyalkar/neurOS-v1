@@ -85,6 +85,7 @@ Reporting & Integration:
 
 __version__ = "0.1.0"
 
+# Core components
 from neuros_mechint.neuron_analysis import NeuronActivationAnalyzer
 from neuros_mechint.circuit_discovery import CircuitDiscovery
 from neuros_mechint.sparse_autoencoder import SparseAutoencoder
@@ -101,36 +102,23 @@ from neuros_mechint.concept_sae import (
 from neuros_mechint.sae_training import (
     ActivationCache,
     MultiLayerSAETrainer,
-    SAETrainingPipeline
+    SAETrainingPipeline,
 )
 
-# SAE Visualization Suite (optional - requires matplotlib)
-try:
-    from neuros_mechint.sae_visualization import (
-        SAEVisualizer,
-        MultiLayerSAEVisualizer
-    )
-    _HAS_VISUALIZATION = True
-except ImportError:
-    SAEVisualizer = None
-    MultiLayerSAEVisualizer = None
-    _HAS_VISUALIZATION = False
+# SAE Visualization Suite
+from neuros_mechint.sae_visualization import (
+    SAEVisualizer,
+    MultiLayerSAEVisualizer,
+)
 
 # Feature Analysis Suite
-try:
-    from neuros_mechint.feature_analysis import (
-        FeatureAttributionAnalyzer,
-        TemporalDynamicsAnalyzer,
-        CausalImportanceAnalyzer,
-        FeatureClusteringAnalyzer,
-        FeatureSteeringAnalyzer
-    )
-except ImportError:
-    FeatureAttributionAnalyzer = None
-    TemporalDynamicsAnalyzer = None
-    CausalImportanceAnalyzer = None
-    FeatureClusteringAnalyzer = None
-    FeatureSteeringAnalyzer = None
+from neuros_mechint.feature_analysis import (
+    FeatureAttributionAnalyzer,
+    TemporalDynamicsAnalyzer,
+    CausalImportanceAnalyzer,
+    FeatureClusteringAnalyzer,
+    FeatureSteeringAnalyzer,
+)
 
 # Causal Graph Builder Suite
 from neuros_mechint.graph_builder import (
@@ -140,7 +128,7 @@ from neuros_mechint.graph_builder import (
     AlignmentScore,
     CausalGraphBuilder,
     CausalGraphVisualizer,
-    build_and_visualize_graph
+    build_and_visualize_graph,
 )
 
 # Energy Flow and Information Landscape Suite
@@ -154,7 +142,7 @@ from neuros_mechint.energy_flow import (
     InformationFlowAnalyzer,
     EnergyLandscape,
     EntropyProduction,
-    compute_information_plane_trajectory
+    compute_information_plane_trajectory,
 )
 
 # Training/Evaluation Hooks
@@ -162,33 +150,19 @@ from neuros_mechint.hooks import (
     MechIntConfig,
     ActivationSampler,
     MechIntHooks,
-    EvalMechIntRunner
+    EvalMechIntRunner,
+    MechIntCallback,
+    FastAPIIntegrationMixin,
 )
 
-# Optional components for hooks (requires pytorch-lightning and fastapi)
-try:
-    from neuros_mechint.hooks import MechIntCallback, FastAPIIntegrationMixin
-except ImportError:
-    MechIntCallback = None
-    FastAPIIntegrationMixin = None
-
-
-
-# Advanced Attribution Methods (optional - requires matplotlib)
-try:
-    from neuros_mechint.attribution import (
-        IntegratedGradients,
-        DeepLIFT,
-        GradientSHAP,
-        GenerativePathAttribution,
-        visualize_attributions
-    )
-except ImportError:
-    IntegratedGradients = None
-    DeepLIFT = None
-    GradientSHAP = None
-    GenerativePathAttribution = None
-    visualize_attributions = None
+# Advanced Attribution Methods
+from neuros_mechint.attribution import (
+    IntegratedGradients,
+    DeepLIFT,
+    GradientSHAP,
+    GenerativePathAttribution,
+    visualize_attributions,
+)
 
 # Brain Alignment Suite
 from neuros_mechint.alignment import (
@@ -199,43 +173,44 @@ from neuros_mechint.alignment import (
 
 # Dynamics Analysis
 from neuros_mechint.dynamics import (
-    DynamicsAnalyzer,
     KoopmanOperator,
     LyapunovAnalyzer,
+    FixedPointFinder,
+    ManifoldAnalyzer,
+    PhaseSpaceAnalyzer,
+    DynamicsAnalyzer,
 )
 
 # Counterfactual Interventions
 from neuros_mechint.counterfactuals import (
     LatentSurgery,
-    DoCalculusEngine,
-    SyntheticLesion,
+    DoCalculusInterventions,
+    SyntheticLesions,
 )
 
 # Meta-Dynamics (Training Trajectory Analysis)
 from neuros_mechint.meta_dynamics import (
-    MetaDynamicsTracker,
-    CheckpointComparison,
     TrainingPhase,
+    RepresentationalTrajectory,
+    TrainingPhaseDetection,
+    GradientAttribution,
 )
 
 # Geometry and Topology
 from neuros_mechint.geometry_topology import (
-    ManifoldAnalyzer,
-    TopologyAnalyzer,
-    CurvatureEstimator,
+    ManifoldGeometry,
+    TopologicalAnalysis,
+    ManifoldVisualization,
 )
 
-# Comprehensive Reporting (optional - requires matplotlib)
-try:
-    from neuros_mechint.reporting import (
-        MechIntReporter,
-        ReportSection,
-        Figure,
-    )
-except ImportError:
-    MechIntReporter = None
-    ReportSection = None
-    Figure = None
+# Comprehensive Reporting
+from neuros_mechint.reporting import (
+    UnifiedMechIntReporter,
+    MechIntReport,
+    ReportSection,
+    ReportMetric,
+    ReportTemplate,
+)
 
 # Fractal Geometry Suite
 from neuros_mechint.fractals import (
@@ -286,7 +261,44 @@ from neuros_mechint.biophysical import (
     DalesLinear,
     EINetworkClassifier,
     RecurrentDalesNetwork,
-    DalesLossRegularizer,
+    AdExNeuron,
+    QuadraticIFNeuron,
+    ResonateAndFireNeuron,
+    PinskyRinzelNeuron,
+    BiophysicalNeuronBase,
+    NeuronParameters,
+    STDP,
+    TripletSTDP,
+    ShortTermPlasticity,
+    SynapticDynamics,
+    HomeostaticPlasticity,
+    BCMRule,
+    Metaplasticity,
+    STDPParameters,
+    VoltageGatedChannel,
+    SodiumChannel,
+    PotassiumChannel,
+    ATypeKChannel,
+    CalciumChannel,
+    HCNChannel,
+    LigandGatedChannel,
+    AMPAReceptor,
+    NMDAReceptor,
+    GABAAReceptor,
+    GABABReceptor,
+    ChannelPopulation,
+    ChannelKinetics,
+    Compartment,
+    MultiCompartmentNeuron,
+    CompartmentGeometry,
+    CableProperties,
+    PrefabNeurons,
+    DendriticComputationAnalyzer,
+    ATPDynamics,
+    MetabolicConstraint,
+    EnergyEfficiencyAnalyzer,
+    GlucoseTransport,
+    EnergyBudget,
 )
 
 # Causal Interventions Suite
@@ -306,157 +318,179 @@ from neuros_mechint.interventions import (
 
 __all__ = [
     # Version
-    '__version__',
-
+    "__version__",
     # Core components
-    'NeuronActivationAnalyzer',
-    'CircuitDiscovery',
-    'SparseAutoencoder',
-
+    "NeuronActivationAnalyzer",
+    "CircuitDiscovery",
+    "SparseAutoencoder",
     # Hierarchical SAE and Concept Discovery
-    'HierarchicalSAE',
-    'ConceptDictionary',
-    'ConceptLabel',
-    'CausalSAEProbe',
-
+    "HierarchicalSAE",
+    "ConceptDictionary",
+    "ConceptLabel",
+    "CausalSAEProbe",
     # SAE Training
-    'ActivationCache',
-    'MultiLayerSAETrainer',
-    'SAETrainingPipeline',
-
+    "ActivationCache",
+    "MultiLayerSAETrainer",
+    "SAETrainingPipeline",
     # SAE Visualization
-    'SAEVisualizer',
-    'MultiLayerSAEVisualizer',
-
+    "SAEVisualizer",
+    "MultiLayerSAEVisualizer",
     # Feature Analysis
-    'FeatureAttributionAnalyzer',
-    'TemporalDynamicsAnalyzer',
-    'CausalImportanceAnalyzer',
-    'FeatureClusteringAnalyzer',
-    'FeatureSteeringAnalyzer',
-
+    "FeatureAttributionAnalyzer",
+    "TemporalDynamicsAnalyzer",
+    "CausalImportanceAnalyzer",
+    "FeatureClusteringAnalyzer",
+    "FeatureSteeringAnalyzer",
     # Causal Graph Builder
-    'CausalGraph',
-    'TimeVaryingGraph',
-    'PerturbationEffect',
-    'AlignmentScore',
-    'CausalGraphBuilder',
-    'CausalGraphVisualizer',
-    'build_and_visualize_graph',
-
+    "CausalGraph",
+    "TimeVaryingGraph",
+    "PerturbationEffect",
+    "AlignmentScore",
+    "CausalGraphBuilder",
+    "CausalGraphVisualizer",
+    "build_and_visualize_graph",
     # Energy Flow and Information Landscape
-    'MutualInformationEstimate',
-    'InformationPlane',
-    'EnergyFunction',
-    'Basin',
-    'EntropyProductionEstimate',
-    'MINENetwork',
-    'InformationFlowAnalyzer',
-    'EnergyLandscape',
-    'EntropyProduction',
-    'compute_information_plane_trajectory',
-
+    "MutualInformationEstimate",
+    "InformationPlane",
+    "EnergyFunction",
+    "Basin",
+    "EntropyProductionEstimate",
+    "MINENetwork",
+    "InformationFlowAnalyzer",
+    "EnergyLandscape",
+    "EntropyProduction",
+    "compute_information_plane_trajectory",
     # Training/Evaluation Hooks
-    'MechIntConfig',
-    'ActivationSampler',
-    'MechIntHooks',
-    'EvalMechIntRunner',
-    'MechIntCallback',
-    'FastAPIIntegrationMixin',
-
+    "MechIntConfig",
+    "ActivationSampler",
+    "MechIntHooks",
+    "EvalMechIntRunner",
+    "MechIntCallback",
+    "FastAPIIntegrationMixin",
     # Advanced Attribution Methods
-    'IntegratedGradients',
-    'DeepLIFT',
-    'GradientSHAP',
-    'GenerativePathAttribution',
-    'visualize_attributions',
-
+    "IntegratedGradients",
+    "DeepLIFT",
+    "GradientSHAP",
+    "GenerativePathAttribution",
+    "visualize_attributions",
     # Brain Alignment
-    'CCAAlignment',
-    'RSAAlignment',
-    'ProcrustesAlignment',
-
+    "CCA",
+    "RSA",
+    "PLS",
     # Dynamics Analysis
-    'DynamicsAnalyzer',
-    'KoopmanOperator',
-    'LyapunovAnalyzer',
-
+    "KoopmanOperator",
+    "LyapunovAnalyzer",
+    "FixedPointFinder",
+    "ManifoldAnalyzer",
+    "PhaseSpaceAnalyzer",
+    "DynamicsAnalyzer",
     # Counterfactual Interventions
-    'LatentSurgery',
-    'DoCalculusEngine',
-    'SyntheticLesion',
-
+    "LatentSurgery",
+    "DoCalculusInterventions",
+    "SyntheticLesions",
     # Meta-Dynamics
-    'MetaDynamicsTracker',
-    'CheckpointComparison',
-    'TrainingPhase',
-
+    "TrainingPhase",
+    "RepresentationalTrajectory",
+    "TrainingPhaseDetection",
+    "GradientAttribution",
     # Geometry and Topology
-    'ManifoldAnalyzer',
-    'TopologyAnalyzer',
-    'CurvatureEstimator',
-
+    "ManifoldGeometry",
+    "TopologicalAnalysis",
+    "ManifoldVisualization",
     # Reporting
-    'MechIntReporter',
-    'ReportSection',
-    'Figure',
-
+    "MechIntReporter",
+    "ReportSection",
+    "Figure",
     # Fractal Geometry Suite
-    'HiguchiFractalDimension',
-    'DetrendedFluctuationAnalysis',
-    'HurstExponent',
-    'SpectralSlope',
-    'GraphFractalDimension',
-    'MultifractalSpectrum',
-    'FractalMetricsBundle',
-    'SpectralPrior',
-    'MultifractalSmoothness',
-    'GraphFractalityPrior',
-    'FractalRegularizationLoss',
-    'FractionalBrownianMotion',
-    'ColoredNoise',
-    'MultiplicativeCascade',
-    'FractalPatterns',
-    'FractionalOU',
-    'DendriteGrowthSimulator',
-    'FractalNetworkModel',
-    'LatentFDTracker',
-    'AttentionFractalCoupling',
-    'CausalScaleAblation',
-
+    "HiguchiFractalDimension",
+    "DetrendedFluctuationAnalysis",
+    "HurstExponent",
+    "SpectralSlope",
+    "GraphFractalDimension",
+    "MultifractalSpectrum",
+    "FractalMetricsBundle",
+    "SpectralPrior",
+    "MultifractalSmoothness",
+    "GraphFractalityPrior",
+    "FractalRegularizationLoss",
+    "FractionalBrownianMotion",
+    "ColoredNoise",
+    "MultiplicativeCascade",
+    "FractalPatterns",
+    "FractionalOU",
+    "DendriteGrowthSimulator",
+    "FractalNetworkModel",
+    "LatentFDTracker",
+    "AttentionFractalCoupling",
+    "CausalScaleAblation",
     # Circuit Inference Suite
-    'LatentCircuitModel',
-    'CircuitFitter',
-    'RecurrentDynamicsAnalyzer',
-    'DUNLModel',
-    'MixedSelectivityAnalyzer',
-    'FactorDecomposition',
-    'FeatureVisualizer',
-    'OptimalStimulus',
-    'ActivationMaximization',
-
+    "LatentCircuitModel",
+    "CircuitFitter",
+    "RecurrentDynamicsAnalyzer",
+    "DUNLModel",
+    "MixedSelectivityAnalyzer",
+    "FactorDecomposition",
+    "FeatureVisualizer",
+    "OptimalStimulus",
+    "ActivationMaximization",
     # Biophysical Modeling Suite
-    'SurrogateGradient',
-    'LeakyIntegrateFireNeuron',
-    'IzhikevichNeuron',
-    'HodgkinHuxleyNeuron',
-    'SpikingNeuralNetwork',
-    'DalesLawConstraint',
-    'DalesLinear',
-    'EINetworkClassifier',
-    'RecurrentDalesNetwork',
-    'DalesLossRegularizer',
-
+    "SurrogateGradient",
+    "LeakyIntegrateFireNeuron",
+    "IzhikevichNeuron",
+    "HodgkinHuxleyNeuron",
+    "SpikingNeuralNetwork",
+    "DalesLawConstraint",
+    "DalesLinear",
+    "EINetworkClassifier",
+    "RecurrentDalesNetwork",
+    "AdExNeuron",
+    "QuadraticIFNeuron",
+    "ResonateAndFireNeuron",
+    "PinskyRinzelNeuron",
+    "BiophysicalNeuronBase",
+    "NeuronParameters",
+    "STDP",
+    "TripletSTDP",
+    "ShortTermPlasticity",
+    "SynapticDynamics",
+    "HomeostaticPlasticity",
+    "BCMRule",
+    "Metaplasticity",
+    "STDPParameters",
+    "VoltageGatedChannel",
+    "SodiumChannel",
+    "PotassiumChannel",
+    "ATypeKChannel",
+    "CalciumChannel",
+    "HCNChannel",
+    "LigandGatedChannel",
+    "AMPAReceptor",
+    "NMDAReceptor",
+    "GABAAReceptor",
+    "GABABReceptor",
+    "ChannelPopulation",
+    "ChannelKinetics",
+    "Compartment",
+    "MultiCompartmentNeuron",
+    "CompartmentGeometry",
+    "CableProperties",
+    "PrefabNeurons",
+    "DendriticComputationAnalyzer",
+    "ATPDynamics",
+    "MetabolicConstraint",
+    "EnergyEfficiencyAnalyzer",
+    "GlucoseTransport",
+    "EnergyBudget",
     # Causal Interventions Suite
-    'ActivationPatcher',
-    'ResidualStreamPatcher',
-    'AttentionPatcher',
-    'MLPPatcher',
-    'NeuronAblation',
-    'LayerAblation',
-    'ComponentAblation',
-    'AblationStudy',
-    'PathAnalyzer',
-    'InformationFlow',
-    'InterventionCausalGraph',
+    "ActivationPatcher",
+    "ResidualStreamPatcher",
+    "AttentionPatcher",
+    "MLPPatcher",
+    "NeuronAblation",
+    "LayerAblation",
+    "ComponentAblation",
+    "AblationStudy",
+    "PathAnalyzer",
+    "InformationFlow",
+    "InterventionCausalGraph",
 ]
