@@ -447,6 +447,80 @@ class InformationFlowAnalyzer:
         mi_samples = np.array(mi_samples)
         return (np.percentile(mi_samples, 2.5), np.percentile(mi_samples, 97.5))
 
+    # ==================== PUBLIC API WRAPPERS ====================
+    # These methods provide direct access to MI estimators for advanced users
+    # while maintaining the recommended estimate_mutual_information() interface
+
+    def estimate_mi_knn(
+        self,
+        X: torch.Tensor,
+        Y: torch.Tensor,
+        k: int = 5
+    ) -> float:
+        """
+        Estimate mutual information using k-NN method (public API).
+
+        This is a wrapper for the internal k-NN estimator, provided for
+        backward compatibility and direct access.
+
+        Args:
+            X: First variable (batch_size, x_dim)
+            Y: Second variable (batch_size, y_dim)
+            k: Number of nearest neighbors
+
+        Returns:
+            Mutual information estimate in nats
+        """
+        return self._estimate_mi_knn(X, Y, k=k)
+
+    def estimate_mi_mine(
+        self,
+        X: torch.Tensor,
+        Y: torch.Tensor,
+        n_epochs: int = 100,
+        lr: float = 1e-3
+    ) -> float:
+        """
+        Estimate mutual information using MINE (public API).
+
+        This is a wrapper for the internal MINE estimator, provided for
+        backward compatibility and direct access.
+
+        Args:
+            X: First variable (batch_size, x_dim)
+            Y: Second variable (batch_size, y_dim)
+            n_epochs: Number of training epochs
+            lr: Learning rate
+
+        Returns:
+            Mutual information estimate in nats
+        """
+        return self._estimate_mi_mine(X, Y, n_epochs=n_epochs, lr=lr)
+
+    def estimate_mi_histogram(
+        self,
+        X: torch.Tensor,
+        Y: torch.Tensor,
+        n_bins: int = 20
+    ) -> float:
+        """
+        Estimate mutual information using histogram method (public API).
+
+        This is a wrapper for the internal histogram estimator, provided for
+        backward compatibility and direct access.
+
+        Args:
+            X: First variable (batch_size, x_dim)
+            Y: Second variable (batch_size, y_dim)
+            n_bins: Number of bins per dimension
+
+        Returns:
+            Mutual information estimate in nats
+        """
+        return self._estimate_mi_histogram(X, Y, n_bins=n_bins)
+
+    # ==================== END PUBLIC API WRAPPERS ====================
+
     def information_plane(
         self,
         activations: Dict[str, torch.Tensor],
