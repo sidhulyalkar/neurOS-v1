@@ -350,8 +350,8 @@ class NeuralODEIntegrator:
 
         trajectory = ODETrajectory(
             times=t.cpu().numpy(),
-            states=states.cpu().numpy(),
-            velocities=velocities.cpu().numpy(),
+            states=states.detach().cpu().numpy(),
+            velocities=velocities.detach().cpu().numpy(),
             method=method,
             rtol=rtol,
             atol=atol

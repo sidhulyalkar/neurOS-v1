@@ -144,85 +144,71 @@ class KoopmanOperator:
         else:
             raise ValueError(f"Unknown DMD method: {method}")
 
-    def _standard_dmd(
-        self,
-        X: np.ndarray,
-        rank: Optional[int] = None
-    ) -> KoopmanResult:
+    def _standard_dmd(self, X: np.ndarray, rank: Optional[int] = None) -> KoopmanResult:
         """
-        Standard Dynamic Mode Decomposition.
-
-        Computes the best-fit linear operator A such that:
-            X_{t+1} ≈ A X_t
-
-        Args:
-            X: State snapshots (n_timesteps, n_features)
-            rank: SVD truncation rank
-
-        Returns:
-            KoopmanResult
+        Standard Dynamic Mode Decomposition (DMD).
+        Computes X_{t+1} ≈ A X_t.
+        X can be (n_features, n_timesteps) or (n_timesteps, n_features).
         """
+        # Auto-correct orientation: we want (n_timesteps, n_features)
+        if X.shape[0] < X.shape[1]:
+            X = X.T
+
+        n_timesteps, n_features = X.shape
         if rank is None:
-            rank = self.rank
+            rank = self.rank or min(n_timesteps, n_features)
 
-        # Split into X and Y (X' in DMD notation)
+        # Build snapshot matrices
         X1 = X[:-1].T  # (n_features, n_timesteps-1)
         X2 = X[1:].T   # (n_features, n_timesteps-1)
 
-        # SVD of X1
-        U, S, Vh = svd(X1, full_matrices=False)
+        # SVD
+        U, S, Vh = np.linalg.svd(X1, full_matrices=False)
 
         # Truncate
-        if rank is not None:
-            U = U[:, :rank]
-            S = S[:rank]
-            Vh = Vh[:rank, :]
+        r = min(rank, len(S))
+        U_r = U[:, :r]
+        S_r = S[:r]
+        Vh_r = Vh[:r, :]
 
-        # Compute Koopman operator in reduced space
-        S_inv = np.diag(1.0 / S)
-        A_tilde = U.T @ X2 @ Vh.T @ S_inv
+        # Reduced Koopman operator
+        A_tilde = U_r.T @ X2 @ Vh_r.T @ np.diag(1.0 / S_r)
 
-        # Eigendecomposition
-        eigenvalues, eigenvectors_tilde = eig(A_tilde)
+        # Eigen decomposition
+        eigenvalues, W = np.linalg.eig(A_tilde)
+        Phi = X2 @ Vh_r.T @ np.diag(1.0 / S_r) @ W  # DMD modes
 
-        # Project back to full space
-        eigenvectors = X2 @ Vh.T @ S_inv @ eigenvectors_tilde
+        # Normalize modes
+        for i in range(Phi.shape[1]):
+            Phi[:, i] /= np.linalg.norm(Phi[:, i])
 
-        # Normalize eigenvectors
-        for i in range(eigenvectors.shape[1]):
-            eigenvectors[:, i] /= np.linalg.norm(eigenvectors[:, i])
-
-        # Compute amplitudes (initial conditions in mode coordinates)
+        # Compute amplitudes (mode coefficients)
         x0 = X1[:, 0]
-        amplitudes = np.linalg.lstsq(eigenvectors, x0, rcond=None)[0]
+        amplitudes = np.linalg.lstsq(Phi, x0, rcond=None)[0]
 
-        # Full Koopman matrix (if requested)
-        K_full = U @ A_tilde @ U.T
-
-        # Compute reconstruction error
-        X_reconstructed = self._reconstruct(
-            eigenvalues, eigenvectors, amplitudes, X1.shape[1]
-        )
+        # Reconstruction error
+        X_reconstructed = self._reconstruct(eigenvalues, Phi, amplitudes, n_timesteps - 1)
         reconstruction_error = np.linalg.norm(X1 - X_reconstructed) / np.linalg.norm(X1)
 
-        # Extract growth rates and frequencies
+        # Growth rates & frequencies
         growth_rates = np.log(np.abs(eigenvalues)) / self.dt
         frequencies = np.angle(eigenvalues) / self.dt
 
         return KoopmanResult(
-            koopman_matrix=K_full,
+            koopman_matrix=A_tilde,
             eigenvalues=eigenvalues,
-            eigenvectors=eigenvectors,
+            eigenvectors=Phi,
             amplitudes=amplitudes,
             growth_rates=growth_rates,
             frequencies=frequencies,
             reconstruction_error=reconstruction_error,
-            U=U,
-            S=S,
-            Vh=Vh,
+            U=U_r,
+            S=S_r,
+            Vh=Vh_r,
             method="standard",
-            rank=rank
+            rank=r
         )
+
 
     def _extended_dmd(
         self,
@@ -459,32 +445,28 @@ class KoopmanOperator:
             rank=result.rank
         )
 
-    def predict(
-        self,
-        result: KoopmanResult,
-        x0: np.ndarray,
-        n_steps: int
-    ) -> np.ndarray:
+    def predict(self, result: KoopmanResult, x0: np.ndarray, n_steps: int) -> np.ndarray:
         """
         Predict future states using Koopman operator.
-
-        Args:
-            result: KoopmanResult from fitting
-            x0: Initial state
-            n_steps: Number of time steps to predict
-
-        Returns:
-            Predicted trajectory (n_steps, n_features)
+        Returns trajectory of shape (n_steps, n_features).
         """
-        # Reconstruct trajectory
-        trajectory = self._reconstruct(
-            result.eigenvalues,
-            result.eigenvectors,
-            result.amplitudes,
-            n_steps
-        )
+        Phi = result.eigenvectors
+        eigenvalues = result.eigenvalues
+        x0 = np.ravel(x0)
 
-        return trajectory.T
+        # Recompute amplitudes from x0
+        amplitudes = np.linalg.lstsq(Phi, x0, rcond=None)[0]
+
+        r = len(amplitudes)
+        eigenvalues = eigenvalues[:r]
+        Phi = Phi[:, :r]
+
+        time_powers = np.arange(n_steps)
+        Vand = np.power(eigenvalues[:, None], time_powers)
+
+        X_pred = Phi @ np.diag(amplitudes) @ Vand
+        return X_pred.T.real
+
 
     def _reconstruct(
         self,
@@ -494,8 +476,18 @@ class KoopmanOperator:
         n_steps: int
     ) -> np.ndarray:
         """Reconstruct trajectory from DMD modes."""
-        Vand = self._vandermonde(eigenvalues, n_steps)
-        return eigenvectors @ np.diag(amplitudes) @ Vand
+        r = len(amplitudes)
+        eigenvalues = eigenvalues[:r]
+        eigenvectors = eigenvectors[:, :r]
+
+        # Build Vandermonde matrix of shape (r, n_steps)
+        time_powers = np.arange(n_steps)
+        Vand = np.power(eigenvalues[:, None], time_powers)
+
+        # (n_features, r) @ (r, r) @ (r, n_steps) → (n_features, n_steps)
+        X_reconstructed = eigenvectors @ np.diag(amplitudes) @ Vand
+        return X_reconstructed
+
 
     def _vandermonde(self, eigenvalues: np.ndarray, n_steps: int) -> np.ndarray:
         """Create Vandermonde matrix from eigenvalues."""
