@@ -131,6 +131,18 @@ class MechIntResult:
                     hasher.update(shape_str.encode())
 
         return hasher.hexdigest()
+    def get_content_hash(self) -> str:
+        """
+        Return a stable, deterministic hash
+        Used by MechIntDatabase for deduplication and caching.
+        """
+        # If already computed, return existing
+        if self.content_hash is not None:
+            return self.content_hash
+
+        # Otherwise recompute from data + metadata
+        self.content_hash = self._compute_hash()
+        return self.content_hash
 
     def save(self, path: str) -> None:
         """
@@ -321,13 +333,14 @@ class CircuitResult(MechIntResult):
     Attributes:
         nodes: List of node names/indices
         edges: List of (source, target, weight) tuples
-        circuit_graph: NetworkX graph (stored as dict for serialization)
         circuit_type: Type of circuit (e.g., 'feed-forward', 'recurrent')
     """
 
     nodes: List[str] = field(default_factory=list)
     edges: List[Tuple[str, str, float]] = field(default_factory=list)
     circuit_type: Optional[str] = None
+
+    # ---------- Graph helpers ----------
 
     def to_networkx(self):
         """Convert to NetworkX DiGraph."""
@@ -337,17 +350,147 @@ class CircuitResult(MechIntResult):
         G.add_weighted_edges_from(self.edges)
         return G
 
+    @classmethod
     def from_networkx(cls, G, method: str, **kwargs):
-        """Create from NetworkX graph."""
+        """Create CircuitResult from a NetworkX graph."""
         nodes = list(G.nodes())
-        edges = [(u, v, d['weight']) for u, v, d in G.edges(data=True)]
+        edges = []
+        for u, v, d in G.edges(data=True):
+            w = d.get("weight", 1.0)
+            edges.append((u, v, float(w)))
         return cls(
             method=method,
+            data={},              # or any dict you want to store in `data`
+            metadata=kwargs.get("metadata", {}),
+            metrics=kwargs.get("metrics", {}),
             nodes=nodes,
             edges=edges,
-            **kwargs
+            circuit_type=kwargs.get("circuit_type"),
         )
 
+    # ---------- Hash override ----------
+
+    def get_content_hash(self) -> str:
+        """
+        Include circuit-specific structure (nodes and edges) in content hash.
+        """
+        import hashlib, json
+        base_hash = super().get_content_hash()
+        hasher = hashlib.sha256()
+        hasher.update(base_hash.encode())
+
+        # Hash nodes and edges deterministically
+        node_str = json.dumps(sorted(self.nodes), sort_keys=True)
+        edge_str = json.dumps(sorted([tuple(e) for e in self.edges]), sort_keys=True)
+        hasher.update(node_str.encode())
+        hasher.update(edge_str.encode())
+
+        if self.circuit_type:
+            hasher.update(self.circuit_type.encode())
+
+        return hasher.hexdigest()
+
+    # ---------- Save / load override ----------
+
+    def save(self, path: str) -> None:
+        """
+        Save base MechIntResult fields plus circuit-specific fields.
+
+        We:
+        - call the base MechIntResult.save() to write method/data/metadata/metrics
+        - then reopen the file in append mode and write nodes/edges/circuit_type
+        """
+        # First let the base class write its stuff
+        super().save(path)
+
+        path = Path(path)
+        if path.suffix != ".h5":
+            path = path.with_suffix(".h5")
+
+        import numpy as np
+        import h5py
+
+        with h5py.File(path, "a") as f:
+            # Store circuit-specific info in a dedicated group
+            grp = f.require_group("circuit")
+
+            # Nodes as a string dataset
+            dt = h5py.string_dtype(encoding="utf-8")
+            if "nodes" in grp:
+                del grp["nodes"]
+            grp.create_dataset("nodes", data=np.array(self.nodes, dtype=object), dtype=dt)
+
+            # Edges: store as three parallel datasets: src, tgt, weight
+            sources = [e[0] for e in self.edges]
+            targets = [e[1] for e in self.edges]
+            weights = [float(e[2]) for e in self.edges] if self.edges else []
+
+            if "sources" in grp:
+                del grp["sources"]
+            if "targets" in grp:
+                del grp["targets"]
+            if "weights" in grp:
+                del grp["weights"]
+
+            grp.create_dataset("sources", data=np.array(sources, dtype=object), dtype=dt)
+            grp.create_dataset("targets", data=np.array(targets, dtype=object), dtype=dt)
+            grp.create_dataset("weights", data=np.array(weights, dtype=float))
+
+            # Circuit type as an attribute
+            if self.circuit_type is not None:
+                grp.attrs["circuit_type"] = self.circuit_type
+
+    @classmethod
+    def load(cls, path: str) -> "CircuitResult":
+        """
+        Load CircuitResult from disk.
+
+        Uses MechIntResult.load() for base fields, then adds circuit-specific attrs.
+        """
+        path = Path(path)
+        if path.suffix != ".h5":
+            path = path.with_suffix(".h5")
+
+        # Load base part using MechIntResult.load (not cls.load to avoid recursion)
+        base = MechIntResult.load(path)
+
+        import h5py
+        nodes: List[str] = []
+        edges: List[Tuple[str, str, float]] = []
+        circuit_type: Optional[str] = None
+
+        with h5py.File(path, "r") as f:
+            if "circuit" in f:
+                grp = f["circuit"]
+
+                # Nodes
+                if "nodes" in grp:
+                    nodes = [str(n) for n in grp["nodes"][:]]
+
+                # Edges
+                if "sources" in grp and "targets" in grp and "weights" in grp:
+                    sources = [str(s) for s in grp["sources"][:]]
+                    targets = [str(t) for t in grp["targets"][:]]
+                    weights = [float(w) for w in grp["weights"][:]]
+                    edges = list(zip(sources, targets, weights))
+
+                # Circuit type
+                if "circuit_type" in grp.attrs:
+                    circuit_type = grp.attrs["circuit_type"]
+
+        return cls(
+            method=base.method,
+            data=base.data,
+            metadata=base.metadata,
+            metrics=base.metrics,
+            visualizations=base.visualizations,
+            provenance=base.provenance,
+            timestamp=base.timestamp,
+            content_hash=base.content_hash,
+            nodes=nodes,
+            edges=edges,
+            circuit_type=circuit_type,
+        )
 
 @dataclass
 class DynamicsResult(MechIntResult):

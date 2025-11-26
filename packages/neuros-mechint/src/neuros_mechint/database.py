@@ -6,13 +6,15 @@ results across all analysis methods. Enables systematic comparisons, provenance
 tracking, and workflow optimization.
 
 Key Features:
-- Content-based caching using SHA256 hashes
-- Efficient HDF5 storage for large arrays
+- Content-based caching using SHA256 hashes (via MechIntResult.get_content_hash)
+- Efficient HDF5 storage for large arrays (delegated to MechIntResult.save/load)
 - SQLite metadata index for fast queries
 - Provenance tracking across analysis chains
 - Batch operations and parallel queries
-- Automatic deduplication
-- Time-based versioning
+- Automatic deduplication + cache cleanup
+- In-memory result cache for fast reuse
+- Basic versioning helpers and tag utilities
+- Optional thumbnail support via metadata
 
 Example:
     >>> db = MechIntDatabase("./mech_int_results")
@@ -23,20 +25,24 @@ Example:
     >>> # Retrieve by ID
     >>> retrieved = db.get(result_id)
     >>>
+    >>> # Or via alias:
+    >>> retrieved = db.load(result_id)
+    >>>
     >>> # Query by metadata
     >>> sae_results = db.query(method="SAE", tags=["experiment1"])
     >>>
-    >>> # Compare similar results
+    >>> # Find similar
     >>> similar = db.find_similar(my_result, threshold=0.9)
 
 Author: NeuroS Team
-Date: 2025-10-30
+Date: 2025-10-30 (updated)
 """
 
 import sqlite3
-import h5py
+import h5py  # kept for future direct HDF5 ops, even though MechIntResult handles most IO
 import json
 import hashlib
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Tuple, Any, Set
 from datetime import datetime
@@ -45,6 +51,7 @@ import torch
 from dataclasses import asdict
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import OrderedDict
 
 from neuros_mechint.results import (
     MechIntResult,
@@ -75,9 +82,10 @@ class MechIntDatabase:
     Args:
         root_dir: Root directory for database storage
         auto_cache: Automatically cache results based on content hash
-        max_cache_size_gb: Maximum cache size in GB (default: 10)
+        max_cache_size_gb: Maximum on-disk cache size in GB (default: 10)
         compression: HDF5 compression level 0-9 (default: 4)
         verbose: Enable verbose logging
+        memory_cache_size: Max number of results to keep in in-memory LRU cache
     """
 
     def __init__(
@@ -86,7 +94,8 @@ class MechIntDatabase:
         auto_cache: bool = True,
         max_cache_size_gb: float = 10.0,
         compression: int = 4,
-        verbose: bool = True
+        verbose: bool = True,
+        memory_cache_size: int = 256,
     ):
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -100,12 +109,25 @@ class MechIntDatabase:
         self.data_dir = self.root_dir / "data"
         self.data_dir.mkdir(exist_ok=True)
 
+        # Optional thumbnails directory
+        self.thumbnails_dir = self.root_dir / "thumbnails"
+        self.thumbnails_dir.mkdir(exist_ok=True)
+
+        # Metadata DB path
         self.metadata_db = self.root_dir / "metadata.db"
 
-        # Initialize database
+        # In-memory LRU-style cache: result_id -> MechIntResult
+        self._memory_cache: "OrderedDict[str, MechIntResult]" = OrderedDict()
+        self._memory_cache_size = max(0, int(memory_cache_size))
+
+        # Initialize database schema
         self._init_database()
 
         self._log(f"Initialized MechIntDatabase at {self.root_dir}")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _log(self, message: str):
         """Log message if verbose."""
@@ -163,6 +185,42 @@ class MechIntDatabase:
         conn.commit()
         conn.close()
 
+    def _update_memory_cache(self, result_id: str, result: MechIntResult):
+        """Insert/refresh an entry in the in-memory LRU cache."""
+        if self._memory_cache_size <= 0:
+            return
+
+        if result_id in self._memory_cache:
+            # Move to end (most recently used)
+            self._memory_cache.move_to_end(result_id)
+        else:
+            self._memory_cache[result_id] = result
+            # Evict least-recently used if over limit
+            if len(self._memory_cache) > self._memory_cache_size:
+                evicted_id, _ = self._memory_cache.popitem(last=False)
+                self._log(f"Evicted {evicted_id} from in-memory cache")
+
+    def _get_from_memory_cache(self, result_id: str) -> Optional[MechIntResult]:
+        """Retrieve an entry from the in-memory cache (if present)."""
+        result = self._memory_cache.get(result_id)
+        if result is not None:
+            # Mark as recently used
+            self._memory_cache.move_to_end(result_id)
+        return result
+
+    def _get_by_hash(self, content_hash: str) -> Optional[str]:
+        """Get result ID by content hash."""
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT result_id FROM results WHERE content_hash = ?", (content_hash,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    # ------------------------------------------------------------------
+    # Core store/load APIs
+    # ------------------------------------------------------------------
+
     def store(
         self,
         result: MechIntResult,
@@ -173,14 +231,14 @@ class MechIntDatabase:
         Store a result in the database.
 
         Args:
-            result: MechIntResult to store
+            result: MechIntResult (or subclass) to store
             tags: Optional tags for categorization
             result_id: Optional custom ID (default: auto-generated)
 
         Returns:
             result_id: Unique identifier for the stored result
         """
-        # Generate content hash
+        # Generate content hash (reproducibility & dedup)
         content_hash = result.get_content_hash()
 
         # Check if already cached
@@ -194,9 +252,17 @@ class MechIntDatabase:
         if result_id is None:
             result_id = f"{result.method}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
-        # Store data to HDF5
+        # Store data to HDF5 (single .h5 file per result)
         file_path = self.data_dir / f"{result_id}.h5"
         result.save(str(file_path))
+
+        # Maybe save thumbnail (if result exposes one)
+        thumb_rel_path = self._maybe_save_thumbnail(result, result_id)
+
+        # Merge thumbnail info into metadata if present
+        metadata = dict(result.metadata or {})
+        if thumb_rel_path is not None:
+            metadata["_thumbnail_path"] = str(thumb_rel_path)
 
         # Get file size
         size_bytes = file_path.stat().st_size
@@ -217,30 +283,39 @@ class MechIntDatabase:
             result.timestamp or datetime.now().isoformat(),
             str(file_path),
             size_bytes,
-            json.dumps(result.metadata),
-            json.dumps(result.metrics)
+            json.dumps(metadata),
+            json.dumps(result.metrics or {}),
         ))
 
         # Store tags
         if tags:
             for tag in tags:
-                cursor.execute("INSERT INTO tags (result_id, tag) VALUES (?, ?)", (result_id, tag))
+                cursor.execute(
+                    "INSERT INTO tags (result_id, tag) VALUES (?, ?)",
+                    (result_id, tag)
+                )
 
         # Store provenance
-        if result.provenance:
+        if getattr(result, "provenance", None):
             for parent in result.provenance:
-                parent_hash = parent.get_content_hash()
-                parent_id = self._get_by_hash(parent_hash)
-                if parent_id:
-                    cursor.execute(
-                        "INSERT INTO provenance (result_id, parent_id) VALUES (?, ?)",
-                        (result_id, parent_id)
-                    )
+                try:
+                    parent_hash = parent.get_content_hash()
+                    parent_id = self._get_by_hash(parent_hash)
+                    if parent_id:
+                        cursor.execute(
+                            "INSERT INTO provenance (result_id, parent_id) VALUES (?, ?)",
+                            (result_id, parent_id)
+                        )
+                except Exception as e:
+                    logger.error(f"Error storing provenance for {result_id}: {e}")
 
         conn.commit()
         conn.close()
 
         self._log(f"Stored result with ID: {result_id}")
+
+        # Update in-memory cache
+        self._update_memory_cache(result_id, result)
 
         # Check cache size and cleanup if needed
         if self.auto_cache:
@@ -250,18 +325,22 @@ class MechIntDatabase:
 
     def get(self, result_id: str) -> Optional[MechIntResult]:
         """
-        Retrieve a result by ID.
+        Retrieve a result by ID. Returns None if not found.
 
-        Args:
-            result_id: Unique identifier
-
-        Returns:
-            MechIntResult or None if not found
+        Uses in-memory cache if available, otherwise loads from HDF5.
         """
+        # Check in-memory cache first
+        cached = self._get_from_memory_cache(result_id)
+        if cached is not None:
+            return cached
+
         conn = sqlite3.connect(self.metadata_db)
         cursor = conn.cursor()
 
-        cursor.execute("SELECT file_path, result_type FROM results WHERE result_id = ?", (result_id,))
+        cursor.execute(
+            "SELECT file_path, result_type, metadata_json, metrics_json FROM results WHERE result_id = ?",
+            (result_id,)
+        )
         row = cursor.fetchone()
         conn.close()
 
@@ -269,9 +348,9 @@ class MechIntDatabase:
             self._log(f"Result not found: {result_id}")
             return None
 
-        file_path, result_type = row
+        file_path, result_type, metadata_json, metrics_json = row
 
-        # Load appropriate class
+        # Select appropriate result class
         result_class = {
             'MechIntResult': MechIntResult,
             'CircuitResult': CircuitResult,
@@ -285,7 +364,118 @@ class MechIntDatabase:
             'MultifractalResult': MultifractalResult,
         }.get(result_type, MechIntResult)
 
-        return result_class.load(file_path)
+        result = result_class.load(file_path)
+
+        # Restore metadata/metrics from DB (in case they changed)
+        try:
+            result.metadata = json.loads(metadata_json) if metadata_json else {}
+        except Exception:
+            result.metadata = {}
+        try:
+            result.metrics = json.loads(metrics_json) if metrics_json else {}
+        except Exception:
+            result.metrics = {}
+
+        # Update in-memory cache
+        self._update_memory_cache(result_id, result)
+
+        return result
+
+    def load(self, result_id: str) -> MechIntResult:
+        """
+        Alias for `get`, but raises KeyError if the result is not found.
+
+        This is useful for components (like CircuitComparator) that expect
+        failures to be exceptional rather than returning None.
+        """
+        result = self.get(result_id)
+        if result is None:
+            raise KeyError(f"No result with ID {result_id} found in MechIntDatabase.")
+        return result
+
+    # ------------------------------------------------------------------
+    # Thumbnail helpers
+    # ------------------------------------------------------------------
+
+    def _maybe_save_thumbnail(self, result: MechIntResult, result_id: str) -> Optional[Path]:
+        """
+        Optionally save a thumbnail for the result, if supported.
+
+        Protocol:
+        - If `result` exposes a `.get_thumbnail()` method:
+            - It may return:
+                - a numpy array (H x W or H x W x 3/4)
+                - a path to an existing image file
+        - We save a PNG (or copy) into root_dir/thumbnails/<result_id>.png
+        - The relative path is then stored in metadata as `_thumbnail_path`.
+
+        Returns:
+            Relative Path to thumbnail file (relative to root_dir), or None
+        """
+        if not hasattr(result, "get_thumbnail"):
+            return None
+
+        try:
+            thumb = result.get_thumbnail()
+        except Exception as e:
+            logger.error(f"Error generating thumbnail for {result_id}: {e}")
+            return None
+
+        if thumb is None:
+            return None
+
+        thumb_path = self.thumbnails_dir / f"{result_id}.png"
+
+        try:
+            # Case 1: numpy array
+            if isinstance(thumb, np.ndarray):
+                import imageio.v2 as imageio  # lazy import
+                imageio.imwrite(thumb_path, thumb)
+            # Case 2: path-like (string or Path)
+            elif isinstance(thumb, (str, Path)):
+                src = Path(thumb)
+                if src.is_file():
+                    import shutil
+                    shutil.copy(src, thumb_path)
+                else:
+                    return None
+            else:
+                # Unsupported type
+                return None
+        except Exception as e:
+            logger.error(f"Failed to save thumbnail for {result_id}: {e}")
+            return None
+
+        # Return path relative to root_dir
+        return thumb_path.relative_to(self.root_dir)
+
+    def get_thumbnail_path(self, result_id: str) -> Optional[Path]:
+        """
+        Return the thumbnail path for a given result, if present in metadata.
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT metadata_json FROM results WHERE result_id = ?", (result_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        try:
+            meta = json.loads(row[0]) if row[0] else {}
+        except Exception:
+            meta = {}
+
+        thumb_rel = meta.get("_thumbnail_path")
+        if not thumb_rel:
+            return None
+
+        return self.root_dir / thumb_rel
+
+    # ------------------------------------------------------------------
+    # Querying and tag utilities
+    # ------------------------------------------------------------------
 
     def query(
         self,
@@ -297,14 +487,14 @@ class MechIntDatabase:
         limit: Optional[int] = None
     ) -> List[str]:
         """
-        Query results by metadata criteria.
+        General query by metadata criteria.
 
         Args:
             method: Filter by method name
-            result_type: Filter by result type
+            result_type: Filter by result type class name
             tags: Filter by tags (all must match)
-            start_time: Filter by timestamp >= start_time
-            end_time: Filter by timestamp <= end_time
+            start_time: Filter by timestamp >= start_time (ISO8601 string)
+            end_time: Filter by timestamp <= end_time (ISO8601 string)
             limit: Maximum number of results
 
         Returns:
@@ -315,7 +505,7 @@ class MechIntDatabase:
 
         query = "SELECT DISTINCT r.result_id FROM results r"
         conditions = []
-        params = []
+        params: List[Any] = []
 
         # Join with tags if needed
         if tags:
@@ -330,13 +520,6 @@ class MechIntDatabase:
             conditions.append("r.result_type = ?")
             params.append(result_type)
 
-        if tags:
-            # All tags must match
-            tag_conditions = " OR ".join(["t.tag = ?"] * len(tags))
-            conditions.append(f"({tag_conditions})")
-            params.extend(tags)
-            query += f" GROUP BY r.result_id HAVING COUNT(DISTINCT t.tag) = {len(tags)}"
-
         if start_time:
             conditions.append("r.timestamp >= ?")
             params.append(start_time)
@@ -344,6 +527,13 @@ class MechIntDatabase:
         if end_time:
             conditions.append("r.timestamp <= ?")
             params.append(end_time)
+
+        if tags:
+            # All tags must match
+            tag_conditions = " OR ".join(["t.tag = ?"] * len(tags))
+            conditions.append(f"({tag_conditions})")
+            params.extend(tags)
+            query += f" GROUP BY r.result_id HAVING COUNT(DISTINCT t.tag) = {len(tags)}"
 
         # Build query
         if conditions:
@@ -360,6 +550,69 @@ class MechIntDatabase:
         conn.close()
 
         self._log(f"Query returned {len(result_ids)} results")
+        return result_ids
+
+    def search_by_tags(
+        self,
+        include_tags: Optional[List[str]] = None,
+        exclude_tags: Optional[List[str]] = None,
+        limit: Optional[int] = None
+    ) -> List[str]:
+        """
+        Convenience tag search.
+
+        Args:
+            include_tags: Results must have ALL of these tags
+            exclude_tags: Results must have NONE of these tags
+            limit: Maximum number of results
+
+        Returns:
+            List of result IDs
+        """
+        include_tags = include_tags or []
+        exclude_tags = exclude_tags or []
+
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+
+        query = "SELECT DISTINCT r.result_id FROM results r"
+        params: List[Any] = []
+
+        if include_tags:
+            query += " INNER JOIN tags t_in ON r.result_id = t_in.result_id"
+        if exclude_tags:
+            query += " LEFT JOIN tags t_ex ON r.result_id = t_ex.result_id"
+
+        conditions: List[str] = []
+
+        if include_tags:
+            tag_in_cond = " OR ".join(["t_in.tag = ?"] * len(include_tags))
+            conditions.append(f"({tag_in_cond})")
+            params.extend(include_tags)
+            query += f" GROUP BY r.result_id HAVING COUNT(DISTINCT t_in.tag) = {len(include_tags)}"
+
+        if exclude_tags:
+            # Exclusion via NOT IN subquery is simpler
+            pass
+
+        # Build WHERE for exclusion
+        if exclude_tags:
+            if not conditions:
+                query += " WHERE "
+            else:
+                query += " AND "
+            placeholders = ", ".join(["?"] * len(exclude_tags))
+            query += f"r.result_id NOT IN (SELECT result_id FROM tags WHERE tag IN ({placeholders}))"
+            params.extend(exclude_tags)
+
+        query += " ORDER BY r.timestamp DESC"
+        if limit:
+            query += f" LIMIT {limit}"
+
+        cursor.execute(query, params)
+        result_ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
         return result_ids
 
     def get_tags(self, result_id: str) -> List[str]:
@@ -382,6 +635,10 @@ class MechIntDatabase:
             )
         conn.commit()
         conn.close()
+
+    # ------------------------------------------------------------------
+    # Provenance, similarity, batch ops
+    # ------------------------------------------------------------------
 
     def get_provenance(self, result_id: str) -> List[str]:
         """Get parent result IDs in provenance chain."""
@@ -412,16 +669,16 @@ class MechIntDatabase:
         # Get candidates
         candidates = self.query(method=method or result.method)
 
-        similar = []
+        similar: List[Tuple[str, float]] = []
         for candidate_id in candidates:
             candidate = self.get(candidate_id)
             if candidate:
                 comparison = result.compare(candidate)
-                # Use mean of all comparison metrics as similarity score
+                # Expect comparison to return a dict of metrics
                 if comparison:
-                    similarity = np.mean(list(comparison.values()))
+                    similarity = float(np.mean(list(comparison.values())))
                     if similarity >= threshold:
-                        similar.append((candidate_id, float(similarity)))
+                        similar.append((candidate_id, similarity))
 
         # Sort by similarity
         similar.sort(key=lambda x: x[1], reverse=True)
@@ -439,7 +696,7 @@ class MechIntDatabase:
         Returns:
             Dictionary mapping result_id to MechIntResult
         """
-        results = {}
+        results: Dict[str, MechIntResult] = {}
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             future_to_id = {executor.submit(self.get, rid): rid for rid in result_ids}
@@ -454,6 +711,10 @@ class MechIntDatabase:
                     logger.error(f"Error loading {rid}: {e}")
 
         return results
+
+    # ------------------------------------------------------------------
+    # Deletion, stats, cache cleanup
+    # ------------------------------------------------------------------
 
     def delete(self, result_id: str):
         """Delete a result and its associated data."""
@@ -471,16 +732,25 @@ class MechIntDatabase:
             if file_path.exists():
                 file_path.unlink()
 
+            # Delete thumbnail if exists
+            thumb_path = self.get_thumbnail_path(result_id)
+            if thumb_path is not None and thumb_path.exists():
+                thumb_path.unlink()
+
             # Delete from database
             cursor.execute("DELETE FROM tags WHERE result_id = ?", (result_id,))
             cursor.execute("DELETE FROM provenance WHERE result_id = ? OR parent_id = ?",
-                          (result_id, result_id))
+                           (result_id, result_id))
             cursor.execute("DELETE FROM results WHERE result_id = ?", (result_id,))
 
             conn.commit()
             self._log(f"Deleted result: {result_id}")
 
         conn.close()
+
+        # Remove from in-memory cache if present
+        if result_id in self._memory_cache:
+            self._memory_cache.pop(result_id, None)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
@@ -517,22 +787,17 @@ class MechIntDatabase:
             'top_tags': top_tags
         }
 
-    def _get_by_hash(self, content_hash: str) -> Optional[str]:
-        """Get result ID by content hash."""
-        conn = sqlite3.connect(self.metadata_db)
-        cursor = conn.cursor()
-        cursor.execute("SELECT result_id FROM results WHERE content_hash = ?", (content_hash,))
-        row = cursor.fetchone()
-        conn.close()
-        return row[0] if row else None
+    def count(self) -> int:
+        """Convenience method: return total number of results."""
+        return self.get_stats()["total_results"]
 
     def _cleanup_cache(self):
-        """Remove oldest results if cache exceeds size limit."""
+        """Remove oldest results if on-disk cache exceeds size limit."""
         stats = self.get_stats()
 
         if stats['total_size_gb'] > self.max_cache_size_gb:
             # Calculate how much to delete
-            to_delete_gb = stats['total_size_gb'] - self.max_cache_size_gb * 0.8  # Keep 80% of limit
+            to_delete_gb = stats['total_size_gb'] - self.max_cache_size_gb * 0.8  # keep 80% of limit
 
             conn = sqlite3.connect(self.metadata_db)
             cursor = conn.cursor()
@@ -557,6 +822,10 @@ class MechIntDatabase:
             conn.close()
 
             self._log(f"Cleaned up {deleted_size / (1024**3):.2f} GB from cache")
+
+    # ------------------------------------------------------------------
+    # Collections, specialized queries, and summaries
+    # ------------------------------------------------------------------
 
     def export_collection(
         self,
@@ -609,7 +878,7 @@ class MechIntDatabase:
         cursor = conn.cursor()
 
         query = "SELECT result_id FROM results WHERE result_type = 'BiophysicalResult'"
-        params = []
+        params: List[Any] = []
 
         if neuron_type:
             query += " AND metadata_json LIKE ?"
@@ -641,7 +910,7 @@ class MechIntDatabase:
 
         Args:
             intervention_type: Filter by type ('optogenetics', 'pharmacology', 'stimulation')
-            min_effect_size: Minimum effect size
+            min_effect_size: Minimum effect size (currently not deeply parsed)
             limit: Maximum number of results
 
         Returns:
@@ -651,14 +920,11 @@ class MechIntDatabase:
         cursor = conn.cursor()
 
         query = "SELECT result_id FROM results WHERE result_type = 'InterventionResult'"
-        params = []
+        params: List[Any] = []
 
         if intervention_type:
             query += " AND metadata_json LIKE ?"
             params.append(f'%"intervention_type": "{intervention_type}"%')
-
-        # Note: For effect_size filtering, we'd need to parse metrics_json
-        # This is a simplified version
 
         query += " ORDER BY timestamp DESC"
 
@@ -696,16 +962,15 @@ class MechIntDatabase:
         cursor.execute(query)
         rows = cursor.fetchall()
 
-        result_ids = []
+        result_ids: List[str] = []
         for result_id, metrics_json in rows:
             if near_critical:
-                # Parse metrics to check branching parameter
                 try:
-                    metrics = json.loads(metrics_json)
+                    metrics = json.loads(metrics_json or "{}")
                     branching = metrics.get('branching_parameter', 0)
                     if abs(branching - 1.0) < threshold:
                         result_ids.append(result_id)
-                except:
+                except Exception:
                     continue
             else:
                 result_ids.append(result_id)
@@ -745,11 +1010,11 @@ class MechIntDatabase:
         cursor.execute(query)
         rows = cursor.fetchall()
 
-        result_ids = []
+        result_ids: List[str] = []
         for result_id, metadata_json, metrics_json in rows:
             try:
-                metadata = json.loads(metadata_json)
-                metrics = json.loads(metrics_json)
+                metadata = json.loads(metadata_json or "{}")
+                metrics = json.loads(metrics_json or "{}")
 
                 # Check analysis method
                 if analysis_method and metadata.get('analysis_method') != analysis_method:
@@ -771,7 +1036,7 @@ class MechIntDatabase:
                 if limit and len(result_ids) >= limit:
                     break
 
-            except:
+            except Exception:
                 continue
 
         conn.close()
@@ -788,14 +1053,13 @@ class MechIntDatabase:
         """
         stats = self.get_stats()
 
-        summary = {
+        summary: Dict[str, Any] = {
             'total_results': stats['total_results'],
             'total_size_gb': stats['total_size_gb'],
             'by_method': stats['by_method'],
             'by_type': stats['by_type'],
         }
 
-        # Add specialized counts
         conn = sqlite3.connect(self.metadata_db)
         cursor = conn.cursor()
 
@@ -821,10 +1085,10 @@ class MechIntDatabase:
         near_critical_count = 0
         for row in cursor.fetchall():
             try:
-                metrics = json.loads(row[0])
+                metrics = json.loads(row[0] or "{}")
                 if abs(metrics.get('branching_parameter', 0) - 1.0) < 0.1:
                     near_critical_count += 1
-            except:
+            except Exception:
                 pass
         summary['criticality_near_critical'] = near_critical_count
 
@@ -839,6 +1103,44 @@ class MechIntDatabase:
         conn.close()
 
         return summary
+
+    # ------------------------------------------------------------------
+    # Versioning & hashing helpers
+    # ------------------------------------------------------------------
+
+    def get_hash(self, result_id: str) -> Optional[str]:
+        """Return the content hash associated with a given result ID."""
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT content_hash FROM results WHERE result_id = ?", (result_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def get_versions_by_hash(self, content_hash: str) -> List[str]:
+        """
+        Return all result IDs sharing the same content hash (should usually be 0 or 1
+        unless you deliberately duplicated content with different IDs).
+        """
+        conn = sqlite3.connect(self.metadata_db)
+        cursor = conn.cursor()
+        cursor.execute("SELECT result_id FROM results WHERE content_hash = ? ORDER BY timestamp ASC", (content_hash,))
+        ids = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return ids
+
+    def get_versions_by_method_and_tags(
+        self,
+        method: str,
+        tags: Optional[List[str]] = None
+    ) -> List[str]:
+        """
+        Return all results for a given method (and optional tags) ordered by time.
+        Useful as a lightweight 'version history' for a specific analysis pipeline.
+        """
+        ids = self.query(method=method, tags=tags)
+        # Already ordered by timestamp DESC; flip to ASC for chronological order
+        return list(reversed(ids))
 
 
 __all__ = [
