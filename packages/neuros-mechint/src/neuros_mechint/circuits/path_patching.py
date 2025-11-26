@@ -520,6 +520,10 @@ class PathPatcher:
             target_metric = self.metric_fn(clean_output)
             baseline_metric = self.metric_fn(corrupted_output)
 
+        # Ensure metrics are floats
+        target_metric = float(target_metric)
+        baseline_metric = float(baseline_metric)
+
         self._log(f"Target metric: {target_metric:.4f}")
         self._log(f"Baseline metric: {baseline_metric:.4f}")
         self._log(f"Total effect to explain: {target_metric - baseline_metric:.4f}")
@@ -564,7 +568,12 @@ class PathPatcher:
 
         def make_hook(name):
             def hook(module, input, output):
-                cache[name] = output.detach().clone()
+                if isinstance(output, tuple):
+                    tensor_output = next((o for o in output if isinstance(o, torch.Tensor)), None)
+                    if tensor_output is not None:
+                        cache[name] = tensor_output.detach().clone()
+                elif isinstance(output, torch.Tensor):
+                    cache[name] = output.detach().clone()
             return hook
 
         # Register hooks

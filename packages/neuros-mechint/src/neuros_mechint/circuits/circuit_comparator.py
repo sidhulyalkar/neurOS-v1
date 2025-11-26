@@ -384,6 +384,8 @@ class CircuitComparator:
 
     def __init__(
         self,
+        circuits=None,
+        database=None,
         similarity_threshold: float = 0.5,
         use_graph_isomorphism: bool = True,
         verbose: bool = True
@@ -393,9 +395,9 @@ class CircuitComparator:
         self.verbose = verbose
 
         # Storage
-        self.circuits: Dict[str, CircuitResult] = {}
+        self.circuits: Dict[str, CircuitResult] = circuits or {}
         self.metadata: Dict[str, Dict[str, Any]] = {}
-
+        self.database = database 
         # Cached comparisons
         self._comparison_cache: Dict[Tuple[str, str], CircuitComparison] = {}
 
@@ -424,6 +426,42 @@ class CircuitComparator:
         self.metadata[circuit_id] = metadata or {}
         self._log(f"Added circuit: {circuit_id}")
 
+    def _extract_nodes_and_edges(self, circuit):
+        """
+        Normalize different circuit representations into:
+        - nodes: set of node labels
+        - edges: set of (source, target) pairs (weights ignored here)
+        Supports:
+          - CircuitResult (nodes: list[str], edges: list[tuple] or list[Edge])
+          - ACDC discovered circuits (with .nodes and .edges as Edge objects)
+        """
+        # Nodes
+        if hasattr(circuit, "nodes"):
+            nodes = set(circuit.nodes)
+        else:
+            raise TypeError(f"Circuit object has no 'nodes' attribute: {type(circuit)}")
+
+        # Edges
+        edges = set()
+        if hasattr(circuit, "edges"):
+            for e in circuit.edges:
+                # Case 1: tuple or list, e.g. (src, tgt, weight) or (src, tgt)
+                if isinstance(e, (tuple, list)):
+                    if len(e) >= 2:
+                        src, tgt = e[0], e[1]
+                    else:
+                        raise TypeError(f"Edge tuple too short: {e}")
+                # Case 2: Edge-like object with .source / .target
+                elif hasattr(e, "source") and hasattr(e, "target"):
+                    src, tgt = e.source, e.target
+                else:
+                    raise TypeError(f"Unsupported edge type: {type(e)}")
+                edges.add((str(src), str(tgt)))
+        else:
+            raise TypeError(f"Circuit object has no 'edges' attribute: {type(circuit)}")
+
+        return nodes, edges
+
     def compare_circuits(
         self,
         circuit_a_id: str,
@@ -448,29 +486,38 @@ class CircuitComparator:
             return self._comparison_cache[cache_key]
 
         self._log(f"Comparing circuits: {circuit_a_id} vs {circuit_b_id}")
+        
+        # --- Load circuit A ---
+        if circuit_a_id in self.circuits:
+            circuit_a = self.circuits[circuit_a_id]
+        elif self.database is not None:
+            circuit_a = self.database.load(circuit_a_id).data
+        else:
+            raise KeyError(f"Circuit ID {circuit_a_id} not found in comparator.")
 
-        circuit_a = self.circuits[circuit_a_id]
-        circuit_b = self.circuits[circuit_b_id]
+        # --- Load circuit B ---
+        if circuit_b_id in self.circuits:
+            circuit_b = self.circuits[circuit_b_id]
+        elif self.database is not None:
+            circuit_b = self.database.load(circuit_b_id).data
+        else:
+            raise KeyError(f"Circuit ID {circuit_b_id} not found in comparator.")
 
-        # Extract nodes and edges
-        nodes_a = set(circuit_a.nodes)
-        nodes_b = set(circuit_b.nodes)
-
-        edges_a = set((e[0], e[1]) for e in circuit_a.edges)  # Ignore weights
-        edges_b = set((e[0], e[1]) for e in circuit_b.edges)
+        # Normalize circuits into (nodes, edges) sets
+        nodes_a, edges_a = self._extract_nodes_and_edges(circuit_a)
+        nodes_b, edges_b = self._extract_nodes_and_edges(circuit_b)
 
         # Compute overlaps
-        common_nodes = nodes_a & nodes_b
-        unique_a_nodes = nodes_a - nodes_b
-        unique_b_nodes = nodes_b - nodes_a
+        node_intersection = nodes_a & nodes_b
+        node_union = nodes_a | nodes_b
 
-        common_edges = edges_a & edges_b
-        unique_a_edges = edges_a - edges_b
-        unique_b_edges = edges_b - edges_a
+        edge_intersection = edges_a & edges_b
+        edge_union = edges_a | edges_b
+
 
         # Jaccard similarities
-        node_overlap = len(common_nodes) / len(nodes_a | nodes_b) if (nodes_a | nodes_b) else 0.0
-        edge_overlap = len(common_edges) / len(edges_a | edges_b) if (edges_a | edges_b) else 0.0
+        node_overlap = len(node_intersection) / len(node_union) if node_union else 0.0
+        edge_overlap = len(edge_intersection) / len(edge_union) if edge_union else 0.0
 
         # Structural similarity (graph isomorphism)
         structural_similarity = self._compute_structural_similarity(circuit_a, circuit_b)
@@ -492,12 +539,12 @@ class CircuitComparator:
             node_overlap=node_overlap,
             edge_overlap=edge_overlap,
             structural_similarity=structural_similarity,
-            common_nodes=common_nodes,
-            unique_a_nodes=unique_a_nodes,
-            unique_b_nodes=unique_b_nodes,
-            common_edges=common_edges,
-            unique_a_edges=unique_a_edges,
-            unique_b_edges=unique_b_edges,
+            common_nodes=node_intersection,
+            unique_a_nodes=nodes_a - nodes_b,
+            unique_b_nodes=nodes_b - nodes_a,
+            common_edges=edge_intersection,
+            unique_a_edges=edges_a - edges_b,
+            unique_b_edges=edges_b - edges_a,
             node_mapping=node_mapping,
             metadata={
                 'circuit_a_metadata': self.metadata.get(circuit_a_id, {}),
@@ -555,57 +602,76 @@ class CircuitComparator:
 
         return analysis
 
-    def _compute_structural_similarity(
-        self,
-        circuit_a: CircuitResult,
-        circuit_b: CircuitResult
-    ) -> float:
+    def _compute_structural_similarity(self, circuit_a, circuit_b):
         """
-        Compute structural similarity using graph metrics.
+        Compute structural similarity of two circuits using NetworkX isomorphism.
 
-        If use_graph_isomorphism is True, uses graph edit distance.
-        Otherwise, uses simpler graph statistics.
+        Handles:
+          - tuple edges (src, tgt) or (src, tgt, weight)
+          - Edge objects with .source and .target
+          - CircuitResult or ACDC-discovered circuit objects
         """
-        if not NETWORKX_AVAILABLE:
-            # Fallback: simple statistics
-            return (circuit_a.metrics.get('sparsity', 0) - circuit_b.metrics.get('sparsity', 0))
+        import networkx as nx
 
-        # Build NetworkX graphs
+        # --- Build graph A ---
         G_a = nx.DiGraph()
-        G_a.add_nodes_from(circuit_a.nodes)
-        G_a.add_edges_from([(e[0], e[1]) for e in circuit_a.edges])
 
+        # Nodes
+        if hasattr(circuit_a, "nodes"):
+            G_a.add_nodes_from(circuit_a.nodes)
+        else:
+            raise TypeError(f"Circuit {type(circuit_a)} has no .nodes attribute.")
+
+        # Edges
+        for e in circuit_a.edges:
+            if isinstance(e, (tuple, list)):
+                if len(e) >= 2:
+                    src, tgt = e[0], e[1]
+                else:
+                    raise TypeError(f"Edge tuple too short: {e}")
+            elif hasattr(e, "source") and hasattr(e, "target"):
+                src, tgt = e.source, e.target
+            else:
+                raise TypeError(f"Unsupported edge type: {type(e)}")
+            G_a.add_edge(str(src), str(tgt))
+
+        # --- Build graph B ---
         G_b = nx.DiGraph()
-        G_b.add_nodes_from(circuit_b.nodes)
-        G_b.add_edges_from([(e[0], e[1]) for e in circuit_b.edges])
 
-        if self.use_graph_isomorphism and len(circuit_a.nodes) < 50:
-            # Graph edit distance (expensive for large graphs)
-            try:
-                # Normalized GED
-                ged = nx.graph_edit_distance(G_a, G_b, timeout=1.0)
-                max_size = max(len(circuit_a.nodes), len(circuit_b.nodes))
-                similarity = 1.0 - (ged / max_size if max_size > 0 else 0.0)
-                return max(0.0, min(1.0, similarity))
-            except:
-                pass  # Timeout or error, fall through
+        if hasattr(circuit_b, "nodes"):
+            G_b.add_nodes_from(circuit_b.nodes)
+        else:
+            raise TypeError(f"Circuit {type(circuit_b)} has no .nodes attribute.")
 
-        # Use graph statistics
-        stats_a = {
-            'density': nx.density(G_a),
-            'avg_degree': sum(dict(G_a.degree()).values()) / len(G_a.nodes()) if G_a.nodes() else 0
-        }
+        for e in circuit_b.edges:
+            if isinstance(e, (tuple, list)):
+                if len(e) >= 2:
+                    src, tgt = e[0], e[1]
+                else:
+                    raise TypeError(f"Edge tuple too short: {e}")
+            elif hasattr(e, "source") and hasattr(e, "target"):
+                src, tgt = e.source, e.target
+            else:
+                raise TypeError(f"Unsupported edge type: {type(e)}")
+            G_b.add_edge(str(src), str(tgt))
 
-        stats_b = {
-            'density': nx.density(G_b),
-            'avg_degree': sum(dict(G_b.degree()).values()) / len(G_b.nodes()) if G_b.nodes() else 0
-        }
+        # --- Compute isomorphism-based similarity ---
+        gm = nx.algorithms.isomorphism.DiGraphMatcher(G_a, G_b)
 
-        # Similarity based on statistics
-        density_sim = 1.0 - abs(stats_a['density'] - stats_b['density'])
-        degree_sim = 1.0 - abs(stats_a['avg_degree'] - stats_b['avg_degree']) / max(stats_a['avg_degree'], stats_b['avg_degree'], 1.0)
+        # Exact structural match
+        if gm.is_isomorphic():
+            return 1.0
 
-        return (density_sim + degree_sim) / 2.0
+        # Soft similarity: normalized common edges
+        common_edges = set(G_a.edges()) & set(G_b.edges())
+        total_edges = len(G_a.edges()) + len(G_b.edges())
+
+        if total_edges == 0:
+            return 0.0
+
+        soft_sim = (2 * len(common_edges)) / total_edges
+        return float(soft_sim)
+
 
     def _compute_node_mapping(
         self,
