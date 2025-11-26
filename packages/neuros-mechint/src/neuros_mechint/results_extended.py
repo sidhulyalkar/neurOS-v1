@@ -19,6 +19,7 @@ import numpy as np
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 import h5py
+import json
 
 from neuros_mechint.results import MechIntResult
 
@@ -58,8 +59,22 @@ class BiophysicalResult(MechIntResult):
     def save(self, filepath: str):
         """Save with specialized biophysical data."""
         with h5py.File(filepath, 'w') as f:
-            # Base data
-            super()._save_base_data(f)
+            # Base data (manually save instead of calling non-existent method)
+            f.attrs['method'] = self.method
+            f.attrs['timestamp'] = self.timestamp if self.timestamp else ''
+            f.attrs['content_hash'] = self.content_hash if self.content_hash else ''
+            f.attrs['metadata'] = json.dumps(self.metadata)
+            f.attrs['metrics'] = json.dumps(self.metrics)
+
+            # Save base data
+            if isinstance(self.data, dict):
+                base_data_group = f.create_group('base_data')
+                for key, value in self.data.items():
+                    if isinstance(value, (np.ndarray, list)):
+                        arr = np.array(value)
+                        base_data_group.create_dataset(key, data=arr, compression='gzip')
+                    else:
+                        base_data_group.attrs[key] = str(value)
 
             # Electrical dynamics
             if self.voltages is not None:
@@ -118,8 +133,30 @@ class BiophysicalResult(MechIntResult):
     def load(cls, filepath: str) -> 'BiophysicalResult':
         """Load biophysical result from HDF5."""
         with h5py.File(filepath, 'r') as f:
-            # Base data
-            result = cls(**cls._load_base_data(f))
+            # Load base data manually
+            method = f.attrs['method']
+            metadata = json.loads(f.attrs['metadata'])
+            metrics = json.loads(f.attrs['metrics'])
+            timestamp = f.attrs.get('timestamp', '')
+            content_hash = f.attrs.get('content_hash', '')
+
+            # Load base data dict
+            data = {}
+            if 'base_data' in f:
+                for key in f['base_data'].keys():
+                    data[key] = f['base_data'][key][:]
+                for key in f['base_data'].attrs.keys():
+                    data[key] = f['base_data'].attrs[key]
+
+            # Create result instance
+            result = cls(
+                method=method,
+                data=data,
+                metadata=metadata,
+                metrics=metrics,
+                timestamp=timestamp,
+                content_hash=content_hash
+            )
 
             # Load specialized data
             if 'voltages' in f:
