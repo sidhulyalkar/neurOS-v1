@@ -291,3 +291,245 @@ def load_mock_bci_data(
         "n_classes": n_classes,
         "is_mock": True,
     }
+
+
+# ==============================================================================
+# Validation Extensions for SAE Feature Analysis
+# ==============================================================================
+
+try:
+    from .base_dataset import BaseNeuralDataset, NeuralWindow
+except ImportError:
+    # Fallback if base_dataset not yet created
+    BaseNeuralDataset = object
+    NeuralWindow = None
+
+
+class BCIMotorImageryValidator(BaseNeuralDataset):
+    """
+    BCI motor imagery dataset validator for cross-modal SAE feature validation.
+
+    Tests whether SAE features generalize from spikes (Allen) to EEG (BCI).
+    Uses mock data for quick validation without large downloads.
+
+    Parameters
+    ----------
+    n_trials : int, default=200
+        Number of motor imagery trials to generate.
+    n_channels : int, default=22
+        Number of EEG channels.
+    sampling_rate : float, default=250.0
+        EEG sampling rate in Hz.
+    data_path : str, default='./bci_data'
+        Path for data storage.
+    cache_dir : str, default='./cache'
+        Cache directory.
+
+    Examples
+    --------
+    >>> validator = BCIMotorImageryValidator(n_trials=100)
+    >>> windows = validator.get_neural_windows(window_length=2.0, stride=1.0)
+    >>> labels = validator.get_task_labels()
+    >>> print(f"Extracted {len(windows)} EEG windows")
+    """
+
+    def __init__(
+        self,
+        n_trials: int = 200,
+        n_channels: int = 22,
+        sampling_rate: float = 250.0,
+        data_path: str = "./bci_data",
+        cache_dir: str = "./cache"
+    ):
+        super().__init__(data_path, cache_dir)
+
+        self.sampling_rate = sampling_rate
+        self.n_channels = n_channels
+        self.n_trials = n_trials
+
+        # Class mapping: 0=left_hand, 1=right_hand
+        self.class_names = ['left_hand', 'right_hand']
+        self.n_classes = len(self.class_names)
+
+        # Generate mock EEG data
+        self.eeg_data = self._generate_motor_imagery_data()
+        logger.info(f"Initialized BCI validator with {n_trials} trials")
+
+    def _generate_motor_imagery_data(self) -> Dict[str, Any]:
+        """Generate mock motor imagery EEG data with realistic features."""
+        rng = np.random.default_rng(42)
+
+        # Trial duration: 4 seconds
+        trial_duration = 4.0
+        n_samples = int(trial_duration * self.sampling_rate)
+
+        trials = []
+        for trial_idx in range(self.n_trials):
+            class_id = trial_idx % self.n_classes
+
+            # Generate EEG-like signal
+            eeg_trial = np.zeros((n_samples, self.n_channels))
+            t = np.arange(n_samples) / self.sampling_rate
+
+            for ch in range(self.n_channels):
+                # Base noise
+                signal = rng.normal(0, 10, n_samples)
+
+                # Add motor-related oscillations
+                if class_id == 0:  # Left hand - stronger alpha/mu on right hemisphere
+                    if ch >= self.n_channels // 2:
+                        signal += 15 * np.sin(2 * np.pi * 10 * t)  # Mu rhythm
+                else:  # Right hand - stronger on left hemisphere
+                    if ch < self.n_channels // 2:
+                        signal += 15 * np.sin(2 * np.pi * 10 * t)
+
+                # Add beta band modulation
+                signal += 8 * np.sin(2 * np.pi * 20 * t) * (1 + 0.5 * np.sin(2 * np.pi * 0.5 * t))
+
+                eeg_trial[:, ch] = signal
+
+            trials.append({
+                'data': eeg_trial,
+                'label': class_id,
+                'class_name': self.class_names[class_id],
+                'trial_id': trial_idx
+            })
+
+        return trials
+
+    def get_neural_windows(
+        self,
+        window_length: float = 2.0,
+        stride: float = 1.0,
+        bin_size: Optional[float] = None
+    ) -> List[NeuralWindow]:
+        """Extract EEG windows from motor imagery trials."""
+        windows = []
+
+        for trial in self.eeg_data:
+            trial_data = trial['data']  # [samples, channels]
+            trial_duration = len(trial_data) / self.sampling_rate
+
+            window_samples = int(window_length * self.sampling_rate)
+            stride_samples = int(stride * self.sampling_rate)
+
+            for start_idx in range(0, len(trial_data) - window_samples + 1, stride_samples):
+                end_idx = start_idx + window_samples
+                window_data = trial_data[start_idx:end_idx]
+
+                window = NeuralWindow(
+                    data=window_data,
+                    labels=np.array([trial['label']]),
+                    metadata={
+                        'trial_id': trial['trial_id'],
+                        'class_name': trial['class_name'],
+                        'motor_class': trial['label'],
+                        'window_start_time': start_idx / self.sampling_rate,
+                        'modality': 'eeg',
+                        'n_channels': self.n_channels
+                    },
+                    window_id=f"trial_{trial['trial_id']}_t_{start_idx}"
+                )
+                windows.append(window)
+
+        logger.info(f"Extracted {len(windows)} EEG windows")
+        return windows
+
+    def get_task_labels(self) -> Dict[str, np.ndarray]:
+        """Return motor imagery class labels."""
+        labels = np.array([trial['label'] for trial in self.eeg_data])
+        class_names = [trial['class_name'] for trial in self.eeg_data]
+
+        laterality = np.array([
+            0 if 'left' in name else 1 for name in class_names
+        ])
+
+        return {
+            'motor_class': labels,
+            'class_names': class_names,
+            'laterality': laterality
+        }
+
+    def get_splits(
+        self,
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
+        temporal_split: bool = True
+    ) -> Tuple[List[int], List[int], List[int]]:
+        """Split trials into train/val/test sets."""
+        n_trials = len(self.eeg_data)
+
+        if temporal_split:
+            train_end = int(n_trials * train_ratio)
+            val_end = int(n_trials * (train_ratio + val_ratio))
+
+            train_trials = list(range(train_end))
+            val_trials = list(range(train_end, val_end))
+            test_trials = list(range(val_end, n_trials))
+        else:
+            # Stratified random split
+            indices = np.random.permutation(n_trials)
+            train_end = int(n_trials * train_ratio)
+            val_end = int(n_trials * (train_ratio + val_ratio))
+
+            train_trials = indices[:train_end].tolist()
+            val_trials = indices[train_end:val_end].tolist()
+            test_trials = indices[val_end:].tolist()
+
+        return train_trials, val_trials, test_trials
+
+    def get_neural_properties(self) -> Dict[str, Any]:
+        """Return BCI-specific neural properties."""
+        return {
+            'n_channels': self.n_channels,
+            'brain_regions': ['motor_cortex', 'sensorimotor_cortex'],
+            'sampling_rate': self.sampling_rate,
+            'modality': 'eeg',
+            'species': 'human',
+            'recording_type': 'surface_eeg',
+            'task_type': 'motor_imagery',
+            'n_classes': self.n_classes
+        }
+
+    def compute_motor_selectivity(
+        self,
+        channel_responses: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        """
+        Compute motor selectivity metrics for validation.
+
+        Parameters
+        ----------
+        channel_responses : np.ndarray
+            Response matrix [n_trials, n_channels].
+
+        Returns
+        -------
+        Dict[str, np.ndarray]
+            Selectivity statistics including preferred classes.
+        """
+        labels = np.array([trial['label'] for trial in self.eeg_data])
+        unique_classes = np.unique(labels)
+
+        n_channels = channel_responses.shape[1] if len(channel_responses.shape) > 1 else 1
+        selectivity_matrix = np.zeros((len(unique_classes), n_channels))
+
+        for i, class_id in enumerate(unique_classes):
+            class_mask = labels == class_id
+            if len(channel_responses.shape) > 1:
+                selectivity_matrix[i] = np.mean(channel_responses[class_mask], axis=0)
+            else:
+                selectivity_matrix[i, 0] = np.mean(channel_responses[class_mask])
+
+        max_response = np.max(selectivity_matrix, axis=0)
+        min_response = np.min(selectivity_matrix, axis=0)
+        selectivity_index = (max_response - min_response) / (max_response + min_response + 1e-8)
+
+        preferred_classes = unique_classes[np.argmax(selectivity_matrix, axis=0)]
+
+        return {
+            'class_responses': selectivity_matrix,
+            'preferred_classes': preferred_classes,
+            'selectivity_index': selectivity_index,
+            'class_names': [self.class_names[c] for c in unique_classes]
+        }

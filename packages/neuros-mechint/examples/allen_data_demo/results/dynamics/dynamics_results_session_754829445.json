@@ -1,0 +1,171 @@
+{
+  "session_id": 754829445,
+  "features_analyzed": [
+    {
+      "feature_idx": 48,
+      "selectivity": 0.7007877414059213,
+      "preferred_orientation": 91.86141800371907,
+      "latency": {
+        "mean_latency": 0.1716744186046512,
+        "std_latency": 0.18312655694142266,
+        "median_latency": 0.1,
+        "n_trials": 430
+      },
+      "decay": {
+        "decay_constant": 2.0810092967994813,
+        "half_life": 1.4424457267955948,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 100,
+      "selectivity": 0.6960047330852297,
+      "preferred_orientation": 42.26647720209876,
+      "latency": {
+        "mean_latency": 0.3060849056603774,
+        "std_latency": 0.2593019518341331,
+        "median_latency": 0.22,
+        "n_trials": 424
+      },
+      "decay": {
+        "decay_constant": 5.517091268109326,
+        "half_life": 3.824156257381872,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 41,
+      "selectivity": 0.6540011107615042,
+      "preferred_orientation": 124.41821152365036,
+      "latency": {
+        "mean_latency": 0.10504464285714286,
+        "std_latency": 0.12365886892640642,
+        "median_latency": 0.08,
+        "n_trials": 448
+      },
+      "decay": {
+        "decay_constant": 2.1604570471722186,
+        "half_life": 1.497514710968288,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 81,
+      "selectivity": 0.6354251480306445,
+      "preferred_orientation": 10.143105573736753,
+      "latency": {
+        "mean_latency": 0.1456179775280899,
+        "std_latency": 0.15749125216426832,
+        "median_latency": 0.08,
+        "n_trials": 445
+      },
+      "decay": {
+        "decay_constant": 8.475465771354733,
+        "half_life": 5.874745203346855,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 82,
+      "selectivity": 0.6324876243590617,
+      "preferred_orientation": 179.57527796542158,
+      "latency": {
+        "mean_latency": 0.23906323185011713,
+        "std_latency": 0.2100898954057906,
+        "median_latency": 0.18,
+        "n_trials": 427
+      },
+      "decay": {
+        "decay_constant": 8.390678939795528,
+        "half_life": 5.8159754501029814,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 18,
+      "selectivity": 0.5969717796617998,
+      "preferred_orientation": 9.502387692197885,
+      "latency": {
+        "mean_latency": 0.14444954128440368,
+        "std_latency": 0.1678231368199366,
+        "median_latency": 0.08,
+        "n_trials": 436
+      },
+      "decay": {
+        "decay_constant": 2.1595313401380904,
+        "half_life": 1.4968730597475577,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 107,
+      "selectivity": 0.5955792381688676,
+      "preferred_orientation": 143.8251001851698,
+      "latency": {
+        "mean_latency": 0.2411241217798595,
+        "std_latency": 0.22411658695184825,
+        "median_latency": 0.16,
+        "n_trials": 427
+      },
+      "decay": {
+        "decay_constant": 7.9168660699552245,
+        "half_life": 5.487553395260158,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 76,
+      "selectivity": 0.58559506894261,
+      "preferred_orientation": 54.47617217216684,
+      "latency": {
+        "mean_latency": 0.166289592760181,
+        "std_latency": 0.1858362226703805,
+        "median_latency": 0.08,
+        "n_trials": 442
+      },
+      "decay": {
+        "decay_constant": 4.646067221928635,
+        "half_life": 3.220408395571811,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 55,
+      "selectivity": 0.5813740920895165,
+      "preferred_orientation": 179.78786784261294,
+      "latency": {
+        "mean_latency": 0.3811518324607329,
+        "std_latency": 0.27499021017185205,
+        "median_latency": 0.3,
+        "n_trials": 191
+      },
+      "decay": {
+        "decay_constant": 1.7051636477584304,
+        "half_life": 1.1819293748370676,
+        "response_type": "sustained"
+      }
+    },
+    {
+      "feature_idx": 44,
+      "selectivity": 0.57190376462388,
+      "preferred_orientation": 44.1807424221021,
+      "latency": {
+        "mean_latency": 0.30431578947368426,
+        "std_latency": 0.24076698773351687,
+        "median_latency": 0.24,
+        "n_trials": 380
+      },
+      "decay": {
+        "decay_constant": 8.951576562452027,
+        "half_life": 6.20476005583011,
+        "response_type": "sustained"
+      }
+    }
+  ],
+  "summary": {
+    "mean_latency": 0.22048160542592393,
+    "n_transient": 0,
+    "n_sustained": 10,
+    "n_intermediate": 0
+  }
+}

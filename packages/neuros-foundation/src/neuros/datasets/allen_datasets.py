@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -381,3 +382,402 @@ def convert_to_spike_raster(
     time_bins = np.arange(n_bins) * bin_size + bin_size / 2
 
     return spike_raster, time_bins
+
+
+# ==============================================================================
+# Validation Extensions for SAE Feature Analysis
+# ==============================================================================
+
+from .base_dataset import BaseNeuralDataset, NeuralWindow
+from scipy.stats import circmean
+
+
+class AllenVisualCodingValidator(BaseNeuralDataset):
+    """
+    Extended Allen Visual Coding dataset loader for SAE validation experiments.
+
+    Focuses on orientation tuning validation using drifting gratings stimulus.
+    Implements the BaseNeuralDataset interface for consistent cross-modal analysis.
+
+    Parameters
+    ----------
+    session_id : int, optional
+        Specific session ID to load. If None, auto-selects a good session.
+    data_path : str, default='./allen_data'
+        Path to store Allen data cache.
+    cache_dir : str, default='./cache'
+        Directory for caching processed data.
+    brain_areas : List[str], default=['V1']
+        Brain areas to include in analysis.
+    min_units : int, default=100
+        Minimum number of good units required for session selection.
+    use_all_units : bool, default=False
+        If True, use all units. If False, use only "good quality" units.
+        Setting to True can increase sample size but may include noisy units.
+
+    Examples
+    --------
+    >>> validator = AllenVisualCodingValidator(brain_areas=['V1', 'LM'])
+    >>> windows = validator.get_neural_windows(window_length=1.0, stride=0.5, bin_size=0.02)
+    >>> labels = validator.get_task_labels()
+    >>> print(f"Extracted {len(windows)} windows with orientations {labels['orientation']}")
+
+    References
+    ----------
+    Allen Institute Visual Coding - Neuropixels:
+    https://portal.brain-map.org/explore/circuits/visual-coding-neuropixels
+
+    Notes
+    -----
+    Requires allensdk: pip install allensdk
+    """
+
+    def __init__(
+        self,
+        session_id: Optional[int] = None,
+        data_path: str = "./allen_data",
+        cache_dir: str = "./cache",
+        brain_areas: List[str] = None,
+        min_units: int = 100,
+        use_all_units: bool = False
+    ):
+        super().__init__(data_path, cache_dir)
+
+        if brain_areas is None:
+            brain_areas = ["V1"]
+
+        self.session_id = session_id
+        self.brain_areas = brain_areas
+        self.min_units = min_units
+        self.use_all_units = use_all_units
+
+        try:
+            from allensdk.brain_observatory.ecephys.ecephys_project_cache import (
+                EcephysProjectCache,
+            )
+        except ImportError:
+            raise ImportError(
+                "AllenSDK is required. Install with: pip install allensdk"
+            )
+
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        self.cache = EcephysProjectCache.from_warehouse(
+            manifest=str(Path(cache_dir) / "manifest.json")
+        )
+
+        self.session = None
+        self.stimulus_table = None
+        self.units = None
+        self._load_session()
+
+    def _load_session(self):
+        """Load Allen session data with quality filtering."""
+        if self.session_id is None:
+            # Auto-select good session for validation
+            sessions = self.cache.get_session_table()
+
+            # Filter to appropriate sessions
+            valid_sessions = sessions[
+                sessions.session_type == 'brain_observatory_1.1'
+            ]
+
+            # Find session with good unit count in target areas
+            for _, session_row in valid_sessions.iterrows():
+                try:
+                    test_session = self.cache.get_session_data(session_row.name)
+                    test_units = test_session.units[
+                        test_session.units.ecephys_structure_acronym.isin(self.brain_areas)
+                    ]
+
+                    # Try to filter by quality if available
+                    if 'quality' in test_units.columns:
+                        good_units = test_units[test_units.quality == 'good']
+                    else:
+                        # If no quality column, use all units
+                        good_units = test_units
+
+                    if len(good_units) >= self.min_units:
+                        self.session_id = session_row.name
+                        logger.info(
+                            f"Auto-selected session {self.session_id} with "
+                            f"{len(good_units)} units"
+                        )
+                        break
+                except Exception as e:
+                    logger.warning(f"Failed to load session {session_row.name}: {e}")
+                    continue
+
+            if self.session_id is None:
+                raise ValueError(
+                    f"No suitable sessions found with {self.min_units}+ units "
+                    f"in {self.brain_areas}"
+                )
+
+        self.session = self.cache.get_session_data(self.session_id)
+
+        # Get drifting gratings stimulus table
+        stim_tables = self.session.stimulus_presentations
+        drifting_gratings = stim_tables[
+            stim_tables.stimulus_name == 'drifting_gratings'
+        ]
+        self.stimulus_table = drifting_gratings
+
+        # Filter to units in target brain areas
+        units_in_areas = self.session.units[
+            self.session.units.ecephys_structure_acronym.isin(self.brain_areas)
+        ]
+
+        # Filter by quality if requested (default: only use good quality)
+        if self.use_all_units:
+            self.units = units_in_areas
+            quality_note = "all"
+        else:
+            if 'quality' in units_in_areas.columns:
+                self.units = units_in_areas[units_in_areas.quality == 'good']
+                quality_note = "good quality"
+            else:
+                self.units = units_in_areas
+                quality_note = "all (no quality column)"
+
+        logger.info(
+            f"Loaded session {self.session_id} with {len(self.units)} {quality_note} units, "
+            f"{len(self.stimulus_table)} drifting grating presentations"
+        )
+
+    def get_neural_windows(
+        self,
+        window_length: float = 1.0,
+        stride: float = 0.5,
+        bin_size: float = 0.02
+    ) -> List[NeuralWindow]:
+        """Extract spike windows aligned to drifting gratings stimulus.
+
+        Parameters
+        ----------
+        window_length : float, default=1.0
+            Window duration in seconds.
+        stride : float, default=0.5
+            Step size in seconds.
+        bin_size : float, default=0.02
+            Spike binning resolution (20ms default).
+
+        Returns
+        -------
+        List[NeuralWindow]
+            List of windows with spike data and orientation labels.
+        """
+        # Get spike times for all good units
+        spike_times = {}
+        for unit_id in self.units.index:
+            spikes = self.session.spike_times[unit_id]
+            spike_times[unit_id] = spikes
+
+        # Process each stimulus presentation
+        windows = []
+        for _, stim in self.stimulus_table.iterrows():
+            stim_start = stim.start_time
+            stim_stop = stim.stop_time
+            stim_duration = stim_stop - stim_start
+
+            # Skip short stimuli
+            if stim_duration < window_length:
+                continue
+
+            # Extract windows with stride
+            window_start = stim_start
+            while window_start + window_length <= stim_stop:
+                window_end = window_start + window_length
+
+                # Bin spikes for all units in this window
+                spike_counts = []
+                time_bins = np.arange(window_start, window_end + bin_size, bin_size)
+
+                for unit_id in self.units.index:
+                    unit_spikes = spike_times[unit_id]
+                    window_spikes = unit_spikes[
+                        (unit_spikes >= window_start) &
+                        (unit_spikes < window_end)
+                    ]
+
+                    # Bin spike counts
+                    counts, _ = np.histogram(window_spikes, bins=time_bins)
+                    spike_counts.append(counts)
+
+                spike_data = np.array(spike_counts).T  # [time_bins, n_units]
+
+                # Create window object
+                window = NeuralWindow(
+                    data=spike_data,
+                    labels=np.array([
+                        stim.orientation,
+                        stim.temporal_frequency if 'temporal_frequency' in stim else 0,
+                    ]),
+                    metadata={
+                        'stimulus_condition_id': stim.stimulus_condition_id if 'stimulus_condition_id' in stim else None,
+                        'session_id': self.session_id,
+                        'start_time': window_start,
+                        'end_time': window_end,
+                        'orientation': stim.orientation,
+                        'temporal_frequency': stim.temporal_frequency if 'temporal_frequency' in stim else None,
+                        'brain_area': self.brain_areas[0] if len(self.brain_areas) == 1 else 'mixed',
+                        'n_units': len(self.units)
+                    },
+                    window_id=f"session_{self.session_id}_stim_{stim.name}_t_{window_start:.2f}"
+                )
+                windows.append(window)
+
+                window_start += stride
+
+        logger.info(f"Extracted {len(windows)} neural windows")
+        return windows
+
+    def get_task_labels(self) -> Dict[str, np.ndarray]:
+        """Return orientation and other stimulus labels.
+
+        Returns
+        -------
+        Dict[str, np.ndarray]
+            Dictionary with keys: orientation, temporal_frequency,
+            orientation_sin, orientation_cos (for circular correlation).
+        """
+        orientations = self.stimulus_table.orientation.values
+
+        # Convert to numeric and remove NaN values
+        orientations = pd.to_numeric(orientations, errors='coerce')
+        valid_mask = ~np.isnan(orientations)
+        orientations = orientations[valid_mask]
+
+        result = {
+            'orientation': orientations,
+            'orientation_sin': np.sin(np.deg2rad(orientations * 2)),
+            'orientation_cos': np.cos(np.deg2rad(orientations * 2))
+        }
+
+        if 'temporal_frequency' in self.stimulus_table.columns:
+            temp_freqs = pd.to_numeric(self.stimulus_table.temporal_frequency.values, errors='coerce')
+            result['temporal_frequency'] = temp_freqs
+
+        return result
+
+    def get_splits(
+        self,
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
+        temporal_split: bool = True
+    ) -> Tuple[List[int], List[int], List[int]]:
+        """Split by stimulus trials to avoid temporal leakage.
+
+        Parameters
+        ----------
+        train_ratio : float, default=0.7
+            Fraction for training.
+        val_ratio : float, default=0.15
+            Fraction for validation.
+        temporal_split : bool, default=True
+            If True, split by trial order (recommended).
+
+        Returns
+        -------
+        Tuple[List[int], List[int], List[int]]
+            Train, validation, and test indices.
+        """
+        n_trials = len(self.stimulus_table)
+
+        if temporal_split:
+            # Split by trial order (temporal)
+            train_end = int(n_trials * train_ratio)
+            val_end = int(n_trials * (train_ratio + val_ratio))
+
+            train_trials = list(range(train_end))
+            val_trials = list(range(train_end, val_end))
+            test_trials = list(range(val_end, n_trials))
+        else:
+            # Random split (not recommended but available)
+            indices = np.random.permutation(n_trials)
+            train_end = int(n_trials * train_ratio)
+            val_end = int(n_trials * (train_ratio + val_ratio))
+
+            train_trials = indices[:train_end].tolist()
+            val_trials = indices[train_end:val_end].tolist()
+            test_trials = indices[val_end:].tolist()
+
+        return train_trials, val_trials, test_trials
+
+    def get_neural_properties(self) -> Dict[str, Any]:
+        """Return Allen-specific neural properties.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Neural recording properties including sampling rate, modality,
+            species, and recording details.
+        """
+        return {
+            'n_units': len(self.units),
+            'brain_regions': self.brain_areas,
+            'sampling_rate': 30000.0,  # Allen Neuropixels sampling rate
+            'modality': 'extracellular_spikes',
+            'species': 'mouse',
+            'recording_type': 'neuropixels',
+            'session_id': self.session_id,
+            'stimulus_type': 'drifting_gratings'
+        }
+
+    def compute_orientation_tuning_curves(
+        self,
+        unit_responses: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        """
+        Compute orientation tuning curves for validation.
+
+        Parameters
+        ----------
+        unit_responses : np.ndarray
+            Response matrix with shape [n_stimuli, n_units].
+
+        Returns
+        -------
+        Dict[str, np.ndarray]
+            Dictionary with tuning curve statistics including preferred
+            orientations and selectivity metrics.
+
+        Examples
+        --------
+        >>> windows = validator.get_neural_windows()
+        >>> responses = np.array([w.data.mean(axis=0) for w in windows])
+        >>> tuning = validator.compute_orientation_tuning_curves(responses)
+        >>> print(f"Preferred orientations: {tuning['preferred_orientations']}")
+        """
+        orientations = self.stimulus_table.orientation.values
+        # Remove NaN orientations
+        valid_mask = ~np.isnan(orientations)
+        orientations = orientations[valid_mask]
+
+        # Handle shape mismatch
+        if len(orientations) > len(unit_responses):
+            orientations = orientations[:len(unit_responses)]
+        elif len(unit_responses) > len(orientations):
+            unit_responses = unit_responses[:len(orientations)]
+
+        unique_orientations = np.unique(orientations)
+        n_units = unit_responses.shape[1] if len(unit_responses.shape) > 1 else 1
+
+        tuning_curves = np.zeros((n_units, len(unique_orientations)))
+
+        for i, ori in enumerate(unique_orientations):
+            ori_mask = orientations == ori
+            if len(unit_responses.shape) > 1:
+                tuning_curves[:, i] = np.mean(unit_responses[ori_mask], axis=0)
+            else:
+                tuning_curves[0, i] = np.mean(unit_responses[ori_mask])
+
+        # Compute orientation selectivity metrics
+        preferred_orientations = unique_orientations[np.argmax(tuning_curves, axis=1)]
+        selectivity = np.max(tuning_curves, axis=1) - np.mean(tuning_curves, axis=1)
+
+        return {
+            'tuning_curves': tuning_curves,
+            'preferred_orientations': preferred_orientations,
+            'selectivity': selectivity,
+            'orientations': unique_orientations
+        }

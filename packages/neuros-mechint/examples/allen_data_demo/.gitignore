@@ -1,0 +1,174 @@
+# Allen Data Demo - Git Ignore
+
+# ============================================================
+# Data Files (DO NOT COMMIT)
+# ============================================================
+
+# Allen Brain Observatory cache (contains downloaded sessions)
+allen_validation_cache/
+**/allen_validation_cache/
+
+# Any other data directories
+data/
+**/data/
+
+# Session cache files
+session_*.nwb
+*.nwb
+
+# ============================================================
+# Model Files (Too Large for Git)
+# ============================================================
+
+# PyTorch model files (can be large)
+*.pt
+*.pth
+*.ckpt
+
+# Keep training results JSON (small, useful for documentation)
+!training_results.json
+!*_results.json
+
+# Model checkpoints
+checkpoints/
+**/checkpoints/
+
+# ============================================================
+# Results and Output Files
+# ============================================================
+
+# Keep results directory structure but allow committing small files
+# Larger output files should be excluded if needed
+*.npy
+*.npz
+
+# Keep PNG visualizations (useful for documentation)
+# !*.png  # Uncomment to commit PNG files
+
+# Large JSON files (>1MB)
+# Add specific large files if needed
+
+# ============================================================
+# Python
+# ============================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# ============================================================
+# IDE and Editor Files
+# ============================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============================================================
+# Operating System Files
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# ============================================================
+# Logs and Temporary Files
+# ============================================================
+
+*.log
+*.tmp
+*.temp
+logs/
+**/logs/
+
+# ============================================================
+# Specific to This Demo
+# ============================================================
+
+# Hyperparameter search outputs (can be large)
+hyperparameter_search/*.json
+hyperparameter_search/*.csv
+
+# Large analysis outputs
+sae_analysis/*.npy
+sae_visualizations/*.npy
+
+# Session analysis temp files
+session_analysis/*.tmp
+
+# ============================================================
+# Keep These Files (Override Above Rules)
+# ============================================================
+
+# Configuration files
+!config/*.json
+!*.yaml
+!*.yml
+
+# Small result files for documentation
+!*_summary.json
+!recommended_sessions.json
+
+# Documentation
+!*.md
+!*.txt
+!README.*
+!LICENSE
+
+# Scripts
+!*.py
+!*.sh

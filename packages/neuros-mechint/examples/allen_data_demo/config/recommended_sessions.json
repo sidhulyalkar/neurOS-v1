@@ -1,0 +1,118 @@
+{
+  "metadata": {
+    "generated": "2025-12-31",
+    "total_processed": 32,
+    "successful": 25,
+    "meeting_criteria": 17,
+    "criteria": ">30% selective units, >0.6 max correlation"
+  },
+  "recommended_sessions": {
+    "best_overall": 754829445,
+    "highest_selectivity_percent": 760345702,
+    "highest_max_correlation": 754829445,
+    "most_units": 754312389,
+    "top_5": [754829445, 760345702, 761418226, 760693773, 737581020],
+    "top_10": [754829445, 760345702, 761418226, 760693773, 737581020, 721123822, 751348571, 757970808, 719161530, 754312389]
+  },
+  "session_details": [
+    {
+      "session_id": 754829445,
+      "rank": 1,
+      "n_units": 92,
+      "fraction_selective": 0.457,
+      "max_correlation": 0.854,
+      "mean_correlation": 0.310,
+      "n_significant": 42,
+      "recommendation": "⭐ BEST OVERALL - Highest max correlation, large N"
+    },
+    {
+      "session_id": 760345702,
+      "rank": 2,
+      "n_units": 72,
+      "fraction_selective": 0.486,
+      "max_correlation": 0.659,
+      "mean_correlation": 0.295,
+      "n_significant": 35,
+      "recommendation": "⭐ MOST SELECTIVE - Highest % of selective units"
+    },
+    {
+      "session_id": 761418226,
+      "rank": 3,
+      "n_units": 36,
+      "fraction_selective": 0.417,
+      "max_correlation": 0.786,
+      "mean_correlation": 0.305,
+      "n_significant": 15,
+      "recommendation": "⭐ EXCELLENT - High correlation, good selectivity"
+    },
+    {
+      "session_id": 760693773,
+      "rank": 4,
+      "n_units": 88,
+      "fraction_selective": 0.398,
+      "max_correlation": 0.829,
+      "mean_correlation": 0.295,
+      "n_significant": 35,
+      "recommendation": "⭐ EXCELLENT - Very high correlation, large N"
+    },
+    {
+      "session_id": 737581020,
+      "rank": 5,
+      "n_units": 40,
+      "fraction_selective": 0.425,
+      "max_correlation": 0.722,
+      "mean_correlation": 0.287,
+      "n_significant": 17,
+      "recommendation": "⭐ EXCELLENT - Balanced quality"
+    },
+    {
+      "session_id": 721123822,
+      "rank": 6,
+      "n_units": 41,
+      "fraction_selective": 0.390,
+      "max_correlation": 0.765,
+      "mean_correlation": 0.291,
+      "n_significant": 16,
+      "recommendation": "✓ GOOD"
+    },
+    {
+      "session_id": 751348571,
+      "rank": 7,
+      "n_units": 49,
+      "fraction_selective": 0.388,
+      "max_correlation": 0.779,
+      "mean_correlation": 0.287,
+      "n_significant": 19,
+      "recommendation": "✓ GOOD"
+    },
+    {
+      "session_id": 757970808,
+      "rank": 8,
+      "n_units": 80,
+      "fraction_selective": 0.388,
+      "max_correlation": 0.804,
+      "mean_correlation": 0.278,
+      "n_significant": 31,
+      "recommendation": "✓ GOOD - Large N, high correlation"
+    },
+    {
+      "session_id": 719161530,
+      "rank": 9,
+      "n_units": 52,
+      "fraction_selective": 0.385,
+      "max_correlation": 0.750,
+      "mean_correlation": 0.275,
+      "n_significant": 20,
+      "recommendation": "✓ GOOD"
+    },
+    {
+      "session_id": 754312389,
+      "rank": 10,
+      "n_units": 102,
+      "fraction_selective": 0.363,
+      "max_correlation": 0.793,
+      "n_significant": 37,
+      "recommendation": "✓ GOOD - Largest N for robust statistics"
+    }
+  ]
+}

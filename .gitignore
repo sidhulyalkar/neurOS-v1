@@ -15,3 +15,34 @@
 **/cache/
 *.nwb
 **/data/allen_neuropixels/
+
+# Allen Brain Observatory validation cache (DO NOT COMMIT)
+allen_validation_cache/
+**/allen_validation_cache/
+
+# SAE model files (can be large)
+*.pt
+*.pth
+*.ckpt
+sae_models/*.pt
+trained_sae*.pt
+
+# Large numpy arrays
+*.npy
+*.npz
+
+# Hyperparameter search results
+hyperparameter_search/
+**/hyperparameter_search/
+
+# Session analysis outputs
+session_analysis/
+**/session_analysis/
+
+# SAE analysis outputs
+sae_analysis/
+**/sae_analysis/
+
+# SAE visualizations
+sae_visualizations/
+**/sae_visualizations/
