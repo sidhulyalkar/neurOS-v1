@@ -1,0 +1,246 @@
+# Allen Visual Coding Multimodal Configuration
+# Integrates astrocyte tokens with neural calcium imaging for neuroFMx
+
+name: allen_visual_coding_multimodal
+description: |
+  Multimodal foundation model training on Allen Brain Observatory data
+  combining 2-photon calcium imaging with astrocyte event tokens from neuros-astro.
+
+# Model architecture (OPTIMIZED for 3070 Ti - smaller, faster)
+model:
+  d_model: 256            # Was 512 - 4x less memory
+  n_mamba_blocks: 4       # Was 6 - faster training
+  n_latents: 32           # Was 64 - smaller latent space
+  latent_dim: 256         # Was 512 - match d_model
+  dropout: 0.2            # Was 0.1 - stronger regularization for small data
+
+  # Domain adversarial for cross-session generalization
+  use_domain_adversarial: true
+  n_domains: 10  # Number of sessions (will auto-update)
+
+# Modality configuration
+modalities:
+  # Neuronal calcium imaging (2-photon @ 30Hz)
+  calcium:
+    enabled: true
+    n_neurons: 200         # Max neurons across sessions
+    sampling_rate: 30.0    # Hz (Allen 2P standard)
+    target_rate: 10.0      # Downsample to 10Hz for alignment
+
+  # Astrocyte signals from neuros-astro
+  astro:
+    enabled: true
+    n_astrocytes: 150      # Max astrocytes across sessions
+    seq_len: 100           # Sequence length at 10Hz = 10 seconds
+    sampling_rate: 10.0    # Hz (event-based, effective rate)
+    use_events: true       # Use event-based tokenization
+    pool_size: 4           # Temporal pooling
+
+    # Event detection params (used in neuros-astro)
+    threshold_sigma: 2.0
+    min_duration_s: 1.0
+
+# Training configuration (OPTIMIZED for small data + 3070 Ti)
+training:
+  batch_size: 16         # Larger batch with smaller model
+  learning_rate: 0.0001  # 1e-4 - slightly higher with smaller model
+  num_epochs: 200        # More epochs for small data
+  warmup_steps: 100      # Shorter warmup
+
+  # Loss weights
+  loss_weights:
+    decode: 1.0          # Reconstruction loss
+    encode: 0.5          # Encoding loss
+    contrastive: 0.3     # Contrastive loss (align modalities)
+    domain: 0.15         # Domain adversarial (generalize across sessions)
+
+  # Optimizer
+  optimizer: adamw
+  weight_decay: 0.05     # Was 0.01 - stronger L2 for small data
+  grad_clip: 1.0
+
+  # Scheduler
+  scheduler: cosine
+  min_lr: 1e-7           # Lower minimum
+
+  # Early stopping
+  patience: 25           # More patience with augmentation
+  min_delta: 1e-5        # Finer improvements
+
+  # Cross-validation
+  use_cross_validation: true
+  n_folds: 5             # 5-fold CV on sessions
+
+# Data configuration
+data:
+  # Paths (relative to project root)
+  calcium_data_dir: packages/neuros-mechint/examples/allen_data_demo/data/2p_sessions_continuous
+  astro_data_dir: allen_nwb_results
+
+  # Session IDs (all 10 Allen Visual Coding sessions)
+  sessions:
+    - "545446482"
+    - "581150104"
+    - "613968705"
+    - "627823695"
+    - "644026238"
+    - "645086975"
+    - "652091264"
+    - "652094901"
+    - "657078119"
+    - "662361096"
+
+  # Data splits (session-based)
+  train_sessions:
+    - "545446482"
+    - "581150104"
+    - "613968705"
+    - "627823695"
+    - "644026238"
+    - "645086975"
+
+  val_sessions:
+    - "652091264"
+    - "652094901"
+
+  test_sessions:
+    - "657078119"
+    - "662361096"
+
+  # Temporal windowing
+  seq_len: 100           # 10 seconds at 10Hz (data is only 15-17s total!)
+  stride: 20             # 80% overlap (2 second stride) - MORE WINDOWS!
+  min_astro_events: 1    # Minimum events per window
+
+  # Temporal alignment
+  align_modalities: true
+  alignment_method: downsample  # downsample calcium from 30Hz to 10Hz
+  target_rate: 10.0             # Hz
+
+  # Data augmentation (CRITICAL for small datasets!)
+  augmentation:
+    enabled: true
+    mode: medium           # none, light, medium, heavy
+
+    # Amplitude augmentations (model measurement variability)
+    gaussian_noise_prob: 0.5
+    gaussian_noise_std: 0.02
+    scaling_prob: 0.5
+    scaling_range: [0.85, 1.15]
+
+    # Temporal augmentations (model timing variability)
+    time_shift_prob: 0.2
+    time_shift_max: 5
+    jitter_prob: 0.3
+    jitter_sigma: 0.03
+
+    # Dropout augmentations (model incomplete data)
+    neuron_dropout_prob: 0.3
+    neuron_dropout_rate: 0.1
+    cutout_prob: 0.2
+    cutout_length: 10
+
+    # Astro augmentations
+    astro_jitter_prob: 0.3
+    astro_jitter_sigma: 0.3
+    astro_dropout_prob: 0.2
+    astro_dropout_rate: 0.15
+
+  # Synthetic data generation (CRUCIAL for small datasets!)
+  synthetic:
+    enabled: true
+    n_synthetic_sessions: 5    # Generate 5 synthetic sessions
+    match_real_statistics: true  # Match mean, std, autocorrelation
+    noise_type: colored        # colored (realistic) or white
+    include_in_training: true  # Mix with real data
+    synthetic_ratio: 0.3       # 30% synthetic, 70% real per epoch
+
+# Evaluation
+evaluation:
+  metrics:
+    - reconstruction_mse
+    - encoding_loss
+    - contrastive_accuracy
+    - cross_modal_alignment
+    - latent_disentanglement
+
+  # Ablation study
+  ablation:
+    enabled: true
+    conditions:
+      - name: calcium_only_baseline
+        description: Neural activity only (baseline)
+        modalities: [calcium]
+
+      - name: astro_only_baseline
+        description: Astrocyte events only
+        modalities: [astro]
+
+      - name: multimodal_fusion
+        description: Full multimodal model (astro + calcium)
+        modalities: [calcium, astro]
+
+# Hardware
+hardware:
+  device: cuda           # cuda, cpu, or mps
+  num_workers: 2         # Dataloader workers (keep low for debugging)
+  pin_memory: true
+  mixed_precision: true  # AMP for faster training
+
+# Logging
+logging:
+  log_dir: ./logs/allen_multimodal
+  experiment_name: allen_astro_calcium_v1
+  log_interval: 50       # Log every 50 steps
+  val_interval: 500      # Validate every 500 steps
+  save_interval: 2000    # Save checkpoint every 2000 steps
+
+  # Weights & Biases (optional)
+  use_wandb: false
+  wandb_project: neuros-astro-allen
+  wandb_entity: null
+  wandb_tags:
+    - allen
+    - multimodal
+    - astrocyte
+    - calcium
+
+# Checkpointing
+checkpointing:
+  save_dir: ./checkpoints/allen_multimodal
+  save_best: true
+  save_last: true
+  monitor: val_reconstruction_mse
+  mode: min
+
+# Reproducibility
+seed: 42
+
+# Experiment notes
+notes: |
+  ## Allen Visual Coding Multimodal Experiment
+
+  ### Dataset:
+  - 10 sessions from Allen Brain Observatory Visual Coding
+  - 2-photon calcium imaging @ 30Hz
+  - Astrocyte event tokens from neuros-astro pipeline
+
+  ### Key Hypotheses:
+  1. Astrocyte slow dynamics provide temporal context for neural activity
+  2. Multimodal fusion improves neural prediction accuracy
+  3. Cross-modal representations generalize across sessions
+
+  ### Expected Outcomes:
+  - Calcium-only baseline: Standard temporal prediction
+  - Astro-only: Test if astro events alone carry information
+  - Multimodal: Improved prediction via astro-neural coupling
+
+  ### Validation:
+  - Cross-session generalization (domain adversarial training)
+  - Ablation comparison (uni-modal vs multi-modal)
+  - Latent space interpretability
+
+  ### Pipeline:
+  1. neuros-astro: Raw Allen NWB → astro event tokens
+  2. Preprocessing: Trial-aligned → continuous calcium traces
+  3. neuroFMx: Multimodal tokenization → foundation model training
