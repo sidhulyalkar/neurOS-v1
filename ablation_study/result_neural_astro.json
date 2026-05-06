@@ -1,0 +1,12 @@
+{
+  "experiment_id": "allen_astro_ablation_test_neural_astro",
+  "model_metrics": {
+    "prediction_loss": 2.0700371265411377,
+    "decoding_accuracy": 0.175,
+    "cross_session_transfer": 0.175,
+    "r2_score": 0.0,
+    "best_val_accuracy": 0.16666666666666666,
+    "train_accuracy": 0.18250950570342206
+  },
+  "processing_time_s": 1.187068223953247
+}

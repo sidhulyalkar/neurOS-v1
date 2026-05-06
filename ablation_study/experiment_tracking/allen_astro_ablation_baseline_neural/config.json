@@ -1,0 +1,42 @@
+{
+  "experiment_id": "allen_astro_ablation_baseline_neural",
+  "experiment_name": "Baseline: Neural Data Only",
+  "description": "Baseline model trained on neural data without astrocyte signals",
+  "timestamp": "2026-05-05T21:17:41.983704",
+  "dataset_name": "allen_visual_coding",
+  "session_ids": [
+    "545446482",
+    "581150104",
+    "613968705",
+    "627823695",
+    "644026238",
+    "645086975",
+    "652091264",
+    "652094901",
+    "657078119",
+    "662361096"
+  ],
+  "data_path": null,
+  "frame_rate_hz": 30.0,
+  "z_threshold": 2.5,
+  "min_duration_frames": 5,
+  "min_amplitude": 0.2,
+  "window_size_s": 60.0,
+  "coactivation_threshold_s": 1.0,
+  "modalities_enabled": [
+    "neural"
+  ],
+  "model_architecture": "neurofmx",
+  "model_parameters": {
+    "hidden_dim": 512,
+    "n_layers": 6,
+    "n_heads": 8,
+    "dropout": 0.1,
+    "batch_size": 32,
+    "learning_rate": 0.0001,
+    "n_epochs": 100,
+    "early_stopping_patience": 10
+  },
+  "random_seed": 42,
+  "n_workers": 1
+}

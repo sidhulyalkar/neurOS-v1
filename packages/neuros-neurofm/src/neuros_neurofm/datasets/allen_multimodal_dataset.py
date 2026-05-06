@@ -4,10 +4,9 @@ Allen Brain Observatory Multimodal Dataset
 Loads calcium imaging + astrocyte data for ablation experiments.
 
 Supports:
-- Calcium imaging (2-photon) from Allen NPZ files
-- Astrocyte tokens from neuros-astro processing
-- Temporal alignment between modalities
-- Train/val/test splits
+- Trial-averaged calcium imaging (2-photon) from Allen NPZ files
+- Astrocyte event features from neuros-astro processing
+- Train/val/test splits for stimulus decoding
 """
 
 import numpy as np
@@ -22,14 +21,17 @@ class AllenMultiModalDataset(Dataset):
     """
     Dataset for Allen calcium + astrocyte multimodal experiments.
 
+    Loads trial-averaged calcium responses and astrocyte event summaries.
+    Designed for stimulus decoding tasks (orientation classification).
+
     Args:
-        calcium_dir: Directory with Allen 2P session NPZ files
-        astro_dir: Directory with neuros-astro processed outputs
+        calcium_dir: Directory with Allen 2P session NPZ files (2p_session_*.npz)
+        astro_dir: Directory with neuros-astro processed outputs (session_*/astro_tokens.npz)
         session_ids: List of session IDs to include (or 'all')
-        seq_len: Sequence length for temporal windows
-        modalities: Which modalities to include ['calcium', 'astro', 'both']
+        modalities: Which modalities to include ['neural', 'astro', 'both']
         transform: Optional data augmentation
-        temporal_alignment: How to align calcium (30Hz) to astro (10Hz)
+        split: 'train', 'val', or 'test' (80/10/10 split)
+        seed: Random seed for reproducible splits
     """
 
     def __init__(
@@ -38,11 +40,13 @@ class AllenMultiModalDataset(Dataset):
         astro_dir: Union[str, Path],
         session_ids: Union[List[str], str] = 'all',
         seq_len: int = 100,
-        modalities: str = 'both',  # 'calcium', 'astro', or 'both'
+        modalities: str = 'both',  # 'neural', 'astro', or 'both'
         transform=None,
         temporal_alignment: str = 'downsample',  # 'downsample' or 'interpolate'
         stride: int = 50,  # Sliding window stride
         min_astro_events: int = 5,  # Min events per window
+        split: str = 'train',  # 'train', 'val', 'test'
+        seed: int = 42,
     ):
         super().__init__()
 
@@ -54,6 +58,8 @@ class AllenMultiModalDataset(Dataset):
         self.temporal_alignment = temporal_alignment
         self.stride = stride
         self.min_astro_events = min_astro_events
+        self.split = split
+        self.seed = seed
 
         # Find sessions
         if session_ids == 'all':
@@ -74,15 +80,22 @@ class AllenMultiModalDataset(Dataset):
         calcium_sessions = set()
         astro_sessions = set()
 
-        # Find calcium sessions
-        for f in self.calcium_dir.glob('*.npz'):
-            session_id = f.stem  # Remove .npz
+        # Find calcium sessions (support both formats)
+        # Format 1: 2p_session_*.npz (original trial-aligned)
+        for f in self.calcium_dir.glob('2p_session_*.npz'):
+            session_id = f.stem.replace('2p_session_', '')
             calcium_sessions.add(session_id)
 
-        # Find astro sessions
+        # Format 2: {session_id}.npz (continuous traces)
+        for f in self.calcium_dir.glob('*.npz'):
+            if not f.stem.startswith('2p_session_'):
+                # Just the session ID
+                calcium_sessions.add(f.stem)
+
+        # Find astro sessions (session_*/astro_tokens.npz)
         for d in self.astro_dir.iterdir():
             if d.is_dir() and (d / 'astro_tokens.npz').exists():
-                session_id = d.name
+                session_id = d.name.replace('session_', '')
                 astro_sessions.add(session_id)
 
         # Intersection
@@ -115,18 +128,26 @@ class AllenMultiModalDataset(Dataset):
             n_neurons, n_timepoints = traces.shape
             sampling_rate_calcium = calcium_data.get('sampling_rate', 30.0)
 
-            # Load astro tokens
-            astro_file = self.astro_dir / session_id / 'astro_tokens.npz'
+            # Load astro tokens (handle both naming conventions)
+            astro_file = self.astro_dir / f"session_{session_id}" / 'astro_tokens.npz'
             if not astro_file.exists():
-                print(f"    Warning: Missing astro file, skipping")
-                continue
+                # Try without "session_" prefix
+                astro_file = self.astro_dir / session_id / 'astro_tokens.npz'
+                if not astro_file.exists():
+                    print(f"    Warning: Missing astro file, skipping")
+                    continue
 
             astro_data = np.load(astro_file, allow_pickle=True)
-            event_tokens = astro_data['event_tokens']
+            # Handle different key names from neuros-astro
+            event_tokens = astro_data.get('event_tokens', astro_data.get('tokens'))
             timestamps = astro_data['timestamps']
             region_ids = astro_data.get('region_ids', astro_data.get('astrocyte_ids'))
 
-            n_astrocytes = int(region_ids.max()) + 1 if len(region_ids) > 0 else 0
+            # If no region IDs, create dummy IDs (all events from "cell 0")
+            if region_ids is None or len(region_ids) == 0:
+                region_ids = np.zeros(len(timestamps), dtype=np.int64)
+
+            n_astrocytes = int(region_ids.max()) + 1 if len(region_ids) > 0 else 1
 
             # Create sliding windows
             total_duration = n_timepoints / sampling_rate_calcium
