@@ -22,7 +22,7 @@ from neuros_neurofm.models.popt import PopT, PopTWithLatents
 from neuros_neurofm.fusion.perceiver import PerceiverIO
 from neuros_neurofm.models.heads import MultiTaskHeads
 from neuros_neurofm.tokenizers import (
-    SpikeTokenizer, BinnedTokenizer, LFPTokenizer, CalciumTokenizer
+    SpikeTokenizer, BinnedTokenizer, LFPTokenizer, CalciumTokenizer, AstroTokenizer
 )
 from neuros_neurofm.tokenizers.eeg_tokenizer import EEGTokenizer
 from neuros_neurofm.tokenizers.fmri_tokenizer import fMRITokenizer
@@ -139,19 +139,18 @@ class MultiModalNeuroFMX(nn.Module):
 
         # Cross-modal Perceiver fusion
         self.perceiver_fusion = PerceiverIO(
-            num_latents=n_latents,
+            n_latents=n_latents,
             latent_dim=d_model,  # Match d_model for compatibility
             input_dim=d_model,
-            num_cross_attention_layers=4,
-            num_self_attention_layers=2,
-            cross_attention_widening_factor=1,
-            self_attention_widening_factor=1
+            n_layers=4,
+            n_heads=8,
+            dropout=dropout
         )
 
         # Mamba backbone for temporal modeling
         self.mamba_backbone = MambaBackbone(
             d_model=d_model,
-            n_layers=n_mamba_blocks,
+            n_blocks=n_mamba_blocks,
             use_multi_rate=True,
             downsample_rates=[1, 4],  # Multi-rate temporal
             dropout=dropout
@@ -191,7 +190,8 @@ class MultiModalNeuroFMX(nn.Module):
         return {
             'spike': {'n_units': 384, 'seq_len': 100},
             'lfp': {'n_channels': 32, 'seq_len': 100},
-            'calcium': {'n_cells': 200, 'seq_len': 100},
+            'calcium': {'n_neurons': 200, 'seq_len': 100},
+            'astro': {'n_astrocytes': 100, 'seq_len': 100, 'sampling_rate': 10.0, 'use_events': True},
             'eeg': {'n_channels': 64, 'seq_len': 100, 'sfreq': 128.0},
             'fmri': {'n_rois': 400, 'seq_len': 50, 'tr': 0.72},
             'ecog': {'n_channels': 128, 'seq_len': 100},
@@ -223,9 +223,19 @@ class MultiModalNeuroFMX(nn.Module):
         if 'calcium' in self.modality_config:
             cfg = self.modality_config['calcium']
             self.tokenizers['calcium'] = CalciumTokenizer(
-                n_cells=cfg.get('n_cells', 200),
+                n_neurons=cfg.get('n_neurons', cfg.get('n_cells', 200)),
+                d_model=self.d_model
+            )
+
+        # Astrocyte tokenizer
+        if 'astro' in self.modality_config:
+            cfg = self.modality_config['astro']
+            self.tokenizers['astro'] = AstroTokenizer(
+                n_astrocytes=cfg.get('n_astrocytes', 100),
                 d_model=self.d_model,
-                seq_len=cfg.get('seq_len', 100)
+                sampling_rate=cfg.get('sampling_rate', 10.0),
+                use_events=cfg.get('use_events', True),
+                pool_size=cfg.get('pool_size', 4)
             )
 
         # EEG tokenizer

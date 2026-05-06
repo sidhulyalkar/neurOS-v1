@@ -26,6 +26,11 @@ from neuros_neurofm.datasets.webdataset_loader import (
     ShardedDatasetInfo,
 )
 
+from neuros_neurofm.datasets.allen_multimodal_dataset import (
+    AllenMultiModalDataset,
+    collate_multimodal,
+)
+
 __all__ = [
     # Synthetic datasets
     "SyntheticNeuralDataset",
@@ -42,4 +47,7 @@ __all__ = [
     "collate_webdataset",
     "create_webdataset_dataloader",
     "ShardedDatasetInfo",
+    # Allen multimodal
+    "AllenMultiModalDataset",
+    "collate_multimodal",
 ]

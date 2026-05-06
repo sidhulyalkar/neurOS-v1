@@ -43,6 +43,7 @@ from neuros_neurofm.tokenizers.calcium_tokenizer import (
 )
 from neuros_neurofm.tokenizers.eeg_tokenizer import EEGTokenizer
 from neuros_neurofm.tokenizers.fmri_tokenizer import fMRITokenizer
+from neuros_neurofm.tokenizers.astro_tokenizer import AstroTokenizer
 
 __all__ = [
     # Base classes
@@ -64,4 +65,5 @@ __all__ = [
     "MiniscopeTokenizer",
     "EEGTokenizer",
     "fMRITokenizer",
+    "AstroTokenizer",
 ]

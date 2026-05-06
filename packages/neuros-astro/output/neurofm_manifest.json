@@ -1,0 +1,29 @@
+{
+  "session_id": "demo_session",
+  "modalities": {
+    "astro": {
+      "type": "event_tokens",
+      "path": "astro_tokens.npz",
+      "sampling": "irregular",
+      "timestamp_key": "timestamps_s",
+      "feature_names": [
+        "onset_time",
+        "duration_s",
+        "peak_dff",
+        "area_px",
+        "centroid_y",
+        "centroid_x",
+        "propagation_speed",
+        "direction_sin",
+        "direction_cos",
+        "confidence"
+      ]
+    }
+  },
+  "metadata": {
+    "n_events": 8,
+    "n_graphs": 5,
+    "duration_s": 60.0,
+    "frame_rate_hz": 10.0
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "session_id": "2p_session_545446482",
+  "modalities": {
+    "astro": {
+      "type": "event_tokens",
+      "path": "astro_tokens.npz",
+      "sampling": "irregular"
+    }
+  },
+  "metadata": {
+    "source": "Allen Brain Observatory 2P",
+    "n_events": 22,
+    "n_cells": 171,
+    "n_graphs": 7
+  }
+}

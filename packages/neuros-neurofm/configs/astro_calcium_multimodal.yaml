@@ -1,0 +1,152 @@
+# Example config for multimodal neuroFMx with astrocytes + neurons
+# Use this for ablation experiments: baseline (calcium only) vs astro-enhanced
+
+name: astro_calcium_multimodal
+description: Multimodal model with calcium imaging + astrocyte signals
+
+# Model architecture
+model:
+  d_model: 512
+  n_mamba_blocks: 6
+  n_latents: 64
+  latent_dim: 512
+  dropout: 0.1
+
+  # Domain adversarial (for cross-species/session generalization)
+  use_domain_adversarial: false
+  n_domains: 3
+
+# Modality configuration
+modalities:
+  # Neuronal calcium imaging (2-photon)
+  calcium:
+    enabled: true
+    n_neurons: 200         # Number of neurons
+    sampling_rate: 30.0    # Hz (typical 2P rate)
+
+  # Astrocyte signals (from neuros-astro)
+  astro:
+    enabled: true
+    n_astrocytes: 100      # Number of astrocytes
+    seq_len: 100           # Sequence length
+    sampling_rate: 10.0    # Hz (downsampled from 2P)
+    use_events: true       # Use event-based tokenization
+    pool_size: 4           # Temporal pooling factor
+
+    # Event detection params (if using continuous mode)
+    threshold_sigma: 3.0
+    min_duration_bins: 2
+
+# Training configuration
+training:
+  batch_size: 16
+  learning_rate: 1e-4
+  num_epochs: 50
+  warmup_steps: 1000
+
+  # Loss weights
+  loss_weights:
+    decode: 1.0           # Reconstruction loss
+    encode: 0.5           # Encoding loss
+    contrastive: 0.3      # Contrastive loss
+    domain: 0.1           # Domain adversarial (if enabled)
+
+  # Optimizer
+  optimizer: adamw
+  weight_decay: 0.01
+  grad_clip: 1.0
+
+  # Scheduler
+  scheduler: cosine
+  min_lr: 1e-6
+
+# Data configuration
+data:
+  # Allen Visual Coding dataset (example)
+  dataset: allen_visual_coding
+
+  # Paths (update to your data)
+  calcium_data_dir: /path/to/allen/calcium
+  astro_data_dir: /path/to/neuros-astro/allen_processed
+
+  # Data splits
+  train_sessions: []  # List of session IDs or "auto" for random split
+  val_sessions: []
+  test_sessions: []
+
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+  # Temporal alignment
+  align_modalities: true
+  alignment_method: interpolate  # interpolate, nearest, or bin
+  target_rate: 10.0              # Hz - align to astro rate (slower)
+
+  # Data augmentation
+  augmentation:
+    temporal_jitter: 0.1    # 10% jitter
+    amplitude_noise: 0.05   # 5% noise
+    dropout_rate: 0.1       # Random neuron/astro dropout
+
+# Evaluation
+evaluation:
+  metrics:
+    - reconstruction_mse
+    - encoding_loss
+    - contrastive_accuracy
+    - latent_disentanglement
+
+  # Ablation study
+  ablation:
+    enabled: true
+    conditions:
+      - name: calcium_only
+        modalities: [calcium]
+      - name: astro_only
+        modalities: [astro]
+      - name: multimodal
+        modalities: [calcium, astro]
+
+# Hardware
+hardware:
+  device: cuda           # cuda, cpu, or mps
+  num_workers: 4
+  pin_memory: true
+  mixed_precision: true  # AMP for faster training
+
+# Logging
+logging:
+  log_dir: ./logs
+  experiment_name: astro_calcium_ablation
+  log_interval: 100      # steps
+  val_interval: 1000     # steps
+  save_interval: 5000    # steps
+
+  # Wandb (optional)
+  use_wandb: false
+  wandb_project: neuros-astro
+  wandb_entity: null
+
+# Checkpointing
+checkpointing:
+  save_dir: ./checkpoints
+  save_best: true
+  save_last: true
+  monitor: val_loss
+  mode: min
+
+# Reproducibility
+seed: 42
+
+# Notes
+notes: |
+  Ablation experiment to test astrocyte contribution to neural prediction.
+
+  Expected results:
+  1. Calcium-only baseline: Standard performance
+  2. Astro-only: Can astro signals predict something useful?
+  3. Multimodal: Does adding astro improve calcium prediction?
+
+  Key hypothesis: Astrocyte slow dynamics provide context that improves
+  neural activity prediction, especially for longer timescales.

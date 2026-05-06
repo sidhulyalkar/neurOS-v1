@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-astro"
+version = "0.1.0"
+description = "A glial signal processing layer for neural foundation models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "neurOS Contributors"}
+]
+keywords = ["neuroscience", "astrocytes", "calcium-imaging", "foundation-models", "neural-data"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+    "numpy>=1.22.0",  # Compatible with allensdk
+    "scipy>=1.10.0",
+    "pandas>=1.5.0",  # Compatible with allensdk
+    "pydantic>=2.0.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "networkx>=3.0",
+]
+
+[project.optional-dependencies]
+nwb = [
+    "pynwb>=2.5.0",
+    "hdmf>=3.10.0",
+]
+dandi = [
+    "dandi>=0.58.0",
+]
+imaging = [
+    "tifffile>=2023.0.0",
+    "scikit-image>=0.21.0",
+]
+viz = [
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "ipython>=8.0.0",
+]
+all = [
+    "neuros-astro[nwb,dandi,imaging,viz,dev]",
+]
+
+[project.scripts]
+neuros-astro = "neuros_astro.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/your-org/neurOS-v1"
+Documentation = "https://github.com/your-org/neurOS-v1/tree/main/packages/neuros-astro"
+Repository = "https://github.com/your-org/neurOS-v1"
+Issues = "https://github.com/your-org/neurOS-v1/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["neuros_astro*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"

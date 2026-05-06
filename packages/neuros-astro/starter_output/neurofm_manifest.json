@@ -1,0 +1,25 @@
+{
+  "session_id": "synthetic_demo",
+  "modalities": {
+    "astro_events": {
+      "type": "event_tokens",
+      "path": "event_tokens.npz",
+      "sampling": "irregular",
+      "timestamp_key": "timestamps_s"
+    },
+    "astro_binned": {
+      "type": "binned_tokens",
+      "path": "binned_tokens.npz",
+      "sampling": "regular",
+      "timestamp_key": "timestamps_s",
+      "bin_size_s": 5.0
+    }
+  },
+  "metadata": {
+    "n_events": 44,
+    "n_regions": 15,
+    "n_graphs": 10,
+    "duration_s": 120.0,
+    "frame_rate_hz": 10.0
+  }
+}
