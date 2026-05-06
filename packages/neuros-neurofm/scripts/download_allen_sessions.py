@@ -188,14 +188,24 @@ def download_sessions(
             trial_temporal_freqs = []
 
             for _, row in stim_table.iterrows():
-                start_idx = row['start']
-                end_idx = row['end']
+                # Convert to int for array slicing
+                start_idx = int(row['start'])
+                end_idx = int(row['end'])
+
+                # Skip invalid indices
+                if start_idx >= end_idx or start_idx < 0 or end_idx > dff.shape[1]:
+                    continue
 
                 # Extract response (mean during stimulus)
                 response = dff[:, start_idx:end_idx].mean(axis=1)
                 trial_responses.append(response)
                 trial_orientations.append(row['orientation'])
                 trial_temporal_freqs.append(row.get('temporal_frequency', 2.0))
+
+            # Check we got valid trials
+            if len(trial_responses) == 0:
+                print(f"  ✗ Session {session_id}: No valid trials found")
+                continue
 
             trial_responses = np.array(trial_responses)  # (n_trials, n_cells)
             trial_orientations = np.array(trial_orientations)
