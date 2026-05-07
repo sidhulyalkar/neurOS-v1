@@ -1,0 +1,54 @@
+# ENGRAM-FMx Production Config
+# Maximum scale for multi-GPU training
+# Estimated cost: ~$100-200 on Lambda Labs/RunPod
+
+# Task
+task: neural_dynamics
+model_size: large
+
+# Model configuration (768-dim, 12 layers)
+hidden_dim: 768
+num_layers: 12
+num_latents: 256
+memory_slots: 1024
+num_heads: 12
+
+# All ENGRAM components enabled
+use_local_processing: true
+use_ssm: true
+use_latent_workspace: true
+use_attractor_memory: true
+use_operator_dynamics: true
+use_sparse_anchor_attention: true
+
+# Data configuration
+seq_length: 4096
+num_train_samples: 100000
+num_val_samples: 10000
+batch_size: 16  # Per GPU, use gradient accumulation
+
+# Training hyperparameters
+max_steps: 100000
+learning_rate: 1e-4
+weight_decay: 0.01
+warmup_steps: 5000
+gradient_clip: 1.0
+gradient_accumulation_steps: 4  # Effective batch size: 64
+
+# Hardware
+device: cuda
+precision: bf16
+
+# Distributed training
+distributed: fsdp
+num_gpus: 4
+
+# Logging
+log_interval: 100
+eval_interval: 2000
+save_interval: 10000
+output_dir: runs/engram_fmx_production
+
+# Memory optimizations
+gradient_checkpointing: true
+activation_checkpointing: true

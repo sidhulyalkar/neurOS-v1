@@ -1,0 +1,38 @@
+# ENGRAM-FMx Ablation: No Attractor Memory
+# Tests importance of Hopfield-style memory retrieval
+
+task: associative_recall
+model_size: tiny
+
+hidden_dim: 128
+num_layers: 2
+num_latents: 32
+memory_slots: 128
+
+# Ablation: disable attractor memory
+use_local_processing: true
+use_ssm: true
+use_latent_workspace: true
+use_attractor_memory: false  # DISABLED
+use_operator_dynamics: true
+use_sparse_anchor_attention: true
+
+seq_length: 256
+num_train_samples: 5000
+num_val_samples: 500
+batch_size: 8
+
+max_steps: 1000
+learning_rate: 1e-4
+weight_decay: 0.01
+warmup_steps: 100
+gradient_clip: 1.0
+
+device: auto
+precision: fp32
+
+log_interval: 50
+eval_interval: 100
+save_interval: 500
+output_dir: runs/engram_fmx/ablations
+experiment_name: no_memory

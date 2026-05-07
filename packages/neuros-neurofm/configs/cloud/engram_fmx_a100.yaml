@@ -1,0 +1,48 @@
+# ENGRAM-FMx A100 Cloud Training Config
+# Optimized for A100 40GB/80GB GPUs
+# Estimated cost: ~$20-50 on Lambda Labs for full training
+
+# Task
+task: neural_dynamics
+model_size: large
+
+# Model configuration (512-dim, 8 layers)
+hidden_dim: 512
+num_layers: 8
+num_latents: 128
+memory_slots: 512
+num_heads: 8
+
+# All ENGRAM components enabled
+use_local_processing: true
+use_ssm: true
+use_latent_workspace: true
+use_attractor_memory: true
+use_operator_dynamics: true
+use_sparse_anchor_attention: true
+
+# Data configuration
+seq_length: 2048
+num_train_samples: 50000
+num_val_samples: 5000
+batch_size: 32
+
+# Training hyperparameters
+max_steps: 50000
+learning_rate: 3e-4
+weight_decay: 0.01
+warmup_steps: 2000
+gradient_clip: 1.0
+
+# Hardware
+device: cuda
+precision: bf16
+
+# Logging
+log_interval: 100
+eval_interval: 1000
+save_interval: 5000
+output_dir: runs/engram_fmx_a100
+
+# Memory optimizations
+gradient_checkpointing: true

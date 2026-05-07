@@ -1,0 +1,43 @@
+# ENGRAM-FMx Tiny Synthetic Training Config
+# Optimized for RTX 3070 Ti (8GB VRAM) - ~2GB usage
+# Estimated time: ~5-10 minutes for 1000 steps
+
+task: associative_recall
+model_size: tiny
+
+# Model overrides (tiny defaults: 128-dim, 2 layers)
+hidden_dim: 128
+num_layers: 2
+num_latents: 32
+memory_slots: 128
+
+# All components enabled
+use_local_processing: true
+use_ssm: true
+use_latent_workspace: true
+use_attractor_memory: true
+use_operator_dynamics: true
+use_sparse_anchor_attention: true
+
+# Data
+seq_length: 256
+num_train_samples: 5000
+num_val_samples: 500
+batch_size: 8
+
+# Training
+max_steps: 1000
+learning_rate: 1e-4
+weight_decay: 0.01
+warmup_steps: 100
+gradient_clip: 1.0
+
+# Hardware
+device: auto
+precision: fp32
+
+# Logging
+log_interval: 50
+eval_interval: 100
+save_interval: 500
+output_dir: runs/engram_fmx
