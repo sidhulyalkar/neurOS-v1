@@ -16,6 +16,22 @@
 *.nwb
 **/data/allen_neuropixels/
 
+# Results and output directories (generated, not source)
+results/
+**/results/
+allen_nwb_results/
+allen_validation_results/
+cross_session_analysis/
+monitoring/
+verification_outputs/
+training_log.txt
+validation_report.json
+validation_report.txt
+
+# Jupyter notebooks (typically not committed)
+notebooks/
+*.ipynb
+
 # Allen Brain Observatory validation cache (DO NOT COMMIT)
 allen_validation_cache/
 **/allen_validation_cache/
@@ -85,3 +101,7 @@ TODAY_SUMMARY.md
 **/docs/archive/
 **/docs/development/
 **/docs/planning/
+
+# Training runs (generated outputs)
+runs/
+**/runs/
