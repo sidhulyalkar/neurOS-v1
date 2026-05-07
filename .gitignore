@@ -46,3 +46,42 @@ sae_analysis/
 # SAE visualizations
 sae_visualizations/
 **/sae_visualizations/
+
+# Manuscript and documentation (not for GitHub)
+manuscript/
+*.tex
+
+# Whitepapers and project specs
+*whitepaper*
+*Whitepaper*
+*_Spec.md
+*_spec.md
+*Spec.md
+
+# Development/planning docs (only READMEs should be committed)
+NEUROS_ASTRO*.md
+*_SUMMARY.md
+*_PLAN.md
+*_ROADMAP.md
+*_COMPLETE.md
+*_COMPLETE_*.md
+*_NEXT_STEPS.md
+*_STATUS.md
+*_REPORT.md
+*_GUIDE.md
+*_QUICKSTART.md
+QUICK_START*.md
+*IMPLEMENTATION*.md
+*SESSION*.md
+*HANDOFF*.md
+*CHANGELOG.md
+*CONTRIBUTING.md
+*INSTALLATION.md
+ABLATION_*.md
+ADVANCED_*.md
+TODAY_SUMMARY.md
+
+# Archive folders
+**/docs/archive/
+**/docs/development/
+**/docs/planning/
