@@ -1,10 +1,12 @@
-# Updated dependency list for the neurOS Constellation platform
+# LEGACY FULL-STACK DEVELOPMENT REQUIREMENTS
 #
-# This file enumerates all third‑party Python packages required to run
-# neurOS and its Constellation extensions.  The versions specified
-# here are minimums; newer versions may also work.  When updating
-# dependencies please verify compatibility across the codebase and
-# adjust these constraints accordingly.
+# This file is retained for reproducibility of older Constellation experiments.
+# It is NOT the canonical neurOS installation definition and must not be read by
+# package setup code. New installations should use package-level pyproject.toml
+# files or `python scripts/bootstrap.py --profile <profile>`.
+#
+# Keeping this list intentionally broad lets older environments be reconstructed,
+# but a normal BCI/kernel install should not install this entire file.
 
 pylsl>=1.16.1
 pyzmq>=25.0.2

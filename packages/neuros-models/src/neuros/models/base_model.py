@@ -1,65 +1,79 @@
-"""
-Base model classes for neurOS.
+"""Base model classes for neurOS.
 
-A model encapsulates both training and inference.  Concrete subclasses must
-implement :meth:`train` and :meth:`predict`.  They may also define
-stateful adaptation logic for online learning.
+``BaseModel`` retains the familiar train/predict API while exposing the new
+structured ``infer`` contract used by the neurOS kernel.
 """
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
-from typing import Iterable, Optional
+from typing import Any
 
 import numpy as np
 
+from neuros.contracts import DecoderCapabilities, DecoderOutput
+
 
 class BaseModel(ABC):
-    """Abstract base class for all models."""
+    """Abstract base class for trainable neurOS models."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         self.is_trained = False
+
+    @property
+    def capabilities(self) -> DecoderCapabilities:
+        return DecoderCapabilities(
+            probabilities=type(self).predict_proba is not BaseModel.predict_proba,
+            online_fit=type(self).partial_fit is not BaseModel.partial_fit,
+        )
 
     @abstractmethod
     def train(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Train the model on labelled feature vectors.
-
-        Parameters
-        ----------
-        X: np.ndarray
-            Feature matrix of shape (n_samples, n_features).
-        y: np.ndarray
-            Target labels of shape (n_samples,).
-        """
+        """Train the model on labelled feature vectors."""
 
     @abstractmethod
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict labels for a batch of feature vectors.
+        """Predict labels for a batch of feature vectors."""
 
-        Parameters
-        ----------
-        X: np.ndarray
-            Feature matrix of shape (n_samples, n_features).
+    def predict_proba(self, X: np.ndarray) -> np.ndarray | None:
+        """Return class probabilities when supported."""
+        return None
 
-        Returns
-        -------
-        np.ndarray
-            Predicted labels of shape (n_samples,).
-        """
+    def infer(self, X: np.ndarray) -> DecoderOutput:
+        """Run structured inference without fabricating confidence."""
+        if not self.is_trained:
+            raise RuntimeError("Model has not been trained. Call train() first.")
+
+        started_ns = time.perf_counter_ns()
+        predictions = np.asarray(self.predict(X))
+        probabilities = self.predict_proba(X)
+        elapsed_ns = time.perf_counter_ns() - started_ns
+
+        prediction: Any
+        if predictions.size == 1:
+            prediction = predictions.reshape(-1)[0].item()
+        else:
+            prediction = predictions
+
+        confidence = None
+        probability_row = None
+        if probabilities is not None:
+            probs = np.asarray(probabilities, dtype=float)
+            probability_row = probs[0] if probs.ndim > 1 and len(probs) else probs
+            if probability_row.size:
+                confidence = float(np.max(probability_row))
+
+        return DecoderOutput(
+            prediction=prediction,
+            confidence=confidence,
+            probabilities=probability_row,
+            model_id=self.__class__.__name__,
+            inference_time_ns=elapsed_ns,
+        )
 
     def partial_fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Incrementally update the model with new samples.
-
-        This method is optional; subclasses may override it if incremental
-        learning is supported.  By default it delegates to :meth:`train`.
-        """
         self.train(X, y)
 
-    def adapt(self, *args, **kwargs) -> None:
-        """Hook for online adaptation.
-
-        Models can override this method to adjust internal parameters based on
-        runtime conditions such as signal quality or classification confidence.
-        The base implementation does nothing.
-        """
-        return
+    def adapt(self, *args: Any, **kwargs: Any) -> None:
+        return None

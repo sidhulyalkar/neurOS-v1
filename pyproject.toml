@@ -1,0 +1,43 @@
+# Repository-level tooling and workspace configuration.
+# Individual distributions own their packaging metadata under packages/*.
+
+[tool.uv.workspace]
+members = [
+    "packages/neuros-core",
+    "packages/neuros-drivers",
+    "packages/neuros-models",
+    "packages/neuros-foundation",
+    "packages/neuros-ui",
+    "packages/neuros-cloud",
+    "packages/neuros",
+    "packages/neuros-mechint",
+    "packages/neuros-neurofm",
+    "packages/neuros-sourceweigher",
+    "packages/orion",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [
+    "docs/archive",
+    "packages/neuros-mechint/docs/archive",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_return_any = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["neuros", "orion"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2

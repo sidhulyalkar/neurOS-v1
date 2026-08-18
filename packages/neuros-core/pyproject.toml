@@ -1,18 +1,16 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros-core"
 version = "2.0.0"
-description = "Core functionality for neurOS - a modular operating system for brain-computer interfaces"
+description = "Core runtime, processing, contracts, and orchestration for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "neurOS Development Team"}
-]
-keywords = ["neuroscience", "bci", "brain-computer-interface", "pipeline", "orchestration"]
+authors = [{name = "neurOS Development Team"}]
+keywords = ["neuroscience", "bci", "brain-computer-interface", "runtime", "orchestration"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -21,22 +19,34 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-
 dependencies = [
     "numpy>=1.24.0",
     "scipy>=1.11.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "pydantic>=1.10.10",
+    "pydantic>=1.10.10,<3",
 ]
 
+[project.optional-dependencies]
+evaluation = ["scikit-learn>=1.2"]
+test = ["pytest>=7.4", "pytest-asyncio>=0.21", "scikit-learn>=1.2"]
+dev = [
+    "neuros-core[evaluation,test]",
+    "ruff>=0.6",
+    "mypy>=1.8",
+]
+
+[project.entry-points."neuros.transforms"]
+bandpass = "neuros.processing.filters:BandpassFilter"
+smoothing = "neuros.processing.filters:SmoothingFilter"
+bandpower = "neuros.processing.feature_extraction:BandPowerExtractor"
+
 [project.urls]
-Homepage = "https://github.com/<your-user>/neuros2"
-Documentation = "https://neuros.readthedocs.io"
-Repository = "https://github.com/<your-user>/neuros2"
-Issues = "https://github.com/<your-user>/neuros2/issues"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Documentation = "https://github.com/sidhulyalkar/neurOS-v1/tree/main/docs"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

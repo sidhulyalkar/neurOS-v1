@@ -1,23 +1,17 @@
-"""
-Model agent for neurOS.
-
-The :class:`ModelAgent` reads feature vectors from an input queue, invokes
-its model to produce predictions and optionally adapts its decision
-threshold based on recent confidence scores.  It can send predictions to
-an output queue or a callback for further processing.
-"""
+"""Model inference operator for the neurOS agent runtime."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Optional
 
 import numpy as np
 
-from neuros.models.base_model import BaseModel
-from neuros.processing.adaptation import AdaptiveThreshold
 from neuros.agents.base_agent import BaseAgent
+from neuros.contracts import DecoderOutput
+from neuros.processing.adaptation import AdaptiveThreshold
+from neuros.runtime import OverflowPolicy, QueueStats, put_with_policy
 
 
 class ModelAgent(BaseAgent):
@@ -25,11 +19,14 @@ class ModelAgent(BaseAgent):
         self,
         input_queue: asyncio.Queue,
         output_queue: Optional[asyncio.Queue],
-        model: BaseModel,
+        model: Any,
         adaptation: Optional[AdaptiveThreshold] = None,
         callback: Optional[
-            Callable[[float, np.ndarray, float, int, float], None]
+            Callable[[float, np.ndarray, float, int, float | None], None]
         ] = None,
+        *,
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
+        queue_stats: QueueStats | None = None,
         **kwargs,
     ) -> None:
         super().__init__(name=kwargs.get("name", "ModelAgent"))
@@ -38,13 +35,49 @@ class ModelAgent(BaseAgent):
         self.model = model
         self.adaptation = adaptation
         self.callback = callback
+        self.overflow_policy = overflow_policy
+        self.queue_stats = queue_stats or QueueStats()
         self.running = False
-        # ensure the model is trained; otherwise raise later
+
+    def _infer_legacy(self, X: np.ndarray) -> DecoderOutput:
+        started_ns = time.perf_counter_ns()
+        pred = np.asarray(self.model.predict(X))
+        prediction = pred.reshape(-1)[0].item() if pred.size == 1 else pred
+        probabilities = None
+        confidence = None
+        predict_proba = getattr(self.model, "predict_proba", None)
+        if callable(predict_proba):
+            try:
+                raw = predict_proba(X)
+                if raw is not None:
+                    probs = np.asarray(raw, dtype=float)
+                    probabilities = probs[0] if probs.ndim > 1 else probs
+                    if probabilities.size:
+                        confidence = float(np.max(probabilities))
+            except (AttributeError, NotImplementedError):
+                probabilities = None
+                confidence = None
+        return DecoderOutput(
+            prediction=prediction,
+            confidence=confidence,
+            probabilities=probabilities,
+            model_id=self.model.__class__.__name__,
+            inference_time_ns=time.perf_counter_ns() - started_ns,
+        )
+
+    def _infer(self, X: np.ndarray) -> DecoderOutput:
+        infer = getattr(self.model, "infer", None)
+        if callable(infer):
+            output = infer(X)
+            if not isinstance(output, DecoderOutput):
+                raise TypeError("model.infer() must return DecoderOutput")
+            return output
+        return self._infer_legacy(X)
 
     async def run(self) -> None:
-        if not self.model.is_trained:
+        if not getattr(self.model, "is_trained", True):
             raise RuntimeError(
-                "Model must be trained before running ModelAgent.  Call model.train()."
+                "Model must be trained before running ModelAgent. Call model.train()."
             )
         self.running = True
         while self.running:
@@ -52,48 +85,45 @@ class ModelAgent(BaseAgent):
                 timestamp, features = await self.input_queue.get()
             except asyncio.CancelledError:
                 break
-            start = time.time()
-            # features expected as 1-D vector; reshape to (1, -1)
-            X = features.reshape(1, -1)
-            # try to get probability estimates.  Check for _model attribute
-            # (used by many neurOS models) or fallback to the model itself.
-            underlying = getattr(self.model, "_model", None)
-            if underlying is None:
-                underlying = self.model
-            if hasattr(underlying, "predict_proba"):
-                try:
-                    probs = underlying.predict_proba(X)[0]
-                    conf = float(np.max(probs))
-                    label = int(np.argmax(probs))
-                except Exception:
-                    # fallback to predict if probability fails
-                    pred = underlying.predict(X)
-                    label = int(pred[0])
-                    conf = 1.0
-            else:
-                # fallback: use predict and assign full confidence
-                pred = underlying.predict(X)
-                label = int(pred[0])
-                conf = 1.0
-            # update adaptation and threshold if provided
-            trigger = True
-            if self.adaptation is not None:
-                self.adaptation.update(conf)
-                trigger = self.adaptation.should_trigger(conf)
-            latency = time.time() - timestamp
-            # send to output queue if triggered
-            if trigger and self.output_queue is not None:
-                try:
-                    self.output_queue.put_nowait((timestamp, label, conf, latency))
-                except asyncio.QueueFull:
-                    self.logger.debug("Model output queue full – dropping result")
-                    pass
-            # call callback for metrics collection
-            if self.callback is not None:
-                try:
-                    self.callback(timestamp, features, latency, label, conf)
-                except Exception as e:
-                    self.logger.exception("Error in callback: %s", e)
+            try:
+                X = np.asarray(features).reshape(1, -1)
+                output = self._infer(X)
+                prediction = output.prediction
+                if isinstance(prediction, np.ndarray):
+                    if prediction.size != 1:
+                        raise ValueError(
+                            "Streaming ModelAgent requires one prediction per input"
+                        )
+                    prediction = prediction.reshape(-1)[0].item()
+                label = int(prediction)
+                confidence = output.confidence
+                trigger = True
+                if self.adaptation is not None and confidence is not None:
+                    self.adaptation.update(confidence)
+                    trigger = self.adaptation.should_trigger(confidence)
+                latency = max(0.0, time.time() - float(timestamp))
+                if trigger and self.output_queue is not None:
+                    accepted = await put_with_policy(
+                        self.output_queue,
+                        (timestamp, label, confidence, latency),
+                        policy=self.overflow_policy,
+                        stats=self.queue_stats,
+                    )
+                    if not accepted:
+                        self.logger.debug("Result queue full; newest result dropped")
+                if self.callback is not None:
+                    try:
+                        self.callback(
+                            float(timestamp),
+                            np.asarray(features),
+                            latency,
+                            label,
+                            confidence,
+                        )
+                    except Exception as exc:
+                        self.logger.exception("Error in callback: %s", exc)
+            finally:
+                self.input_queue.task_done()
 
     async def stop(self) -> None:
         self.running = False

@@ -1,18 +1,16 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros-drivers"
 version = "2.0.0"
-description = "Hardware drivers for neurOS - EEG, video, audio, and multi-modal data acquisition"
+description = "Hardware and dataset sources for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "neurOS Development Team"}
-]
-keywords = ["neuroscience", "bci", "eeg", "brainflow", "lsl", "video", "audio"]
+authors = [{name = "neurOS Development Team"}]
+keywords = ["neuroscience", "bci", "eeg", "brainflow", "lsl", "multimodal"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -21,43 +19,42 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-
 dependencies = [
     "neuros-core>=2.0.0",
     "numpy>=1.24.0",
-    "pynwb>=2.2.0",
-    "hdmf>=3.10.0",
 ]
 
 [project.optional-dependencies]
-eeg = [
-    "brainflow>=5.10.0",
-    "pylsl>=1.16.1",
-]
-video = [
-    "opencv-python>=4.8.0",
-]
-audio = [
-    "pyaudio>=0.2.13",
-]
-nwb = [
-    "pynwb>=2.2.0",
-    "hdmf>=3.10.0",
-]
+eeg = ["brainflow>=5.10.0", "pylsl>=1.16.1"]
+video = ["opencv-python>=4.8.0"]
+audio = ["pyaudio>=0.2.13"]
+nwb = ["pynwb>=2.2.0", "hdmf>=3.10.0"]
 all = [
     "brainflow>=5.10.0",
     "pylsl>=1.16.1",
     "opencv-python>=4.8.0",
     "pyaudio>=0.2.13",
+    "pynwb>=2.2.0",
+    "hdmf>=3.10.0",
 ]
+test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
+
+[project.entry-points."neuros.sources"]
+mock = "neuros.drivers.mock_driver:MockDriver"
+brainflow = "neuros.drivers.brainflow_driver:BrainFlowDriver"
+dataset = "neuros.drivers.dataset_driver:DatasetDriver"
+ecg = "neuros.drivers.ecg_driver:ECGDriver"
+ecog = "neuros.drivers.ecog_driver:ECoGDriver"
+emg = "neuros.drivers.emg_driver:EMGDriver"
+eog = "neuros.drivers.eog_driver:EOGDriver"
+fnirs = "neuros.drivers.fnirs_driver:FnirsDriver"
+gsr = "neuros.drivers.gsr_driver:GSRDriver"
 
 [project.urls]
-Homepage = "https://github.com/<your-user>/neuros2"
-Documentation = "https://neuros.readthedocs.io"
-Repository = "https://github.com/<your-user>/neuros2"
-Issues = "https://github.com/<your-user>/neuros2/issues"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

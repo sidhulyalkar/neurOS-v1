@@ -1,42 +1,49 @@
-"""
-Device agent for neurOS.
-
-The :class:`DeviceAgent` wraps a driver and streams data into an output
-queue.  It manages starting and stopping the driver and handles backpressure
-by dropping samples if the queue is full.
-"""
+"""Device source adapter for the legacy agent runtime."""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Any
 
-from neuros.drivers.base_driver import BaseDriver
 from neuros.agents.base_agent import BaseAgent
+from neuros.runtime import OverflowPolicy, QueueStats, put_with_policy
 
 
 class DeviceAgent(BaseAgent):
-    def __init__(self, driver: BaseDriver, output_queue: asyncio.Queue, **kwargs) -> None:
+    def __init__(
+        self,
+        driver: Any,
+        output_queue: asyncio.Queue,
+        *,
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
+        queue_stats: QueueStats | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(name=kwargs.get("name", "DeviceAgent"))
         self.driver = driver
         self.output_queue = output_queue
+        self.overflow_policy = overflow_policy
+        self.queue_stats = queue_stats or QueueStats()
         self.running = False
 
     async def run(self) -> None:
         self.logger.info("Starting driver…")
         await self.driver.start()
         self.running = True
-        async for timestamp, data in self.driver:
-            if not self.running:
-                break
-            try:
-                # put data into queue; drop if queue is full
-                self.output_queue.put_nowait((timestamp, data))
-            except asyncio.QueueFull:
-                # drop sample to prevent backlog
-                self.logger.debug("Queue full – dropping sample")
-                pass
-        await self.driver.stop()
+        try:
+            async for timestamp, data in self.driver:
+                if not self.running:
+                    break
+                accepted = await put_with_policy(
+                    self.output_queue,
+                    (timestamp, data),
+                    policy=self.overflow_policy,
+                    stats=self.queue_stats,
+                )
+                if not accepted:
+                    self.logger.debug("Raw queue full; newest sample dropped")
+        finally:
+            await self.driver.stop()
 
     async def stop(self) -> None:
         self.running = False

@@ -1,17 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros"
 version = "2.0.0"
-description = "A modular operating system for brain-computer interfaces (meta-package)"
+description = "User-facing SDK and CLI for the neurOS BCI runtime"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "neurOS Development Team"}
-]
+authors = [{name = "neurOS Development Team"}]
 keywords = ["neuroscience", "bci", "brain-computer-interface", "eeg", "neural-decoding"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -21,10 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-
-# Standard installation: core + drivers + models
 dependencies = [
     "neuros-core>=2.0.0",
     "neuros-drivers>=2.0.0",
@@ -32,49 +27,41 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Full installation (everything)
 all = [
     "neuros-foundation>=2.0.0",
     "neuros-ui>=2.0.0",
     "neuros-cloud>=2.0.0",
 ]
-
-# BCI applications
 bci = [
     "neuros-drivers[eeg]>=2.0.0",
     "neuros-models[pytorch]>=2.0.0",
     "neuros-ui[dashboard]>=2.0.0",
 ]
-
-# Research with foundation models
 research = [
     "neuros-models[all]>=2.0.0",
     "neuros-foundation[all]>=2.0.0",
 ]
-
-# Production deployment
 deployment = [
     "neuros-ui[all]>=2.0.0",
     "neuros-cloud[all]>=2.0.0",
 ]
-
-# Development and testing
+orion = ["neuros-orion>=0.1.0"]
 dev = [
-    "pytest>=7.2",
-    "pytest-cov>=4.0",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
     "pytest-asyncio>=0.21",
-    "black>=23.0",
-    "ruff>=0.1.0",
+    "ruff>=0.6",
+    "mypy>=1.8",
 ]
 
 [project.scripts]
 neuros = "neuros.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/<your-user>/neuros2"
-Documentation = "https://neuros.readthedocs.io"
-Repository = "https://github.com/<your-user>/neuros2"
-Issues = "https://github.com/<your-user>/neuros2/issues"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Documentation = "https://github.com/sidhulyalkar/neurOS-v1/tree/main/docs"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

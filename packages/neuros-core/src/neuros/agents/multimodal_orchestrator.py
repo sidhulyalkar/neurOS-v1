@@ -1,98 +1,31 @@
-"""
-Multi‑modal orchestrator for neurOS.
-
-This orchestrator coordinates multiple drivers, processing agents and a
-model to form a unified pipeline capable of ingesting and fusing
-signals from many modalities.  Each driver is paired with its own
-processing chain to clean and extract features.  A fusion agent
-concatenates the feature vectors from all modalities and forwards the
-result to a single model agent for prediction.  Latencies and
-throughput are tracked across the entire pipeline.
-
-The architecture mirrors the existing single‑modality orchestrator
-(:class:`~neuros.agents.orchestrator_agent.Orchestrator`) but extends
-it to handle multiple streams concurrently.  It preserves the
-asynchronous design so that fast and slow modalities can be fused
-without blocking each other.  The orchestrator collects metrics such
-as mean latency and sample throughput, enabling comparison across
-different multi‑modal configurations.
-"""
+"""Multi-modal orchestrator for neurOS."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from neuros.drivers.base_driver import BaseDriver
-from neuros.models.base_model import BaseModel
-from neuros.processing.adaptation import AdaptiveThreshold
-from neuros.processing.filters import SmoothingFilter
-from neuros.processing.feature_extraction import BandPowerExtractor
-from neuros.agents.device_agent import DeviceAgent
-from neuros.agents.processing_agent import ProcessingAgent
-from neuros.agents.model_agent import ModelAgent
 from neuros.agents.base_agent import BaseAgent
+from neuros.agents.device_agent import DeviceAgent
 from neuros.agents.fusion_agent import FusionAgent
+from neuros.agents.model_agent import ModelAgent
+from neuros.agents.processing_agent import ProcessingAgent
+from neuros.processing.adaptation import AdaptiveThreshold
+from neuros.processing.feature_extraction import BandPowerExtractor
+from neuros.processing.filters import SmoothingFilter
+from neuros.runtime import OverflowPolicy, QueueStats
 
 
 class MultiModalOrchestrator(BaseAgent):
-    """Coordinate multiple drivers, processing chains and a model.
-
-    Parameters
-    ----------
-    drivers : list of BaseDriver
-        Data source drivers for each modality.
-    model : BaseModel
-        Model used for prediction on fused features.
-    extractors : list of objects or None
-        List of feature extractor objects corresponding to each
-        driver.  Each extractor must implement an ``extract`` method
-        returning a 1‑D NumPy array.  If an element is None, a
-        default :class:`BandPowerExtractor` will be used with the
-        sampling rate of the corresponding driver.  When a
-        ``processing_agent_classes`` entry is provided the extractor
-        is ignored and delegated to the custom processing agent.
-    fs_list : list of float or None, optional
-        Sampling rates for each driver.  If None for an entry, the
-        driver's ``sampling_rate`` attribute is used.  Band power
-        extraction depends on this value when a default extractor is
-        used.
-    filters_list : list of list, optional
-        A list containing a list of filter objects for each
-        modality.  These filters are applied before feature
-        extraction.  If a sublist is empty or omitted, only a
-        smoothing filter is used.  Use ``None`` for modalities that
-        bypass filtering.
-    adaptation : bool, optional
-        If True (default), apply an adaptive threshold to model
-        confidences via :class:`AdaptiveThreshold`.
-    duration : float or None, optional
-        Duration in seconds to run the pipeline.  If None, the
-        orchestrator runs until externally cancelled.
-    processing_agent_classes : list of type or None, optional
-        Custom processing agent classes for each modality.  If an
-        entry is not None, the orchestrator instantiates that class
-        instead of the default :class:`ProcessingAgent` and passes the
-        corresponding ``processing_kwargs_list`` element as keyword
-        arguments.  Custom agents must accept ``(input_queue,
-        output_queue, **kwargs)`` in their constructor and implement a
-        ``run`` coroutine.
-    processing_kwargs_list : list of dict, optional
-        Keyword arguments passed to each custom processing agent.
-    monitor : optional
-        Quality monitor object used by processing agents.  If
-        provided, it is passed to all default processing agents.  For
-        custom agents the monitor must be handled within the custom
-        implementation.
-    """
+    """Coordinate multiple sources, processing chains, fusion, and a decoder."""
 
     def __init__(
         self,
-        drivers: List[BaseDriver],
-        model: BaseModel,
+        drivers: List[Any],
+        model: Any,
         *,
         extractors: Optional[List[Any]] = None,
         fs_list: Optional[List[Optional[float]]] = None,
@@ -103,119 +36,149 @@ class MultiModalOrchestrator(BaseAgent):
         processing_kwargs_list: Optional[List[Optional[Dict[str, Any]]]] = None,
         monitor: Optional[Any] = None,
         name: Optional[str] = None,
+        queue_capacity: int = 100,
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
     ) -> None:
         super().__init__(name=name or "MultiModalOrchestrator")
         if not drivers:
-            raise ValueError("At least one driver must be provided.")
+            raise ValueError("At least one driver must be provided")
+        if queue_capacity <= 0:
+            raise ValueError("queue_capacity must be positive")
         self.drivers = drivers
         self.model = model
         self.extractors = extractors or [None] * len(drivers)
-        if fs_list is None:
-            self.fs_list = [None] * len(drivers)
-        else:
-            self.fs_list = fs_list
+        self.fs_list = fs_list or [None] * len(drivers)
         self.filters_list = filters_list or [None] * len(drivers)
         self.adaptation_enabled = adaptation
         self.duration = duration
         self.processing_agent_classes = processing_agent_classes or [None] * len(drivers)
         self.processing_kwargs_list = processing_kwargs_list or [None] * len(drivers)
         self.monitor = monitor
-        # metrics
+        self.queue_capacity = queue_capacity
+        self.overflow_policy = overflow_policy
         self.latencies: List[float] = []
-        self.sample_count: int = 0
-        # internal state
+        self.sample_count = 0
         self._tasks: List[asyncio.Task] = []
+        self._queue_stats: dict[str, QueueStats] = {}
 
-    def _on_result(self, timestamp: float, features: np.ndarray, latency: float, label: int, confidence: float) -> None:
+    def _on_result(
+        self,
+        timestamp: float,
+        features: np.ndarray,
+        latency: float,
+        label: int,
+        confidence: float | None,
+    ) -> None:
         self.latencies.append(latency)
         self.sample_count += 1
 
-    async def run(self) -> Dict[str, float]:
-        # create queues and agents per modality
-        raw_queues: List[asyncio.Queue] = []
+    async def run(self) -> Dict[str, Any]:
         feat_queues: List[asyncio.Queue] = []
-        device_agents: List[DeviceAgent] = []
-        processing_agents: List[BaseAgent] = []
         tasks: List[asyncio.Task] = []
-
         for idx, driver in enumerate(self.drivers):
-            raw_q: asyncio.Queue = asyncio.Queue(maxsize=100)
-            feat_q: asyncio.Queue = asyncio.Queue(maxsize=100)
-            raw_queues.append(raw_q)
+            raw_q = asyncio.Queue(maxsize=self.queue_capacity)
+            feat_q = asyncio.Queue(maxsize=self.queue_capacity)
             feat_queues.append(feat_q)
-            # instantiate device agent
-            d_agent = DeviceAgent(driver, raw_q)
-            device_agents.append(d_agent)
-            tasks.append(asyncio.create_task(d_agent.run()))
-            # determine processing agent
+            raw_stats = QueueStats()
+            feat_stats = QueueStats()
+            self._queue_stats[f"raw_{idx}"] = raw_stats
+            self._queue_stats[f"features_{idx}"] = feat_stats
+            device_agent = DeviceAgent(
+                driver,
+                raw_q,
+                overflow_policy=self.overflow_policy,
+                queue_stats=raw_stats,
+            )
+            tasks.append(asyncio.create_task(device_agent.run()))
             custom_cls = self.processing_agent_classes[idx] if idx < len(self.processing_agent_classes) else None
             custom_kwargs = (
-                self.processing_kwargs_list[idx] if idx < len(self.processing_kwargs_list) and self.processing_kwargs_list[idx] is not None else {}
+                self.processing_kwargs_list[idx]
+                if idx < len(self.processing_kwargs_list) and self.processing_kwargs_list[idx] is not None
+                else {}
             )
             if custom_cls is not None:
-                # custom processing agent handles extraction internally
-                p_agent = custom_cls(raw_q, feat_q, **custom_kwargs)
+                processing_agent = custom_cls(raw_q, feat_q, **custom_kwargs)
             else:
-                # default processing: optional filters and extractor
-                filters = self.filters_list[idx] if idx < len(self.filters_list) and self.filters_list[idx] is not None else []
-                # ensure smoothing filter is present
+                filters = (
+                    self.filters_list[idx]
+                    if idx < len(self.filters_list) and self.filters_list[idx] is not None
+                    else []
+                )
                 if not any(isinstance(f, SmoothingFilter) for f in filters):
                     filters = filters + [SmoothingFilter(window_size=5)]
-                # choose extractor
                 extractor = self.extractors[idx] if idx < len(self.extractors) else None
-                # if no extractor, fall back to BandPowerExtractor for EEG‑like data
                 if extractor is None:
-                    # determine sampling rate for band power
-                    fs = self.fs_list[idx] if idx < len(self.fs_list) and self.fs_list[idx] is not None else getattr(driver, "sampling_rate", 250.0)
+                    fs = (
+                        self.fs_list[idx]
+                        if idx < len(self.fs_list) and self.fs_list[idx] is not None
+                        else getattr(driver, "sampling_rate", 250.0)
+                    )
                     extractor = BandPowerExtractor(fs=fs)
-                p_agent = ProcessingAgent(raw_q, feat_q, filters=filters, extractor=extractor, monitor=self.monitor)
-            processing_agents.append(p_agent)
-            tasks.append(asyncio.create_task(p_agent.run()))
-        # fusion agent
-        fused_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        fusion_agent = FusionAgent(feat_queues, fused_queue)
+                processing_agent = ProcessingAgent(
+                    raw_q,
+                    feat_q,
+                    filters=filters,
+                    extractor=extractor,
+                    monitor=self.monitor,
+                    overflow_policy=self.overflow_policy,
+                    queue_stats=feat_stats,
+                )
+            tasks.append(asyncio.create_task(processing_agent.run()))
+
+        fused_queue = asyncio.Queue(maxsize=self.queue_capacity)
+        fusion_stats = QueueStats()
+        result_stats = QueueStats()
+        self._queue_stats["fused"] = fusion_stats
+        self._queue_stats["results"] = result_stats
+        fusion_agent = FusionAgent(
+            feat_queues,
+            fused_queue,
+            overflow_policy=self.overflow_policy,
+            queue_stats=fusion_stats,
+        )
         tasks.append(asyncio.create_task(fusion_agent.run()))
-        # model agent
-        result_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        result_queue = asyncio.Queue(maxsize=self.queue_capacity)
         adapt_obj = AdaptiveThreshold(window_size=50) if self.adaptation_enabled else None
-        model_agent = ModelAgent(fused_queue, result_queue, model=self.model, adaptation=adapt_obj, callback=self._on_result)
+        model_agent = ModelAgent(
+            fused_queue,
+            result_queue,
+            model=self.model,
+            adaptation=adapt_obj,
+            callback=self._on_result,
+            overflow_policy=self.overflow_policy,
+            queue_stats=result_stats,
+        )
         tasks.append(asyncio.create_task(model_agent.run()))
         self._tasks = tasks
-        # run until duration or external cancellation
-        start_time = time.time()
+
+        started = time.perf_counter()
         try:
             if self.duration is not None:
                 await asyncio.sleep(self.duration)
             else:
                 while True:
                     await asyncio.sleep(1)
-        except asyncio.CancelledError:
-            pass
         finally:
-            # stop all tasks
             for task in tasks:
                 task.cancel()
-            # stop drivers
-            for driver in self.drivers:
-                await driver.stop()
-            # await tasks to finish
             for task in tasks:
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
-        # compute metrics
-        runtime = time.time() - start_time
-        throughput = self.sample_count / runtime if runtime > 0 else 0.0
-        mean_latency = float(np.mean(self.latencies)) if self.latencies else 0.0
-        metrics: Dict[str, float] = {
+            for driver in self.drivers:
+                await driver.stop()
+
+        runtime = max(0.0, time.perf_counter() - started)
+        metrics: Dict[str, Any] = {
             "duration": runtime,
             "samples": self.sample_count,
-            "throughput": throughput,
-            "mean_latency": mean_latency,
+            "throughput": self.sample_count / runtime if runtime else 0.0,
+            "mean_latency": float(np.mean(self.latencies)) if self.latencies else 0.0,
+            "model": self.model.__class__.__name__,
+            "driver": "+".join(driver.__class__.__name__ for driver in self.drivers),
         }
-        # include model and drivers
-        metrics["model"] = self.model.__class__.__name__
-        # join driver names separated by '+'
-        metrics["driver"] = "+".join([d.__class__.__name__ for d in self.drivers])
+        for name, stats in self._queue_stats.items():
+            metrics[f"{name}_queue_dropped"] = stats.dropped
+            metrics[f"{name}_queue_high_water_mark"] = stats.high_water_mark
         return metrics

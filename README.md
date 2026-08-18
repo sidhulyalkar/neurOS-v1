@@ -1,156 +1,196 @@
-# neurOS-v1 – A Modular Operating System for Brain‑Computer Interfaces
+# neurOS
 
-**neurOS-v1** is a reimagined version of the original neurOS codebase.  It focuses
-on clarity, extensibility and measurable performance while delivering a
-production‑ready platform for brain–computer interface (BCI) development and
-research.  This repository contains a self‑contained Python package and
-accompanying scripts for real‑time neural data streaming, processing and
-classification.  It also includes benchmarking tools and a simple dashboard so
-that researchers can evaluate the system end‑to‑end.
+**neurOS is a modular runtime and SDK for building reliable brain-computer interface systems.**
 
-## Highlights
+The project is being organized around a deliberately small kernel: explicit neural data contracts, device-independent streaming, timing and synchronization, processing, decoder execution, recording/replay, observability, and extension points. Research packages can innovate quickly without owning the runtime architecture.
 
-* **Streamlined drivers** – A unified API for reading data from real or simulated
-  BCI hardware.  Drivers can be hot‑swapped without modifying the rest of the
-  pipeline.
-* **Pluggable processing pipeline** – Filters, feature extractors and models
-  live in their own modules and are loaded dynamically at run time.  New
-  algorithms can be added without changing core code.
-* **Agent‑based orchestration** – An asynchronous orchestrator coordinates
-  multiple agents (device, processing and model) to build a real‑time BCI
-  pipeline.  Agents monitor performance and can adapt their behaviour when
-  signals degrade.
-* **Model training and inference** – Built‑in support for offline training and
-  real‑time inference with state‑of‑the‑art neural and classical models.  Models
-  implement a simple interface so that custom architectures can be added
-  easily.
-* **Benchmarking suite** – Scripts to measure latency, throughput and accuracy
-  using synthetic and recorded datasets.  Benchmarks facilitate fair
-  comparisons with other BCI frameworks.
-* **Dashboard and CLI** – A lightweight Streamlit dashboard (optional) and
-  command line interface make it easy to run pipelines, launch benchmarks and
-  visualise data without writing code.
+ORION is the complementary neural-intelligence layer for tokenization, learned representations, adaptive decoding, personalization, and future neural foundation-model research.
 
-## Getting Started
+> **Status:** active research and engineering platform. The core APIs are being stabilized; hardware validation and production qualification remain ongoing. The repository should not be interpreted as a medically validated or production-certified BCI system.
 
-### Installation
+## Architecture
 
-```bash
-git clone https://github.com/shulyalk/neuros-v1.git
-cd neuros-v1
-pip install -r requirements.txt
-pip install -e .
-
-# run basic diagnostics
-neuros --help
+```text
+hardware / datasets
+       |
+       v
+neuros-drivers
+       |
+       v
+SignalFrame + StreamDescriptor        <- stable neural data contracts
+       |
+       v
+neurOS runtime
+  timing | processing | queues | monitoring | recording/replay
+       |
+       +--------------------------+
+       |                          |
+       v                          v
+neuros-models                    ORION
+conventional decoders       tokenization / representations /
+                            adaptive neural intelligence
+       |                          |
+       +------------+-------------+
+                    v
+               applications
 ```
 
-### Running a Pipeline
+The important boundary is simple:
 
-You can run a real‑time pipeline with a simulated driver using the CLI:
+- **neurOS** answers: _How should neural systems execute reliably?_
+- **ORION** answers: _How should neural systems represent, understand, and adapt to neural activity?_
 
-```bash
-# run a pipeline that streams data for 5 seconds
-neuros run --duration 5
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design.
+
+## Repository layout
+
+```text
+packages/
+  neuros-core/          kernel contracts, runtime, processing, timing, replay
+  neuros-drivers/       hardware and dataset sources
+  neuros-models/        task-specific decoders and model adapters
+  neuros-foundation/    adapters for external neural foundation models
+  neuros-ui/            dashboard/API/visualization surfaces
+  neuros-cloud/         optional distributed/cloud integrations
+  neuros/               user-facing SDK and CLI
+  orion/                ORION neural-intelligence contracts
+  neuros-neurofm/       experimental neural foundation-model research
+  neuros-mechint/       mechanistic-interpretability research toolkit
+  neuros-sourceweigher/ focused service component
+
+examples/ and notebooks/  learning and research material
+docs/                    architecture, guides, and research plans
+scripts/                 development/bootstrap/benchmark utilities
+tests/                   repository-wide contract and integration tests
 ```
 
-The pipeline will print classification outputs to the terminal and record
-latency metrics.  See `neuros run --help` for all options.
+## Installation
 
-### Benchmarking
+The repository is a multi-package workspace. **The old root `setup.py` installation path is intentionally gone.** Package metadata lives with each package under `packages/*/pyproject.toml`.
 
-To evaluate the system performance on synthetic data, run:
-
-```bash
-neuros benchmark --duration 10 --report benchmarks/report.json
-```
-
-This command measures throughput, end‑to‑end latency and classification
-accuracy over a configurable duration.  The resulting report can be used to
-compare neurOS with other systems.
-
-### Dashboard
-
-An optional Streamlit dashboard is provided for interactive monitoring.  To
-launch it, install `streamlit` and run:
+For the standard BCI development profile:
 
 ```bash
-pip install streamlit
-neuros dashboard
+git clone https://github.com/sidhulyalkar/neurOS-v1.git
+cd neurOS-v1
+python scripts/bootstrap.py --profile bci --test-tools
+```
 
-## Constellation Demo Pipeline
-
-In addition to single‑device pipelines, neurOS includes a **Constellation
-demo** that ingests and synchronises multiple modalities (EEG, audio,
-video, EDA, fNIRS/HD‑DOT, respiration, ECG and phone sensors), writes
-raw data to NWB/Zarr (or fallbacks), exports curated samples into
-WebDataset shards and optionally launches a distributed training job.
-The demo exposes Prometheus metrics for observability and supports
-fault injection to test robustness.
-
-To run the demo locally for 10 seconds and store data in
-`/tmp/constellation_demo`:
+Other profiles:
 
 ```bash
-neuros constellation \
-  --duration 10 \
-  --output-dir /tmp/constellation_demo \
-  --subject-id demo \
-  --session-id session1 \
-  --fault-injection
+python scripts/bootstrap.py --profile kernel     # runtime only
+python scripts/bootstrap.py --profile orion      # kernel + ORION contracts
+python scripts/bootstrap.py --profile research   # research stack
+python scripts/bootstrap.py --profile all        # full workspace
 ```
 
-If you have a Kafka broker running on `localhost:9092`, events will be
-published to topics prefixed with `raw`.  Use `--no-kafka` to disable
-streaming and run in dry‑run mode.  A helper script
-`scripts/run_local_demo.py` simplifies launching the demo and
-optionally starting the local Kafka stack via Docker Compose.
+The root `pyproject.toml` also declares the workspace for tools that support Python monorepos.
 
-See `docs/runbook_constellation.md` for a detailed guide, including
-instructions for starting Kafka with Docker Compose, importing the
-preconfigured Grafana dashboard and running integration tests.
+## First pipeline
+
+```python
+import asyncio
+import numpy as np
+
+from neuros.drivers.mock_driver import MockDriver
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.pipeline import Pipeline
+
+model = SimpleClassifier()
+model.train(np.random.randn(100, 40), np.random.randint(0, 2, 100))
+
+pipeline = Pipeline(
+    driver=MockDriver(sampling_rate=250, channels=8),
+    model=model,
+)
+
+metrics = asyncio.run(pipeline.run(duration=2.0))
+print(metrics)
 ```
 
-## Documentation
+The runtime report includes throughput and latency as well as queue-drop/high-water telemetry so overload is visible rather than silently ignored.
 
-- **[QUICKSTART.md](QUICKSTART.md)** – Get up and running in 5 minutes
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** – Developer guide and contribution guidelines
-- **[AUDIT.md](AUDIT.md)** – Current project status and development roadmap
-- **[docs/](docs/)** – Technical documentation and white papers
+## Canonical neural data
 
-## Project Status
+Hardware-specific code can still expose legacy streaming tuples for compatibility, but the long-term interchange format is `SignalFrame`:
 
-**Version:** 2.0.0 (Beta)
-**Status:** Core functionality complete, production readiness in progress
+```python
+from neuros.contracts import SignalFrame, StreamDescriptor
+```
 
-- ✅ Core pipeline working (single and multi-modal)
-- ✅ 10+ models implemented (SimpleClassifier, RandomForest, EEGNet, Transformer, etc.)
-- ✅ 15+ drivers for different modalities (EEG, video, motion, EMG, ECG, etc.)
-- ✅ CLI and API functional
-- ✅ Auto-configuration system
-- ⚠️ Test coverage: 40% (target: >90%)
-- ⚠️ Model persistence in progress
-- ⚠️ Hardware testing needed
+A frame carries stream identity, sequence number, sampling rate, explicit device/host/synchronized clocks, quality flags, metadata, and the neural array itself. This is the contract that recording, synchronization, ORION, and future runtime operators build on.
 
-See [AUDIT.md](AUDIT.md) for detailed status and roadmap.
+## Configuration and plugins
+
+neurOS now has a versioned configuration schema and a real plugin registry. External packages can expose entry points in categories such as:
+
+```text
+neuros.sources
+neuros.transforms
+neuros.tokenizers
+neuros.encoders
+neuros.decoders
+neuros.sinks
+neuros.monitors
+```
+
+Configuration is represented by `neuros.config.PipelineConfig`, with explicit stream IDs and runtime backpressure policy.
+
+## ORION
+
+ORION begins at the neural representation boundary:
+
+```text
+SignalFrame
+   -> NeuroTokenizer
+   -> NeuroTokenBatch
+   -> NeuralEncoder
+   -> RepresentationBatch
+   -> AdaptiveDecoder
+```
+
+Existing NeuroFM and neurotokenization experiments should migrate behind these interfaces only when their scientific value is demonstrated. The ORION package is intentionally a stable contract surface, not a claim that a universal neural foundation model is already solved.
+
+## Timing and replay
+
+The kernel includes:
+
+- bounded device-to-host clock-drift estimation,
+- explicit synchronization uncertainty,
+- canonical synchronized timestamps,
+- deterministic `SignalFrame` recording/replay primitives.
+
+These capabilities are intended to make multimodal experiments reproducible and to support hardware-independent regression testing.
+
+## Quality gates
+
+GitHub Actions validates three layers:
+
+1. kernel contracts across Python 3.10-3.12,
+2. an end-to-end mock BCI pipeline,
+3. ORION representation contracts.
+
+Run locally with:
+
+```bash
+pytest tests/
+```
+
+Research packages maintain additional package-specific test suites.
+
+## Research packages
+
+The repository contains broad experimental work, including NeuroFM, mechanistic interpretability, DINO-based neuroscience experiments, and neurotokenization plans. These are valuable research surfaces but are not automatically part of the neurOS kernel API.
+
+The architectural rule going forward is:
+
+> Research may depend on stable runtime contracts. Stable runtime contracts should not depend on research implementations.
 
 ## Contributing
 
-Contributions are welcome!  Please see [CONTRIBUTING.md](CONTRIBUTING.md) for
-guidelines on adding new drivers, processors or models.  The architecture is
-designed to be extensible, so new functionality can be added with minimal
-boilerplate.
-
-## Support
-
-- **Issues:** Report bugs or request features on [GitHub Issues](https://github.com/shulyalk/neuros-v1/issues)
-- **Discussions:** Ask questions and share ideas
-- **Documentation:** Check the [docs/](docs/) folder for technical details
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). New foundational functionality should prefer stable contracts and plugin interfaces over new cross-package imports.
 
 ## License
 
-This project is licensed under the MIT license – see [LICENSE](LICENSE) for details.
-
----
-
-**NeurOS v1** – Building the future of brain-computer interfaces 🧠✨
+MIT. See [`LICENSE`](LICENSE).

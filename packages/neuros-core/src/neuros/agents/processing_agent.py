@@ -1,21 +1,12 @@
-"""
-Processing agent for neurOS.
-
-The :class:`ProcessingAgent` applies a sequence of filters to incoming raw
-signals and extracts feature vectors.  It reads from an input queue of
-timestamped arrays and writes feature vectors to an output queue.  Filters
-must implement an `apply` method and the extractor must provide an
-`extract` method.
-"""
+"""Signal-processing operator for the legacy agent runtime."""
 
 from __future__ import annotations
 
 import asyncio
-from typing import Iterable, List, Optional
-
-import numpy as np
+from typing import Iterable, Optional
 
 from neuros.agents.base_agent import BaseAgent
+from neuros.runtime import OverflowPolicy, QueueStats, put_with_policy
 
 
 class ProcessingAgent(BaseAgent):
@@ -26,6 +17,9 @@ class ProcessingAgent(BaseAgent):
         filters: Iterable[object],
         extractor: object,
         monitor: Optional[object] = None,
+        *,
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
+        queue_stats: QueueStats | None = None,
         **kwargs,
     ) -> None:
         super().__init__(name=kwargs.get("name", "ProcessingAgent"))
@@ -34,8 +28,9 @@ class ProcessingAgent(BaseAgent):
         self.filters = list(filters)
         self.extractor = extractor
         self.running = False
-        # optional quality monitor; called with raw data before filtering
         self.monitor = monitor
+        self.overflow_policy = overflow_policy
+        self.queue_stats = queue_stats or QueueStats()
 
     async def run(self) -> None:
         self.running = True
@@ -44,23 +39,25 @@ class ProcessingAgent(BaseAgent):
                 timestamp, data = await self.input_queue.get()
             except asyncio.CancelledError:
                 break
-            # update quality monitor with raw data before filtering
-            if self.monitor is not None:
-                try:
-                    self.monitor.update(data)
-                except Exception:
-                    # ignore monitoring errors to avoid disrupting pipeline
-                    pass
-            # apply each filter sequentially
-            for filt in self.filters:
-                data = filt.apply(data)
-            # extract features
-            features = self.extractor.extract(data)
             try:
-                self.output_queue.put_nowait((timestamp, features))
-            except asyncio.QueueFull:
-                self.logger.debug("Processing output queue full – dropping features")
-                pass
+                if self.monitor is not None:
+                    try:
+                        self.monitor.update(data)
+                    except Exception:
+                        self.logger.exception("Quality monitor update failed")
+                for filt in self.filters:
+                    data = filt.apply(data)
+                features = self.extractor.extract(data)
+                accepted = await put_with_policy(
+                    self.output_queue,
+                    (timestamp, features),
+                    policy=self.overflow_policy,
+                    stats=self.queue_stats,
+                )
+                if not accepted:
+                    self.logger.debug("Feature queue full; newest feature dropped")
+            finally:
+                self.input_queue.task_done()
 
     async def stop(self) -> None:
         self.running = False
