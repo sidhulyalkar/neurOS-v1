@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from neuros.config.schema import PipelineConfig, PluginConfig
 from neuros.errors import ConfigurationError
@@ -45,22 +45,31 @@ def resolve_config(
     config: PipelineConfig,
     *,
     registry: PluginRegistry | None = None,
+    source_overrides: Mapping[str, Any] | None = None,
 ) -> ResolvedPipeline:
-    """Instantiate configured plugins and compile the topology to RuntimeGraph.
+    """Instantiate configured plugins and compile them to ``RuntimeGraph``.
 
-    The returned graph is a validated execution specification. The current
-    compatibility orchestrators do not yet execute arbitrary graphs directly;
-    this function establishes the stable compilation boundary for that executor.
+    ``source_overrides`` is keyed by stream ID and is primarily used for
+    deterministic replay. It prevents hardware source construction entirely,
+    which means a recorded experiment can be replayed on a machine that does
+    not have the original device SDK installed.
     """
 
     plugin_registry = registry or default_registry
     plugin_registry.discover()
+    overrides = dict(source_overrides or {})
+    unknown = set(overrides) - {stream.stream_id for stream in config.streams}
+    if unknown:
+        raise ConfigurationError(f"Unknown source override stream IDs: {sorted(unknown)}")
+
     graph = RuntimeGraph()
     resolved_streams: list[ResolvedStream] = []
     stream_tails: list[str] = []
 
     for stream in config.streams:
-        source = _create(plugin_registry, PluginKind.SOURCE, stream.source)
+        source = overrides.get(stream.stream_id)
+        if source is None:
+            source = _create(plugin_registry, PluginKind.SOURCE, stream.source)
         transforms = tuple(
             _create(plugin_registry, PluginKind.TRANSFORM, transform)
             for transform in stream.transforms

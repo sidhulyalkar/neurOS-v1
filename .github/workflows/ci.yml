@@ -37,7 +37,8 @@ jobs:
             tests/test_plugin_registry.py \
             tests/test_config_schema.py \
             tests/test_clock_sync.py \
-            tests/test_replay.py
+            tests/test_replay.py \
+            tests/test_session_archive.py
 
   bci-smoke:
     name: BCI end-to-end smoke
@@ -52,12 +53,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python scripts/bootstrap.py --profile bci --test-tools
-      - name: Exercise installed CLI
+      - name: Exercise installed CLI and persistent replay
         run: |
           neuros doctor --json
           neuros validate configs/examples/mock_bci.yaml --json
           neuros run configs/examples/mock_bci.yaml --duration 0.05 --json
-      - name: Run pipeline, config, plugin and CLI smoke tests
+          SESSION_DIR="${RUNNER_TEMP}/neuros-session"
+          neuros record configs/examples/mock_bci.yaml --output "${SESSION_DIR}" --session-id ci --duration 0.05 --json
+          neuros inspect "${SESSION_DIR}" --verify --json
+          neuros replay "${SESSION_DIR}" --config configs/examples/mock_bci.yaml --json
+      - name: Run pipeline, config, plugin, CLI, and recording smoke tests
         run: |
           pytest -q \
             tests/test_pipeline.py \
@@ -65,12 +70,30 @@ jobs:
             tests/test_config_resolution.py \
             tests/test_runtime_executor.py \
             tests/test_cli_v3.py \
+            tests/test_recording_cli.py \
+            tests/test_session_archive.py \
             tests/test_kernel_contracts.py \
             tests/test_runtime_queues.py \
             tests/test_plugin_registry.py \
             tests/test_config_schema.py \
             tests/test_clock_sync.py \
             tests/test_replay.py
+
+  recording-interop:
+    name: Recording interoperability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install recording exporters
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[recording,test]"
+      - name: Verify NWB and Zarr exports
+        run: pytest -q tests/test_recording_exports.py tests/test_session_archive.py
 
   orion-contracts:
     name: ORION contracts

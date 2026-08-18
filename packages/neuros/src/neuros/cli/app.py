@@ -17,6 +17,7 @@ from neuros.plugins import PluginKind
 from .config_commands import execute_config, validate_config
 from .diagnostics import devices, doctor, plugin_inventory
 from .legacy import handle as handle_legacy
+from .recording_commands import inspect_archive, record_config, replay_archive
 
 
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
@@ -51,6 +52,40 @@ def _parse_args() -> argparse.Namespace:
     )
     run_parser.add_argument("--show-outputs", action="store_true", help="Stream decoder outputs as JSONL")
     _add_json_flag(run_parser)
+
+    record_parser = subparsers.add_parser(
+        "record", help="Run a config while recording exact SignalFrames"
+    )
+    record_parser.add_argument("config", type=str)
+    record_parser.add_argument("--output", type=str, required=True, help="Session archive directory")
+    record_parser.add_argument("--session-id", type=str, default="session")
+    record_parser.add_argument("--duration", type=float, default=10.0)
+    record_parser.add_argument("--overwrite", action="store_true")
+    record_parser.add_argument(
+        "--export",
+        action="append",
+        choices=["nwb", "zarr"],
+        default=[],
+        help="Optional interoperability export; may be repeated",
+    )
+    record_parser.add_argument("--show-outputs", action="store_true")
+    _add_json_flag(record_parser)
+
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect a neurOS session archive")
+    inspect_parser.add_argument("archive", type=str)
+    inspect_parser.add_argument("--verify", action="store_true", help="Verify every frame SHA-256")
+    _add_json_flag(inspect_parser)
+
+    replay_parser = subparsers.add_parser(
+        "replay", help="Replay a session archive through the original processing graph"
+    )
+    replay_parser.add_argument("archive", type=str)
+    replay_parser.add_argument("--config", type=str, required=True)
+    replay_parser.add_argument("--realtime", action="store_true")
+    replay_parser.add_argument("--speed", type=float, default=1.0)
+    replay_parser.add_argument("--duration", type=float, default=None)
+    replay_parser.add_argument("--show-outputs", action="store_true")
+    _add_json_flag(replay_parser)
 
     bench_parser = subparsers.add_parser("benchmark", help="Benchmark a config or legacy synthetic pipeline")
     bench_parser.add_argument("config", nargs="?", default=None, help="Optional Pipeline YAML config")
@@ -175,6 +210,44 @@ def main() -> None:
             _emit(result, machine=args.json)
             return
 
+        if args.command == "record":
+            callback = _print_output if args.show_outputs else None
+            result = cli_api.asyncio.run(
+                record_config(
+                    args.config,
+                    args.output,
+                    session_id=args.session_id,
+                    duration_s=args.duration,
+                    overwrite=args.overwrite,
+                    export_formats=args.export,
+                    on_output=callback,
+                )
+            )
+            _emit(result, machine=args.json)
+            return
+
+        if args.command == "inspect":
+            _emit(
+                inspect_archive(args.archive, verify_hashes=args.verify),
+                machine=args.json,
+            )
+            return
+
+        if args.command == "replay":
+            callback = _print_output if args.show_outputs else None
+            result = cli_api.asyncio.run(
+                replay_archive(
+                    args.archive,
+                    args.config,
+                    realtime=args.realtime,
+                    speed=args.speed,
+                    duration_s=args.duration,
+                    on_output=callback,
+                )
+            )
+            _emit(result, machine=args.json)
+            return
+
         if args.command == "benchmark" and args.config is not None:
             result = cli_api.asyncio.run(
                 execute_config(args.config, duration_s=args.duration)
@@ -196,6 +269,9 @@ def main() -> None:
     except KeyError as exc:
         print(f"plugin error: {exc}", file=sys.stderr)
         raise SystemExit(3) from exc
+    except (FileNotFoundError, IOError) as exc:
+        print(f"recording error: {exc}", file=sys.stderr)
+        raise SystemExit(5) from exc
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         raise SystemExit(130)
