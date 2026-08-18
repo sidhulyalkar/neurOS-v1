@@ -38,7 +38,8 @@ jobs:
             tests/test_config_schema.py \
             tests/test_clock_sync.py \
             tests/test_replay.py \
-            tests/test_session_archive.py
+            tests/test_session_archive.py \
+            tests/test_quality_v3.py
 
   bci-smoke:
     name: BCI end-to-end smoke
@@ -78,6 +79,27 @@ jobs:
             tests/test_config_schema.py \
             tests/test_clock_sync.py \
             tests/test_replay.py
+
+  scientific-quality:
+    name: Scientific and latency gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install BCI quality profile
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile bci --test-tools
+      - name: Run deterministic quality tests
+        run: pytest -q tests/test_quality_v3.py tests/test_feature_extraction_compat.py
+      - name: Run version-controlled quality gate
+        run: |
+          python scripts/run_quality_gate.py configs/examples/mock_bci.yaml \
+            --thresholds configs/quality/ci.yaml \
+            --report "${RUNNER_TEMP}/quality-report.json"
 
   recording-interop:
     name: Recording interoperability
