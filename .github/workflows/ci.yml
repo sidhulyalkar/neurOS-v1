@@ -52,15 +52,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python scripts/bootstrap.py --profile bci --test-tools
-      - name: Resolve example configuration
-        run: python scripts/validate_config.py configs/examples/mock_bci.yaml
-      - name: Run pipeline and plugin smoke tests
+      - name: Exercise installed CLI
+        run: |
+          neuros doctor --json
+          neuros validate configs/examples/mock_bci.yaml --json
+          neuros run configs/examples/mock_bci.yaml --duration 0.05 --json
+      - name: Run pipeline, config, plugin and CLI smoke tests
         run: |
           pytest -q \
             tests/test_pipeline.py \
             tests/test_builtin_plugins.py \
             tests/test_config_resolution.py \
             tests/test_runtime_executor.py \
+            tests/test_cli_v3.py \
             tests/test_kernel_contracts.py \
             tests/test_runtime_queues.py \
             tests/test_plugin_registry.py \

@@ -32,6 +32,7 @@ all = ["torch>=2.1.0"]
 test = ["pytest>=7.4"]
 
 [project.entry-points."neuros.decoders"]
+threshold = "neuros.models.threshold_decoder:ThresholdDecoder"
 simple = "neuros.models.simple_classifier:SimpleClassifier"
 random_forest = "neuros.models.random_forest_model:RandomForestModel"
 svm = "neuros.models.svm_model:SVMModel"

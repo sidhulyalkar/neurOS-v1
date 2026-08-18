@@ -2,7 +2,7 @@ schema_version: 1
 
 metadata:
   name: mock-bci-smoke
-  purpose: deterministic configuration/plugin smoke test
+  purpose: executable configuration/plugin/runtime smoke test
 
 streams:
   - id: eeg
@@ -11,11 +11,15 @@ streams:
       options:
         sampling_rate: 250.0
         channels: 8
-    transforms: []
+    transforms:
+      - plugin: smoothing
+        options:
+          window_size: 3
 
 decoder:
-  plugin: simple
-  options: {}
+  plugin: threshold
+  options:
+    threshold: 0.0
 
 runtime:
   queue_capacity: 16
