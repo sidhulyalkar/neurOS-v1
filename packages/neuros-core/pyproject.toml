@@ -38,9 +38,9 @@ dev = [
 ]
 
 [project.entry-points."neuros.transforms"]
-bandpass = "neuros.processing.filters:BandpassFilter"
-smoothing = "neuros.processing.filters:SmoothingFilter"
-bandpower = "neuros.processing.feature_extraction:BandPowerExtractor"
+bandpass = "neuros.processing.plugin_transforms:BandpassTransform"
+smoothing = "neuros.processing.plugin_transforms:SmoothingTransform"
+bandpower = "neuros.processing.plugin_transforms:BandPowerTransform"
 
 [project.urls]
 Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
