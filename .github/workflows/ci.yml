@@ -33,6 +33,7 @@ jobs:
           pytest -q \
             tests/test_kernel_contracts.py \
             tests/test_runtime_queues.py \
+            tests/test_runtime_executor.py \
             tests/test_plugin_registry.py \
             tests/test_config_schema.py \
             tests/test_clock_sync.py \
@@ -59,6 +60,7 @@ jobs:
             tests/test_pipeline.py \
             tests/test_builtin_plugins.py \
             tests/test_config_resolution.py \
+            tests/test_runtime_executor.py \
             tests/test_kernel_contracts.py \
             tests/test_runtime_queues.py \
             tests/test_plugin_registry.py \

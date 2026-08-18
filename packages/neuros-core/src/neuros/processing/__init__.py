@@ -1,18 +1,26 @@
-"""
-Signal processing and feature extraction modules.
+"""Signal processing and feature extraction modules."""
 
-These functions and classes operate on raw neural data to clean it and
-extract informative features for downstream models.  They are designed to be
-small and composable so that they can be arranged flexibly in a pipeline.
-"""
-
-from neuros.processing.filters import BandpassFilter, SmoothingFilter  # noqa: F401
-from neuros.processing.feature_extraction import (
+from neuros.processing.adaptation import AdaptiveThreshold  # noqa: F401
+from neuros.processing.feature_extraction import (  # noqa: F401
+    AudioFeatureExtractor,
     BandPowerExtractor,
     HeartRateExtractor,
-    SkinConductanceExtractor,
-    RespirationExtractor,
     HormoneExtractor,
-    AudioFeatureExtractor,
-)  # noqa: F401
-from neuros.processing.adaptation import AdaptiveThreshold  # noqa: F401
+    RespirationExtractor,
+    SkinConductanceExtractor,
+)
+from neuros.processing.filters import BandpassFilter, SmoothingFilter  # noqa: F401
+from neuros.processing.operators import FeatureTransform  # noqa: F401
+
+__all__ = [
+    "AdaptiveThreshold",
+    "AudioFeatureExtractor",
+    "BandPowerExtractor",
+    "BandpassFilter",
+    "FeatureTransform",
+    "HeartRateExtractor",
+    "HormoneExtractor",
+    "RespirationExtractor",
+    "SkinConductanceExtractor",
+    "SmoothingFilter",
+]
