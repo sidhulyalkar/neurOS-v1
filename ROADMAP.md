@@ -1,583 +1,252 @@
-# NeurOS Platform Roadmap
-**Vision: The DIAMOND Standard for Neuroscience Data Processing**
+# neurOS + ORION Roadmap
 
-*Last Updated: 2025-10-10*
+This roadmap describes the current architectural sequence and the evidence required to promote new capabilities. Historical plans and session reports live under `docs/archive/` and are not active roadmaps.
 
----
+## Current refactor stack
 
-## Executive Summary
+The current kernel-to-research refactor is intentionally split into reviewable stacked pull requests. Merge bottom-up only after reviewing and validating each layer:
 
-NeurOS is evolving into a comprehensive platform for neuroscience data processing, bridging classical BCI methods with cutting-edge foundation models. This roadmap outlines the path to becoming the **DIAMOND standard**: **D**ata-driven, **I**nteroperable, **A**daptive, **M**ulti-modal, **O**pen, **N**eural **D**ecoding platform.
+1. **PR #1: neurOS kernel and ORION contracts**
+   - canonical `SignalFrame`, stream metadata, decoder outputs, queue policies, timing, config/plugin foundations, replay primitives, workspace packaging.
+2. **PR #8: Runtime v3**
+   - native `RuntimeGraph` executor, failure supervision, typed execution classes, p50/p95/p99 telemetry, single/multimodal execution convergence.
+3. **PR #9: CLI v3**
+   - config-first `doctor`, `plugins`, `devices`, `validate`, `run`, and benchmark execution with modular command ownership.
+4. **PR #10: Recording v3**
+   - lossless session archives, exact replay, source overrides, provenance, integrity verification, optional NWB/Zarr exports.
+5. **PR #11: Quality v3**
+   - version-controlled runtime quality gates, deterministic fault injection, benchmark manifests, known-signal scientific validity probes.
+6. **PR #12: ORION tokenization v1**
+   - seven tokenizer families, synthetic motif ground truth, fit/test separation, robustness benchmarks, tokenizer evidence reports.
+7. **PR #13: Repository v3**
+   - product/research/archive separation, historical cleanup, current documentation, and repository-hygiene enforcement.
 
----
-
-## Current Status (v2.1)
-
-### ✅ Completed Features (239 tests, 100% passing)
-
-#### Core Infrastructure
-- **Agent-based Architecture**: Orchestrator, DeviceAgent, ProcessingAgent, ModelAgent
-- **11 Models**: SimpleClassifier, EEGNet, CNN, RF, SVM, KNN, GBDT, Transformer, DinoV3, LSTM, AttentionFusion
-- **CLI Interface**: `neuros run`, `neuros benchmark`, `neuros train`
-- **REST API**: FastAPI server with WebSocket streaming
-- **Database**: SQLite with multi-tenant support
-- **Security**: Token-based authentication with RBAC
-
-#### Advanced Features (New in v2.0)
-1. **Cross-Validation & Evaluation** (500+ lines, 19 tests)
-   - K-fold and stratified CV
-   - Comprehensive metrics suite
-   - CVResults dataclass
-
-2. **Data Augmentation** (565+ lines, 33 tests)
-   - 8 augmentation techniques for EEG
-   - Mixup, time warping, frequency shifts
-   - AugmentationPipeline
-
-3. **Dataset Loaders** (600+ lines, 21 tests)
-   - Allen Institute (Visual Coding, Neuropixels)
-   - BCI datasets (BNCI Horizon, PhysioNet)
-   - Mock data generators
-
-4. **Dynamic Time Warping** (400+ lines, 25 tests)
-   - Piecewise linear warping
-   - Multi-trial alignment
-   - Template estimation
-
-5. **Foundation Models** (3,400+ lines, 114 tests) **NEW in v2.1**
-   - BaseFoundationModel abstract class
-   - POYO/POYO+ wrappers (multi-session, multi-task)
-   - NDT2/NDT3 (Neural Data Transformers)
-   - CEBRA (learnable latent embeddings)
-   - Neuroformer (multimodal generative pretraining)
-
-#### Model Registry
-- Save/load models with metadata
-- Version management
-- SHA-256 checksum verification
-- Tag-based searching
+The stack is complete only when the exact head of every PR has green CI and each PR remains reviewable relative to the branch immediately below it.
 
 ---
 
-## Phase 1: Foundation Model Zoo (Q1 2025)
+## North-star architecture
 
-### 1.1 Neural Data Transformers (NDT) ✅ COMPLETED
-**Priority: HIGH** | **Complexity: Medium**
+```text
+physical neural system
+        |
+        v
+hardware / sensors / datasets / replay
+        |
+        v
+neuros Source plugins
+        |
+        v
+SignalFrame + StreamDescriptor
+        |
+        v
+RuntimeGraph
+  acquisition
+  synchronization
+  processing
+  fusion
+  inference
+  sinks
+        |
+        +---------------> recording / replay / quality evidence
+        |
+        v
+ORION representation boundary
+  tokenization
+  neural encoders
+  adaptation
+  personalization
+  interpretable state
+        |
+        v
+application / closed-loop controller
+```
 
-Implement NDT2/NDT3 wrappers for multi-context neural decoding.
-
-**Tasks:**
-- [x] Create `ndt_model.py` following POYO template
-- [x] Implement NDT2 (multi-context pretraining)
-- [x] Implement NDT3 (generalist intracortical decoder)
-- [x] Add session context embeddings
-- [x] Create integration tests (28 tests, 100% passing)
-- [ ] Add fine-tuning examples
-
-**References:**
-- NDT2: "Neural Data Transformer 2: Multi-context Pretraining", NeurIPS 2023
-- NDT3: "A Generalist Intracortical Motor Decoder", 2025
-
-**Completed:** 965 lines (model: 565, tests: 400)
-
----
-
-### 1.2 CEBRA Latent Embeddings ✅ COMPLETED
-**Priority: HIGH** | **Complexity: Medium**
-
-Integrate CEBRA for joint behavioral and neural analysis.
-
-**Tasks:**
-- [x] Create `cebra_model.py`
-- [x] Implement learnable latent embeddings
-- [x] Add behavioral alignment support (time/behavior/hybrid modes)
-- [x] Temperature-contrastive learning
-- [x] Consistency computation for cross-session validation
-- [x] Integration tests (27 tests, 100% passing)
-- [ ] Visualization utilities for embeddings
-
-**References:**
-- CEBRA: Schneider et al., "Learnable latent embeddings for joint behavioural and neural analysis", Nature 2023
-
-**Completed:** 786 lines (model: 434, tests: 352)
+neurOS should make neural computation operationally predictable. ORION should make neural representation and adaptation increasingly powerful without weakening runtime reliability.
 
 ---
 
-### 1.3 Neuroformer ✅ COMPLETED
-**Priority: MEDIUM** | **Complexity: HIGH**
+# Post-stack Phase A: hardware qualification
 
-Multimodal and multitask generative pretraining for brain data.
+## Goal
 
-**Tasks:**
-- [x] Create `neuroformer_model.py`
-- [x] Implement multimodal fusion with modality embeddings
-- [x] Add masked autoencoding pretraining
-- [x] Multi-task decoding heads (classification/regression/generation)
-- [x] Zero-shot and few-shot learning capabilities
-- [x] Generative capabilities with context conditioning
-- [x] Integration tests (30 tests, 100% passing)
-- [ ] Pretrained checkpoint loading from HuggingFace
+Move from simulated and software-level integration evidence to explicit device qualification without conflating hardware validation with generic CI.
 
-**References:**
-- Neuroformer: "Multimodal and Multitask Generative Pretraining for Brain Data", ICLR 2024
+## Work
 
-**Completed:** 917 lines (model: 570, tests: 347)
+- define a `HardwareQualificationManifest` containing manufacturer, device/model, firmware, driver/plugin version, OS, transport, channel layout, reference/montage, nominal sample rate, clock source, experiment config hash, Git SHA, and environment versions;
+- implement deterministic qualification protocols for representative EEG and biosignal hardware;
+- measure packet loss, reconnect behavior, clock drift, synchronization uncertainty, source-to-host latency, queue pressure, and sustained recording reliability;
+- validate stop/restart/disconnect behavior and corrupted/partial-session recovery;
+- publish machine-readable qualification reports rather than prose performance claims;
+- maintain hardware-specific thresholds outside generic CI.
 
----
+## Exit gates
 
-### 1.4 Additional Foundation Models
-**Priority: MEDIUM** | **Complexity: HIGH**
-
-Implement remaining models from awesome-neurofm:
-
-- [ ] **MtM**: Universal translator at single-cell resolution
-- [ ] **NDT1**: Original Neural Data Transformer
-- [ ] **PopT**: Population Transformer
-- [ ] **GNOCCHI**: Diffusion-based generation
-- [ ] **LDNS**: Latent diffusion for spiking data
-- [ ] **Multi-X DDM**: Multi-context diffusion models
-
-**Estimated Lines:** 2,000+ total
+A device is called **qualified** only when its exact hardware/firmware/software combination has a reproducible report and all mandatory runtime/recording checks pass.
 
 ---
 
-## Phase 2: Benchmark Integration (Q1-Q2 2025)
+# Post-stack Phase B: model artifacts and decoder safety
 
-### 2.1 FALCON Benchmark
-**Priority: HIGH** | **Complexity: MEDIUM**
+## Goal
 
-Integrate Few-shot Algorithms for Consistent Neural Decoding.
+Make model deployment reproducible, inspectable, and safe enough for long-lived BCI experiments.
 
-**Tasks:**
-- [ ] Create `benchmarks/falcon.py`
-- [ ] Implement FALCON evaluation protocol
-- [ ] Add few-shot learning scenarios
-- [ ] Cross-dataset evaluation
-- [ ] Consistency metrics
-- [ ] Leaderboard integration
+## Work
 
-**Estimated Lines:** 300+ (benchmark) + 100+ (tests)
+- replace arbitrary trusted-environment pickle loading in production paths with backend-specific artifacts plus stable manifests;
+- include architecture/input contract, training dataset hashes, subject/session scope, calibration state, metrics, Git SHA, package versions, and artifact SHA-256;
+- add decoder compatibility checks against stream/representation schemas before runtime start;
+- add probability/calibration capability tests and preserve `confidence=None` when uncertainty is unavailable;
+- implement immutable model registry identifiers and explicit promotion stages such as experimental, validated, qualified;
+- add rollback and replay-based regression tests for every promoted artifact.
 
----
+## Exit gates
 
-### 2.2 Additional Benchmarks
-**Priority: MEDIUM**
-
-- [ ] BNCI Horizon benchmark suite
-- [ ] NeuroBench (spiking neural networks)
-- [ ] BCI Competition datasets
-- [ ] Cross-lab validation protocols
+A promoted decoder must be reproducibly loadable, schema-compatible, replay-tested, and associated with a complete provenance manifest.
 
 ---
 
-## Phase 3: DIAMOND Standard Compliance
+# Post-stack Phase C: real multimodal timing and fusion
 
-### D - Data-driven
-**Status: 🟡 Partial**
+## Goal
 
-**Current:**
-- ✅ Multiple dataset loaders
-- ✅ Data augmentation
-- ✅ Mock data generation
+Turn explicit clock semantics into best-in-class multimodal BCI synchronization.
 
-**Needed:**
-- [ ] Automated data versioning (DVC integration)
-- [ ] Data quality metrics and validation
-- [ ] Automated preprocessing pipelines
-- [ ] Data provenance tracking
-- [ ] Anomaly detection in neural recordings
-- [ ] Batch processing for large datasets
-- [ ] Distributed data loading
+## Work
 
----
+- extend the affine clock estimator to multiple hardware clock domains and intermittent synchronization observations;
+- propagate synchronization uncertainty through fusion decisions;
+- add fusion policies that can reject stale or temporally incompatible frames rather than blindly reuse the latest sample;
+- benchmark synthetic known-offset/drift scenarios and recorded multimodal sessions;
+- expose timing uncertainty to ORION so learned representations can distinguish neural uncertainty from biological variation.
 
-### I - Interoperable
-**Status: 🟡 Partial**
+## Exit gates
 
-**Current:**
-- ✅ REST API with WebSocket
-- ✅ Multiple data format support
-- ✅ Model registry
-
-**Needed:**
-- [ ] **NWB (Neurodata Without Borders) support**
-  - Read/write NWB files
-  - Convert between formats
-  - Metadata preservation
-- [ ] **BIDS (Brain Imaging Data Structure) compatibility**
-- [ ] **MNE-Python integration**
-  - Import/export MNE objects
-  - Use MNE preprocessing
-- [ ] **Docker containers** for reproducibility
-- [ ] **Kubernetes deployment** manifests
-- [ ] **ONNX export** for model interchange
-- [ ] **gRPC API** for high-performance streaming
-- [ ] **Cloud platform integrations**
-  - AWS SageMaker
-  - GCP Vertex AI
-  - Azure ML
-
-**Priority: HIGH** | **Estimated Lines:** 1,500+
+Fusion outputs must report which source frames contributed, their synchronized timestamps, and the uncertainty under which the fusion decision was made.
 
 ---
 
-### A - Adaptive
-**Status: 🟢 Good**
+# Post-stack Phase D: ORION on real neural datasets
 
-**Current:**
-- ✅ Transfer learning with foundation models
-- ✅ Multi-session support
-- ✅ Fine-tuning interface
-- ✅ Incremental learning (partial_fit)
+## Goal
 
-**Needed:**
-- [ ] **Online learning** with streaming data
-- [ ] **Active learning** for efficient labeling
-- [ ] **Continual learning** without catastrophic forgetting
-- [ ] **Meta-learning** for rapid adaptation
-- [ ] **Domain adaptation** across subjects
-- [ ] **Hyperparameter optimization** (Optuna integration)
-  - Auto-tuning pipelines
-  - Multi-objective optimization
-  - Distributed hyperparameter search
+Determine which neural tokenization and representation strategies survive contact with real data.
 
-**Priority: MEDIUM** | **Estimated Lines:** 800+
+## Work
 
----
+- add NWB spike-event adapters using the canonical replay/data contracts;
+- evaluate tokenizers on multiple preparations, sessions, animals/subjects, and behavioral tasks;
+- add held-out-unit prediction, next-window neural prediction, behavior/state decoding, cross-session transfer, few-shot adaptation, and compute-normalized metrics;
+- evaluate robustness to jitter, unit dropout, sorting instability, rate shifts, and session drift;
+- separate tokenizer fit data, representation-model training data, adaptation data, and held-out evaluation data;
+- compare ORION tokenization against event, count, rate-summary, and randomized controls under matched model budgets.
 
-### M - Multi-modal
-**Status: 🟡 Partial**
+## NeuroFM promotion rule
 
-**Current:**
-- ✅ AttentionFusion model
-- ✅ Multi-task POYO+
-- ✅ Composite models
+Existing `neuros-neurofm` implementations are research candidates, not automatically ORION components. A NeuroFM component moves behind an ORION interface only when it:
 
-**Needed:**
-- [ ] **EEG + fMRI fusion**
-- [ ] **EEG + EMG fusion**
-- [ ] **Spikes + LFP fusion**
-- [ ] **Calcium imaging + behavior fusion**
-- [ ] **Audio/video synchronization**
-- [ ] **Multi-modal preprocessing**
-- [ ] **Cross-modal attention mechanisms**
-- [ ] **Unified latent space** across modalities
-
-**Priority: MEDIUM** | **Estimated Lines:** 600+
+1. satisfies the interface and artifact contracts;
+2. has leakage-controlled evidence;
+3. improves a meaningful metric or offers a clear efficiency/interpretability advantage;
+4. remains stable under perturbation and cross-session tests;
+5. has reproducible compute and data manifests.
 
 ---
 
-### O - Open
-**Status: 🟢 Good**
+# Post-stack Phase E: adaptive and personalized BCI intelligence
 
-**Current:**
-- ✅ Open source (license to be added)
-- ✅ Public datasets support
-- ✅ Comprehensive documentation
-- ✅ Example notebooks
+## Goal
 
-**Needed:**
-- [ ] **Documentation website** (MkDocs or Sphinx)
-  - API reference
-  - Tutorials
-  - Best practices
-  - Theory background
-- [ ] **More example notebooks**
-  - P300 speller
-  - Motor imagery BCI
-  - Multi-modal fusion
-  - Foundation model fine-tuning
-- [ ] **Video tutorials**
-- [ ] **Community forum** (GitHub Discussions)
-- [ ] **Contributing guidelines**
-- [ ] **Code of conduct**
-- [ ] **Publication** in JOSS or similar
-- [ ] **PyPI package** distribution
-- [ ] **Conda package**
+Make adaptation explicit, constrained, reversible, and scientifically measurable.
 
-**Priority: HIGH** | **Estimated Lines:** N/A (documentation)
+## Work
+
+- implement adaptation proposal/review/apply lifecycle rather than hidden online mutation;
+- distinguish calibration, unsupervised domain adaptation, supervised online learning, and user-specific personalization;
+- maintain baseline and candidate model states with rollback;
+- evaluate adaptation under simulated nonstationarity, electrode/channel degradation, and behavioral drift;
+- log every adaptation trigger, training window, objective, resulting artifact, and before/after metrics;
+- add mechanistic-interpretability hooks for explaining what state changed and which channels/tokens drove a decision.
+
+## Exit gates
+
+No adaptive component may silently alter a promoted decoder. Every update must be attributable, replayable, bounded, and reversible.
 
 ---
 
-### N - Neural
-**Status: 🟢 Excellent**
+# Post-stack Phase F: closed-loop safety plane
 
-**Current:**
-- ✅ 11 neural network models
-- ✅ Foundation models (POYO+)
-- ✅ Transformer architectures
-- ✅ PyTorch and sklearn backends
+## Goal
 
-**Needed:**
-- [ ] **More architectures**
-  - Recurrent models (GRU, LSTM variants)
-  - Graph neural networks for electrode connectivity
-  - Capsule networks
-  - Neural ODEs
-- [ ] **Model compression**
-  - Quantization
-  - Pruning
-  - Knowledge distillation
-- [ ] **Explainability tools**
-  - Grad-CAM for CNNs
-  - Attention visualization
-  - Feature importance
-  - SHAP values
+Make neurOS suitable as a research substrate for increasingly consequential closed-loop applications without pretending software tests constitute medical validation.
 
-**Priority: MEDIUM** | **Estimated Lines:** 1,000+
+## Work
+
+- introduce a first-class safety/constraint node type or equivalent policy layer;
+- add action-rate limits, deadman states, confidence/quality gating, stale-data rejection, and emergency stop semantics;
+- distinguish advisory decoder outputs from commands sent to an actuator;
+- create hardware-in-the-loop simulation before physical closed-loop control;
+- record proposed actions, accepted actions, rejected actions, reasons, neural quality, decoder state, and timing;
+- develop task-specific hazard analyses and qualification profiles.
+
+## Exit gates
+
+A closed-loop demo must fail safe under source loss, runtime overload, decoder failure, stale synchronization, and explicit user/operator stop.
 
 ---
 
-### D - Decoding
-**Status: 🟢 Excellent**
+# Post-stack Phase G: developer ecosystem and productization
 
-**Current:**
-- ✅ Multi-task decoding
-- ✅ Regression and classification
-- ✅ Real-time streaming
-- ✅ Ensemble methods
+## Goal
 
-**Needed:**
-- [ ] **More decoding paradigms**
-  - P300 speller
-  - SSVEP with frequency detection
-  - Motor imagery with CSP
-  - Error-related potentials
-  - Cognitive workload estimation
-- [ ] **Decoder calibration**
-  - Bias correction
-  - Confidence calibration
-  - Uncertainty quantification
-- [ ] **Adaptive decoders**
-  - Non-stationary signal handling
-  - Drift correction
-  - Self-calibration
+Make the platform useful to researchers and BCI developers beyond this repository.
 
-**Priority: MEDIUM** | **Estimated Lines:** 800+
+## Work
+
+- stabilize versioned plugin APIs and compatibility policy;
+- publish a small set of independently installable, well-tested device and decoder plugins;
+- provide supported examples for motor imagery, replay analysis, multimodal fusion, and ORION tokenization;
+- generate schema-aware configuration documentation and editor support;
+- add package build/wheel/clean-install release gates;
+- establish semantic versioning and deprecation periods for stable contracts;
+- build UI surfaces from the same config/runtime/event APIs rather than separate orchestration logic.
+
+## Exit gates
+
+A new contributor should be able to install a standard profile, validate a config, run a mock experiment, record/replay it, inspect metrics, and add a plugin without modifying kernel code.
 
 ---
 
-## Phase 4: Performance & Scalability (Q2 2025)
+# Evidence hierarchy
 
-### 4.1 Performance Optimization
-**Priority: HIGH**
+Claims should always identify their evidence tier:
 
-- [ ] **GPU acceleration** for all models
-- [ ] **Batch processing** optimization
-- [ ] **Caching** strategies
-- [ ] **Lazy loading** for large datasets
-- [ ] **Parallel processing** for CV
-- [ ] **JIT compilation** with Numba
-- [ ] **Memory profiling** and optimization
-- [ ] **Benchmark suite** for performance tracking
+1. **Unit:** local function/class correctness.
+2. **Contract:** implementation satisfies a stable neurOS/ORION interface.
+3. **Integration:** multiple real packages execute together.
+4. **Replay:** deterministic recorded session reproduces expected behavior.
+5. **Scientific synthetic:** known ground truth is recovered under controlled perturbation.
+6. **Dataset:** leakage-controlled real-data evaluation.
+7. **Hardware qualification:** measured on named hardware/firmware/software.
+8. **Closed-loop qualification:** hardware-in-the-loop or physical system safety/reliability testing.
+9. **Clinical evidence:** separate regulated/clinical work, not implied by the software repository.
 
-**Estimated Lines:** 500+ (optimizations)
-
----
-
-### 4.2 Distributed Computing
-**Priority: MEDIUM**
-
-- [ ] **Dask integration** for distributed processing
-- [ ] **Ray** for distributed training
-- [ ] **Spark** for big data processing
-- [ ] **Multi-GPU training**
-- [ ] **Federated learning** for privacy
-
-**Estimated Lines:** 600+
+No lower tier should be described using language that implies a higher tier.
 
 ---
 
-## Phase 5: Advanced Features (Q2-Q3 2025)
+# Near-term priority after merging the stack
 
-### 5.1 Real-time Processing
-**Priority: HIGH**
+The highest-value next sequence is:
 
-- [ ] **Low-latency pipeline** (< 10ms)
-- [ ] **Hardware acceleration** (FPGA, TPU)
-- [ ] **Real-time visualization**
-- [ ] **Closed-loop control**
-- [ ] **Neurofeedback** support
+1. hardware qualification manifests and one real EEG device pipeline;
+2. durable model-artifact loading and replay regression;
+3. real NWB spike dataset adapter for ORION tokenization;
+4. cross-session ORION tokenizer benchmark;
+5. multimodal synchronization uncertainty and stale-frame-aware fusion;
+6. adaptation lifecycle with rollback and provenance;
+7. closed-loop safety policy layer.
 
-**Estimated Lines:** 800+
-
----
-
-### 5.2 Clinical Applications
-**Priority: MEDIUM**
-
-- [ ] **Medical device compliance** (FDA, CE)
-- [ ] **Patient data privacy** (HIPAA)
-- [ ] **Clinical validation** protocols
-- [ ] **Seizure detection**
-- [ ] **Sleep staging**
-- [ ] **Cognitive assessment**
-
-**Estimated Lines:** 1,000+
-
----
-
-### 5.3 Advanced Analysis
-**Priority: MEDIUM**
-
-- [ ] **Connectivity analysis**
-  - Coherence, phase locking
-  - Granger causality
-  - Graph theory metrics
-- [ ] **Source localization**
-  - Dipole fitting
-  - Beamforming
-  - Minimum norm estimates
-- [ ] **Time-frequency analysis**
-  - Wavelet transforms
-  - Hilbert-Huang transform
-  - Empirical mode decomposition
-
-**Estimated Lines:** 1,200+
-
----
-
-## Phase 6: Ecosystem Integration (Q3-Q4 2025)
-
-### 6.1 Tool Integration
-- [ ] **MNE-Python**: Full bidirectional integration
-- [ ] **EEGLAB**: MATLAB bridge
-- [ ] **FieldTrip**: Data exchange
-- [ ] **BrainVision**: Hardware support
-- [ ] **OpenBCI**: Direct integration
-- [ ] **Lab Streaming Layer**: Real-time streaming
-
----
-
-### 6.2 Platform Integration
-- [ ] **MATLAB SDK**
-- [ ] **R package**
-- [ ] **Julia integration**
-- [ ] **Web interface** (React/Vue)
-- [ ] **Mobile app** (iOS/Android)
-
----
-
-## Critical Gaps Analysis
-
-### High Priority Gaps
-
-1. **NWB Support** (Severity: HIGH)
-   - Required for wide adoption in neuroscience
-   - Standard for data sharing
-   - **Action**: Implement NWB reader/writer (Week 1)
-
-2. **Documentation Website** (Severity: HIGH)
-   - Essential for user onboarding
-   - API documentation needed
-   - **Action**: Set up MkDocs (Week 2)
-
-3. **Hyperparameter Optimization** (Severity: MEDIUM)
-   - Critical for model performance
-   - Users need automated tuning
-   - **Action**: Integrate Optuna (Week 3)
-
-4. **More Example Notebooks** (Severity: MEDIUM)
-   - P300, SSVEP, motor imagery examples
-   - Foundation model tutorials
-   - **Action**: Create 3-5 notebooks (Week 4)
-
----
-
-## Success Metrics
-
-### Technical Metrics
-- [ ] **Coverage**: 200+ tests, 95%+ coverage
-- [ ] **Performance**: < 50ms latency for real-time decoding
-- [ ] **Accuracy**: Match or exceed state-of-the-art on benchmarks
-- [ ] **Scalability**: Handle 1M+ neurons, 1000+ sessions
-
-### Community Metrics
-- [ ] **Users**: 100+ GitHub stars
-- [ ] **Contributors**: 10+ external contributors
-- [ ] **Citations**: Published in JOSS/similar
-- [ ] **Downloads**: 1000+ PyPI downloads/month
-
-### Compliance Metrics
-- [ ] **D**: 3+ major datasets, versioning support
-- [ ] **I**: NWB/BIDS support, 3+ platform integrations
-- [ ] **A**: Online learning, hyperparameter optimization
-- [ ] **M**: 3+ modality combinations
-- [ ] **O**: Documentation site, 10+ tutorials
-- [ ] **N**: 15+ model architectures
-- [ ] **D**: 5+ decoding paradigms
-
----
-
-## Development Priorities
-
-### Immediate (Next 2 Weeks)
-1. ✅ POYO+ foundation model (DONE)
-2. Implement NDT2/NDT3
-3. Implement CEBRA
-4. Add NWB support
-5. Create documentation website
-
-### Short-term (1-2 Months)
-1. Complete foundation model zoo
-2. FALCON benchmark integration
-3. Hyperparameter optimization (Optuna)
-4. More example notebooks (P300, SSVEP)
-5. PyPI package release
-
-### Medium-term (3-6 Months)
-1. Advanced multi-modal fusion
-2. Online learning support
-3. Distributed computing (Dask/Ray)
-4. Clinical validation protocols
-5. Community building
-
-### Long-term (6-12 Months)
-1. Medical device compliance
-2. Commercial partnerships
-3. Cloud platform deployment
-4. Mobile applications
-5. Major publication
-
----
-
-## Resource Requirements
-
-### Development Team
-- **Core developers**: 2-3 full-time
-- **Contributors**: 5-10 part-time
-- **Domain experts**: Neuroscientists, clinicians
-
-### Infrastructure
-- **Compute**: GPU cluster for training
-- **Storage**: Cloud storage for datasets
-- **CI/CD**: GitHub Actions (current)
-- **Monitoring**: Performance tracking
-
-### Funding
-- **Grants**: NIH, NSF opportunities
-- **Industry partnerships**
-- **Open collective** for community support
-
----
-
-## Conclusion
-
-NeurOS has a strong foundation and clear path to becoming the DIAMOND standard. The platform combines:
-
-✅ **Solid Core**: Agent architecture, 11 models, 154 tests
-✅ **Modern Features**: Foundation models, DTW, augmentation
-✅ **Clear Vision**: DIAMOND standard framework
-✅ **Active Development**: Regular commits, comprehensive tests
-
-**Next Steps:**
-1. Complete foundation model zoo (NDT, CEBRA, Neuroformer)
-2. Add NWB support for interoperability
-3. Create documentation website
-4. Release v2.0 on PyPI
-
-The future is bright for neurOS! 🧠✨
-
----
-
-*For questions or contributions, see CONTRIBUTING.md*
+The guiding question remains: **what are the smallest stable abstractions from which serious BCI systems can be built, measured, replayed, and improved?**

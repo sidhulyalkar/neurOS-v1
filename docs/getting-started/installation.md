@@ -31,7 +31,8 @@ Then verify the standard path:
 
 ```bash
 pytest -q tests/test_pipeline.py tests/test_kernel_contracts.py
-neuros --help
+neuros doctor --json
+neuros validate configs/examples/mock_bci.yaml --json
 ```
 
 ## Installation profiles
@@ -45,7 +46,7 @@ python scripts/bootstrap.py --profile kernel
 # Standard BCI runtime + sources + decoders + SDK
 python scripts/bootstrap.py --profile bci
 
-# Kernel + ORION contract layer
+# Kernel + ORION representation/tokenization layer
 python scripts/bootstrap.py --profile orion
 
 # Foundation-model and interpretability research stack
@@ -59,7 +60,7 @@ Use `--test-tools` to add shared pytest tooling, or `--dry-run` to inspect the c
 
 ## Installing individual packages
 
-Each distribution can also be installed independently:
+Each distribution can also be installed independently from its package directory:
 
 ```bash
 pip install -e packages/neuros-core
@@ -70,9 +71,9 @@ pip install -e packages/neuros
 
 Because this repository contains unpublished workspace dependencies and active development packages, installing editable local packages is the source-of-truth contributor workflow until a coordinated PyPI release is published and validated.
 
-## Optional hardware dependencies
+## Optional hardware and storage dependencies
 
-Hardware and heavyweight formats are intentionally optional.
+Hardware, deep-learning frameworks, and interoperability formats are intentionally optional.
 
 ### EEG / BrainFlow / LSL
 
@@ -92,10 +93,12 @@ pip install -e "packages/neuros-drivers[video]"
 pip install -e "packages/neuros-drivers[audio]"
 ```
 
-### NWB
+### Persistent NWB/Zarr interoperability
+
+The canonical neurOS archive has no additional storage dependency. To add NWB and Zarr exports:
 
 ```bash
-pip install -e "packages/neuros-drivers[nwb]"
+pip install -e "packages/neuros-core[recording]"
 ```
 
 ### PyTorch decoders
@@ -104,30 +107,24 @@ pip install -e "packages/neuros-drivers[nwb]"
 pip install -e "packages/neuros-models[pytorch]"
 ```
 
-This keeps a mock/synthetic runtime lightweight and avoids forcing hardware SDKs, cloud libraries, or foundation-model dependencies onto every installation.
+This keeps a mock/synthetic runtime lightweight and avoids forcing hardware SDKs, cloud libraries, storage backends, or foundation-model dependencies onto every installation.
 
 ## ORION
 
-Install the ORION contracts alongside the kernel with:
+Install ORION alongside the kernel with:
 
 ```bash
 python scripts/bootstrap.py --profile orion --test-tools
-pytest -q tests/test_orion_contracts.py
+pytest -q tests/test_orion_contracts.py tests/test_orion_tokenization.py
 ```
 
-ORION currently defines stable neural tokenization, representation, adaptive-decoder, and adaptation interfaces. Experimental NeuroFM/tokenizer implementations remain separate research packages until they are validated behind those contracts.
+ORION provides the stable neural tokenization/representation contracts plus the controlled initial tokenizer benchmark. Experimental NeuroFM components remain research candidates until they satisfy ORION contracts and comparative evidence gates.
 
 ## Workspace tooling
 
-The root `pyproject.toml` defines repository-wide tooling and the workspace membership. It deliberately does not contain `[project]` package metadata.
+The root `pyproject.toml` defines repository-wide tooling and workspace membership. It deliberately does not contain `[project]` package metadata.
 
-The old root `setup.py` has been removed. Do not use:
-
-```bash
-pip install -e .
-```
-
-from the repository root.
+The historical root packaging path has been removed. **Do not install the repository root as though it were a single Python distribution.** Use `scripts/bootstrap.py` or install the individual package directories shown above.
 
 ## GPU environments
 
@@ -136,21 +133,39 @@ GPU stacks are intentionally not pinned by the kernel. Install the appropriate P
 ## Common validation commands
 
 ```bash
-# Kernel contracts
+# Kernel/runtime contracts
 pytest -q \
   tests/test_kernel_contracts.py \
   tests/test_runtime_queues.py \
+  tests/test_runtime_executor.py \
   tests/test_clock_sync.py \
   tests/test_replay.py
 
-# BCI smoke path
-pytest -q tests/test_pipeline.py
+# BCI/config/CLI smoke path
+neuros run configs/examples/mock_bci.yaml --duration 0.1 --json
 
-# ORION contracts
-pytest -q tests/test_orion_contracts.py
+# Persistent recording/replay
+neuros record configs/examples/mock_bci.yaml \
+  --output /tmp/neuros-session \
+  --session-id smoke \
+  --duration 0.1
+neuros inspect /tmp/neuros-session --verify --json
+neuros replay /tmp/neuros-session \
+  --config configs/examples/mock_bci.yaml \
+  --json
+
+# Scientific/runtime quality gate
+python scripts/run_quality_gate.py \
+  configs/examples/mock_bci.yaml \
+  --thresholds configs/quality/ci.yaml
+
+# ORION tokenization benchmark
+python scripts/orion/run_tokenizer_benchmark.py \
+  configs/orion/tokenization_smoke.yaml \
+  --output /tmp/orion-tokenization
 ```
 
-GitHub Actions runs the corresponding kernel, BCI, and ORION jobs automatically.
+GitHub Actions runs the corresponding kernel, BCI, recording, scientific-quality, ORION, and repository-hygiene jobs automatically.
 
 ## Troubleshooting
 
@@ -162,10 +177,10 @@ Install the minimal BCI profile first and add only the relevant driver extra. Ha
 
 Ensure all workspace packages were installed into the same virtual environment. The `neuros` namespace is intentionally distributed across multiple installations.
 
-### `pip install neuros` does not match the repository
+### A published package does not match the repository
 
-The repository is ahead of a coordinated package release during this refactor. Use the editable workspace profile for development until published versions are explicitly tagged and validated.
+The repository may be ahead of a coordinated package release during active refactors. Use the workspace profile for development until published versions are explicitly tagged and validated.
 
 ### Need deterministic debugging without hardware
 
-Use `neuros.recording.ReplaySource` with recorded `SignalFrame` objects. Replay uses the same canonical frame contract as live sources.
+Use a canonical neurOS session archive and `ArchiveReplaySource`, or the `neuros replay` command. Replay uses the same `SignalFrame` and RuntimeGraph path as live sources.

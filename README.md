@@ -2,73 +2,81 @@
 
 **neurOS is a modular runtime and SDK for building reliable brain-computer interface systems.**
 
-The project is being organized around a deliberately small kernel: explicit neural data contracts, device-independent streaming, timing and synchronization, processing, decoder execution, recording/replay, observability, and extension points. Research packages can innovate quickly without owning the runtime architecture.
+The project is organized around a deliberately small kernel: explicit neural-data contracts, device-independent streaming, timing and synchronization, typed runtime graphs, processing, decoder execution, persistent recording/replay, observability, scientific quality gates, and extension points. Research packages can innovate quickly without owning the runtime architecture.
 
-ORION is the complementary neural-intelligence layer for tokenization, learned representations, adaptive decoding, personalization, and future neural foundation-model research.
+**ORION** is the complementary neural-intelligence layer for neural tokenization, learned representations, adaptive decoding, personalization, and future neural foundation-model research.
 
-> **Status:** active research and engineering platform. The core APIs are being stabilized; hardware validation and production qualification remain ongoing. The repository should not be interpreted as a medically validated or production-certified BCI system.
+> **Status:** active research and engineering platform. APIs are being stabilized and tested, but hardware qualification, clinical validation, and safety certification are separate workstreams. This repository is not a medically validated BCI system.
 
 ## Architecture
 
 ```text
-hardware / datasets
-       |
-       v
-neuros-drivers
-       |
-       v
-SignalFrame + StreamDescriptor        <- stable neural data contracts
-       |
-       v
-neurOS runtime
-  timing | processing | queues | monitoring | recording/replay
-       |
-       +--------------------------+
-       |                          |
-       v                          v
-neuros-models                    ORION
-conventional decoders       tokenization / representations /
-                            adaptive neural intelligence
-       |                          |
-       +------------+-------------+
-                    v
-               applications
+hardware / datasets / replay
+          |
+          v
+      Sources
+          |
+          v
+SignalFrame + StreamDescriptor       stable neural data ABI
+          |
+          v
+     RuntimeGraph
+ source -> transform -> fusion -> decoder -> sink
+          |                    |
+          |                    +-> DecoderOutput
+          |
+ timing / queues / monitoring / recording / quality
+          |
+          +-----------------------------+
+          |                             |
+          v                             v
+   neuros-models                       ORION
+ conventional decoders         neural tokens / representations /
+                               adaptive neural intelligence
 ```
 
-The important boundary is simple:
+The architectural boundary is intentional:
 
-- **neurOS** answers: _How should neural systems execute reliably?_
+- **neurOS** answers: _How should neural systems execute reliably and reproducibly?_
 - **ORION** answers: _How should neural systems represent, understand, and adapt to neural activity?_
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design.
 
-## Repository layout
+## Repository map
 
 ```text
 packages/
-  neuros-core/          kernel contracts, runtime, processing, timing, replay
-  neuros-drivers/       hardware and dataset sources
+  neuros-core/          kernel contracts, runtime, processing, timing, recording, quality
+  neuros-drivers/       hardware, simulated, and dataset sources
   neuros-models/        task-specific decoders and model adapters
-  neuros-foundation/    adapters for external neural foundation models
+  neuros-foundation/    adapters for external neural representation/foundation models
   neuros-ui/            dashboard/API/visualization surfaces
   neuros-cloud/         optional distributed/cloud integrations
   neuros/               user-facing SDK and CLI
-  orion/                ORION neural-intelligence contracts
+  orion/                ORION tokenization and neural-intelligence interfaces
   neuros-neurofm/       experimental neural foundation-model research
   neuros-mechint/       mechanistic-interpretability research toolkit
   neuros-sourceweigher/ focused service component
 
-examples/ and notebooks/  learning and research material
-docs/                    architecture, guides, and research plans
-scripts/                 development/bootstrap/benchmark utilities
-tests/                   repository-wide contract and integration tests
+configs/                versioned runtime, quality, and ORION experiment configs
+examples/               supported executable examples; CI is required for promotion here
+tutorials/              maintained learning material
+notebooks/              transitional BCI notebooks; not automatically a stable API surface
+experiments/            research code, notebooks, papers, and exploratory evaluations
+docs/                   current architecture and guides
+docs/archive/           historical plans, migration reports, and session notes
+scripts/                current bootstrap, benchmark, quality, and developer utilities
+scripts/archive/        historical migration utilities
+tests/                  repository-wide contract, integration, replay, and scientific tests
 ```
+
+Research may depend on stable runtime contracts. **Stable runtime contracts must not depend on research implementations.**
 
 ## Installation
 
-The repository is a multi-package workspace. **The old root `setup.py` installation path is intentionally gone.** Package metadata lives with each package under `packages/*/pyproject.toml`.
+This is a multi-package Python workspace. Package metadata lives under each package's `pyproject.toml`; the removed root `setup.py` is not a supported installation path.
 
-For the standard BCI development profile:
+For standard BCI development:
 
 ```bash
 git clone https://github.com/sidhulyalkar/neurOS-v1.git
@@ -79,15 +87,27 @@ python scripts/bootstrap.py --profile bci --test-tools
 Other profiles:
 
 ```bash
-python scripts/bootstrap.py --profile kernel     # runtime only
-python scripts/bootstrap.py --profile orion      # kernel + ORION contracts
-python scripts/bootstrap.py --profile research   # research stack
-python scripts/bootstrap.py --profile all        # full workspace
+python scripts/bootstrap.py --profile kernel
+python scripts/bootstrap.py --profile orion
+python scripts/bootstrap.py --profile research
+python scripts/bootstrap.py --profile all
 ```
 
-The root `pyproject.toml` also declares the workspace for tools that support Python monorepos.
+## Config-first workflow
 
-## First pipeline
+The primary execution surface is a versioned YAML configuration resolved through installed plugins.
+
+```bash
+neuros doctor --json
+neuros plugins --json
+neuros devices --json
+neuros validate configs/examples/mock_bci.yaml --json
+neuros run configs/examples/mock_bci.yaml --duration 2 --json
+```
+
+The checked-in mock configuration is deliberately training-free and uses a deterministic threshold decoder so installation/runtime smoke tests never hide model training in the CLI.
+
+Python APIs remain available:
 
 ```python
 import asyncio
@@ -109,21 +129,42 @@ metrics = asyncio.run(pipeline.run(duration=2.0))
 print(metrics)
 ```
 
-The runtime report includes throughput and latency as well as queue-drop/high-water telemetry so overload is visible rather than silently ignored.
+Standard `Pipeline` and `MultiModalPipeline` paths compile to the same native `RuntimeGraph` executor used by config execution.
 
-## Canonical neural data
+## Canonical neural data and real-time semantics
 
-Hardware-specific code can still expose legacy streaming tuples for compatibility, but the long-term interchange format is `SignalFrame`:
+`SignalFrame` is the neural interchange contract. A frame carries:
 
-```python
-from neuros.contracts import SignalFrame, StreamDescriptor
+- stream and sequence identity,
+- sample rate and array payload,
+- device, host-receive, and synchronized nanosecond clocks,
+- clock domain and synchronization uncertainty,
+- composable quality flags,
+- immutable metadata/provenance.
+
+Runtime edges have explicit capacity and overflow policy (`block`, `drop_oldest`, `drop_newest`, or `fail`). Runtime snapshots report accepted/dropped counts, queue high-water marks, node failures, and bounded latency summaries including p50/p95/p99.
+
+## Persistent recording and replay
+
+neurOS can persist exact `SignalFrame` semantics in a canonical session archive and replay those recordings through the same runtime graph without constructing the original hardware SDK.
+
+```bash
+neuros record configs/examples/mock_bci.yaml \
+  --output /tmp/session \
+  --session-id demo \
+  --duration 10
+
+neuros inspect /tmp/session --verify --json
+neuros replay /tmp/session \
+  --config configs/examples/mock_bci.yaml \
+  --json
 ```
 
-A frame carries stream identity, sequence number, sampling rate, explicit device/host/synchronized clocks, quality flags, metadata, and the neural array itself. This is the contract that recording, synchronization, ORION, and future runtime operators build on.
+The canonical archive records sequence/timing/quality metadata, stream descriptors, config hash, Git SHA, package versions, runtime metrics, and per-frame SHA-256 integrity. NWB and Zarr are optional interoperability exports rather than replacements for neurOS' lossless replay semantics.
 
-## Configuration and plugins
+## Plugins
 
-neurOS now has a versioned configuration schema and a real plugin registry. External packages can expose entry points in categories such as:
+External packages can register implementations through Python entry points:
 
 ```text
 neuros.sources
@@ -135,14 +176,14 @@ neuros.sinks
 neuros.monitors
 ```
 
-Configuration is represented by `neuros.config.PipelineConfig`, with explicit stream IDs and runtime backpressure policy.
+This keeps the kernel independent of concrete hardware, decoder, storage, and ORION implementations.
 
-## ORION
+## ORION tokenization
 
-ORION begins at the neural representation boundary:
+ORION begins at the representation boundary:
 
 ```text
-SignalFrame
+explicit spike SignalFrames
    -> NeuroTokenizer
    -> NeuroTokenBatch
    -> NeuralEncoder
@@ -150,46 +191,47 @@ SignalFrame
    -> AdaptiveDecoder
 ```
 
-Existing NeuroFM and neurotokenization experiments should migrate behind these interfaces only when their scientific value is demonstrated. The ORION package is intentionally a stable contract surface, not a claim that a universal neural foundation model is already solved.
-
-## Timing and replay
-
-The kernel includes:
-
-- bounded device-to-host clock-drift estimation,
-- explicit synchronization uncertainty,
-- canonical synchronized timestamps,
-- deterministic `SignalFrame` recording/replay primitives.
-
-These capabilities are intended to make multimodal experiments reproducible and to support hardware-independent regression testing.
-
-## Quality gates
-
-GitHub Actions validates three layers:
-
-1. kernel contracts across Python 3.10-3.12,
-2. an end-to-end mock BCI pipeline,
-3. ORION representation contracts.
-
-Run locally with:
+The initial tokenization layer includes exact-event, binned-count, relative-ISI, burst/pause/rebound, synchrony-packet, vector-quantized motif, and assembly tokenizers. A controlled benchmark compares them using separately seeded train/test synthetic sessions with labeled motifs, jitter and unit-dropout perturbations, compression, entropy, motif decoding, robustness, and runtime metrics.
 
 ```bash
-pytest tests/
+python scripts/orion/run_tokenizer_benchmark.py \
+  configs/orion/tokenization_smoke.yaml \
+  --output /tmp/orion-tokenization
 ```
 
-Research packages maintain additional package-specific test suites.
+The benchmark emits `metrics.json`, `comparison_table.csv`, and `tokenizer_cards.md`. Existing NeuroFM research is promoted behind ORION interfaces only when comparative evidence justifies it.
 
-## Research packages
+## Quality and evidence
 
-The repository contains broad experimental work, including NeuroFM, mechanistic interpretability, DINO-based neuroscience experiments, and neurotokenization plans. These are valuable research surfaces but are not automatically part of the neurOS kernel API.
+GitHub Actions separates several evidence layers:
 
-The architectural rule going forward is:
+1. kernel contracts on Python 3.10, 3.11, and 3.12,
+2. installed BCI/config/CLI/runtime smoke execution,
+3. exact recording/replay plus NWB/Zarr interoperability,
+4. deterministic scientific and latency quality gates,
+5. ORION contracts and the controlled tokenizer benchmark,
+6. repository hygiene.
 
-> Research may depend on stable runtime contracts. Stable runtime contracts should not depend on research implementations.
+Generic CI quality thresholds are intentionally distinct from hardware-specific qualification. Device/model/application latency and reliability claims require a recorded qualification profile with the relevant hardware, firmware, data, and artifact metadata.
 
-## Contributing
+Run the generic evidence gate with:
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). New foundational functionality should prefer stable contracts and plugin interfaces over new cross-package imports.
+```bash
+python scripts/run_quality_gate.py \
+  configs/examples/mock_bci.yaml \
+  --thresholds configs/quality/ci.yaml
+```
+
+## Research and historical material
+
+Broad research remains in the monorepo, including NeuroFM, mechanistic interpretability, DINO-based neuroscience experiments, and ORION representation work. Research artifacts live under `experiments/` or research packages and are not automatically stable APIs.
+
+Historical cleanup reports, migration plans, implementation notes, and session summaries live under [`docs/archive/`](docs/archive/). They are retained for provenance but are **not** current documentation.
+
+## Roadmap and contributing
+
+- [`ROADMAP.md`](ROADMAP.md) tracks the current architectural sequence and post-refactor gates.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) defines package boundaries, test expectations, plugin rules, and research-promotion requirements.
 
 ## License
 
