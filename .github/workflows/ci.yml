@@ -118,7 +118,7 @@ jobs:
         run: pytest -q tests/test_recording_exports.py tests/test_session_archive.py
 
   orion-contracts:
-    name: ORION contracts
+    name: ORION contracts and tokenization
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,5 +130,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python scripts/bootstrap.py --profile orion --test-tools
-      - name: Run ORION contract tests
-        run: pytest -q tests/test_orion_contracts.py tests/test_kernel_contracts.py
+      - name: Run ORION contract and tokenization tests
+        run: |
+          pytest -q \
+            tests/test_orion_contracts.py \
+            tests/test_orion_tokenization.py \
+            tests/test_kernel_contracts.py
+      - name: Run controlled tokenizer benchmark
+        run: |
+          OUT="${RUNNER_TEMP}/orion-tokenization"
+          python scripts/orion/run_tokenizer_benchmark.py \
+            configs/orion/tokenization_smoke.yaml \
+            --output "${OUT}"
+          test -s "${OUT}/metrics.json"
+          test -s "${OUT}/comparison_table.csv"
+          test -s "${OUT}/tokenizer_cards.md"
