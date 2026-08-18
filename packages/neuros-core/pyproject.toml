@@ -30,6 +30,9 @@ dependencies = [
 
 [project.optional-dependencies]
 evaluation = ["scikit-learn>=1.2"]
+zarr = ["zarr>=2.16,<3"]
+nwb = ["pynwb>=2.5"]
+recording = ["zarr>=2.16,<3", "pynwb>=2.5"]
 test = ["pytest>=7.4", "pytest-asyncio>=0.21", "scikit-learn>=1.2"]
 dev = [
     "neuros-core[evaluation,test]",

@@ -37,6 +37,7 @@ bci = [
     "neuros-models[pytorch]>=2.0.0",
     "neuros-ui[dashboard]>=2.0.0",
 ]
+recording = ["neuros-core[recording]>=2.0.0"]
 research = [
     "neuros-models[all]>=2.0.0",
     "neuros-foundation[all]>=2.0.0",
