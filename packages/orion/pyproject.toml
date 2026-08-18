@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-orion"
+version = "0.1.0"
+description = "ORION neural intelligence contracts and adaptive representation interfaces"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "neurOS Development Team"}]
+keywords = ["bci", "neuroscience", "foundation-models", "neural-representations", "tokenization"]
+dependencies = ["neuros-core>=2.0.0", "numpy>=1.24.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4"]
+
+[project.urls]
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]

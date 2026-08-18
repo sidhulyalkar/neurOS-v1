@@ -1,14 +1,22 @@
-"""
-Plugins package
-===============
+"""neurOS extension registry.
 
-This subpackage contains optional components that extend the core neurOS
-framework.  Each plugin resides in its own module or package under
-``neuros/plugins`` and exposes a well-defined API.  To register a plugin,
-import it via ``neuros.load_plugin`` and instantiate it as needed.
-
-The ``cv`` subpackage provides computer‑vision‑oriented modules including the
-DINOv3 backbone and segmentation heads used in the accompanying experiments.
+Third-party packages can advertise entry points under ``neuros.sources``,
+``neuros.transforms``, ``neuros.tokenizers``, ``neuros.encoders``,
+``neuros.decoders``, ``neuros.sinks`` and ``neuros.monitors``.
 """
 
-__all__ = ["cv"]
+from .registry import (
+    PluginDescriptor,
+    PluginKind,
+    PluginRegistry,
+    load_plugin,
+    registry,
+)
+
+__all__ = [
+    "PluginDescriptor",
+    "PluginKind",
+    "PluginRegistry",
+    "load_plugin",
+    "registry",
+]

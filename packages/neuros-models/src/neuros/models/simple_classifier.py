@@ -1,14 +1,6 @@
-"""
-A simple logistic regression classifier for demonstration purposes.
-
-This model uses scikit‑learn's :class:`LogisticRegression` to classify
-feature vectors.  It serves as a baseline that can be replaced by more
-sophisticated models like EEGNet or transformers.
-"""
+"""A simple logistic regression classifier for demonstration purposes."""
 
 from __future__ import annotations
-
-from typing import Optional
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -21,7 +13,6 @@ class SimpleClassifier(BaseModel):
 
     def __init__(self, **kwargs) -> None:
         super().__init__()
-        # allow hyperparameters to be passed through kwargs
         self._model = LogisticRegression(**kwargs)
 
     def train(self, X: np.ndarray, y: np.ndarray) -> None:
@@ -30,5 +21,10 @@ class SimpleClassifier(BaseModel):
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         if not self.is_trained:
-            raise RuntimeError("Model has not been trained.  Call train() first.")
+            raise RuntimeError("Model has not been trained. Call train() first.")
         return self._model.predict(X)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        if not self.is_trained:
+            raise RuntimeError("Model has not been trained. Call train() first.")
+        return self._model.predict_proba(X)

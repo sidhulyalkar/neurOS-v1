@@ -1,17 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros-models"
 version = "2.0.0"
-description = "Deep learning models for neurOS - EEGNet, Transformers, LSTM, and more"
+description = "Task-specific decoders and model adapters for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [
-    {name = "neurOS Development Team"}
-]
+authors = [{name = "neurOS Development Team"}]
 keywords = ["neuroscience", "deep-learning", "eegnet", "transformer", "neural-decoding"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -21,9 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-
 dependencies = [
     "neuros-core>=2.0.0",
     "numpy>=1.24.0",
@@ -31,22 +27,24 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pytorch = [
-    "torch>=2.1.0",
-]
-sklearn = [
-    "scikit-learn>=1.2",
-]
-all = [
-    "torch>=2.1.0",
-    "scikit-learn>=1.2",
-]
+pytorch = ["torch>=2.1.0"]
+all = ["torch>=2.1.0"]
+test = ["pytest>=7.4"]
+
+[project.entry-points."neuros.decoders"]
+simple = "neuros.models.simple_classifier:SimpleClassifier"
+random_forest = "neuros.models.random_forest_model:RandomForestModel"
+svm = "neuros.models.svm_model:SVMModel"
+knn = "neuros.models.knn_model:KNNModel"
+gbdt = "neuros.models.gbdt_model:GBDTModel"
+eegnet = "neuros.models.eegnet_model:EEGNetModel"
+cnn = "neuros.models.cnn_model:CNNModel"
+transformer = "neuros.models.transformer_model:TransformerModel"
 
 [project.urls]
-Homepage = "https://github.com/<your-user>/neuros2"
-Documentation = "https://neuros.readthedocs.io"
-Repository = "https://github.com/<your-user>/neuros2"
-Issues = "https://github.com/<your-user>/neuros2/issues"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

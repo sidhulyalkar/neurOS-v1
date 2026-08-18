@@ -1,0 +1,83 @@
+name: neurOS CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "agent/**"
+
+permissions:
+  contents: read
+
+jobs:
+  kernel-contracts:
+    name: Kernel contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install kernel test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+      - name: Run kernel contract tests
+        run: |
+          pytest -q \
+            tests/test_kernel_contracts.py \
+            tests/test_runtime_queues.py \
+            tests/test_plugin_registry.py \
+            tests/test_config_schema.py \
+            tests/test_clock_sync.py \
+            tests/test_replay.py
+
+  bci-smoke:
+    name: BCI end-to-end smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install BCI workspace profile
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile bci --test-tools
+      - name: Resolve example configuration
+        run: python scripts/validate_config.py configs/examples/mock_bci.yaml
+      - name: Run pipeline and plugin smoke tests
+        run: |
+          pytest -q \
+            tests/test_pipeline.py \
+            tests/test_builtin_plugins.py \
+            tests/test_config_resolution.py \
+            tests/test_kernel_contracts.py \
+            tests/test_runtime_queues.py \
+            tests/test_plugin_registry.py \
+            tests/test_config_schema.py \
+            tests/test_clock_sync.py \
+            tests/test_replay.py
+
+  orion-contracts:
+    name: ORION contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ORION workspace profile
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile orion --test-tools
+      - name: Run ORION contract tests
+        run: pytest -q tests/test_orion_contracts.py tests/test_kernel_contracts.py

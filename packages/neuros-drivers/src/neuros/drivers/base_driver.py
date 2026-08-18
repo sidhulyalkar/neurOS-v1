@@ -1,50 +1,69 @@
-"""
-Base classes and interfaces for neurOS drivers.
+"""Base classes and interfaces for neurOS drivers.
 
-A driver abstracts away details of a physical or simulated device and provides
-an asynchronous generator that yields neural samples.  Concrete drivers
-inherit from :class:`BaseDriver` and implement the `_stream()` coroutine.
+Legacy tuple streaming remains supported, while ``frames()`` exposes the new
+canonical ``SignalFrame`` contract with explicit timing metadata.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Optional
 
 import numpy as np
 
+from neuros.contracts import ClockDomain, SignalFrame, StreamDescriptor
+from neuros.runtime import OverflowPolicy, QueueStats, put_with_policy
+
 
 class BaseDriver(ABC):
-    """Abstract base class for all drivers.
+    """Abstract base class for physical and simulated data sources."""
 
-    A driver must implement the :meth:`_stream` method, which yields
-    timestamped samples at the device's sampling rate.  Each yielded item is
-    a tuple ``(timestamp, data)`` where ``timestamp`` is a float (seconds
-    since epoch) and ``data`` is a 1‑D or 2‑D NumPy array representing
-    channels × samples.
-
-    Drivers can be started and stopped using the :meth:`start` and
-    :meth:`stop` methods, which manage internal tasks and resources.
-    """
-
-    def __init__(self, sampling_rate: float = 250.0, channels: int = 8) -> None:
+    def __init__(
+        self,
+        sampling_rate: float = 250.0,
+        channels: int = 8,
+        *,
+        stream_id: str | None = None,
+        modality: str = "unknown",
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
+    ) -> None:
+        if sampling_rate <= 0:
+            raise ValueError("sampling_rate must be positive")
+        if channels <= 0:
+            raise ValueError("channels must be positive")
         self.sampling_rate = sampling_rate
         self.channels = channels
+        self.stream_id = stream_id or self.__class__.__name__.lower()
+        self.modality = modality
+        self.overflow_policy = overflow_policy
         self._task: Optional[asyncio.Task] = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        self._running: bool = False
+        self._queue_stats = QueueStats()
+        self._running = False
+
+    @property
+    def descriptor(self) -> StreamDescriptor:
+        return StreamDescriptor(
+            stream_id=self.stream_id,
+            modality=self.modality,
+            sample_rate_hz=self.sampling_rate,
+            channel_names=tuple(f"ch{i}" for i in range(self.channels)),
+            clock_domain=ClockDomain.UNKNOWN,
+            device=self.__class__.__name__,
+        )
+
+    @property
+    def queue_stats(self) -> QueueStats:
+        return self._queue_stats
 
     async def start(self) -> None:
-        """Start streaming from the device."""
         if self._running:
             return
         self._running = True
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Stop streaming from the device and clean up resources."""
         self._running = False
         if self._task is not None:
             self._task.cancel()
@@ -52,40 +71,53 @@ class BaseDriver(ABC):
                 await self._task
             except asyncio.CancelledError:
                 pass
-        # flush any remaining items
+            self._task = None
         while not self._queue.empty():
             try:
                 self._queue.get_nowait()
+                self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
 
     async def _run(self) -> None:
-        """Internal loop to call the driver's `_stream` coroutine."""
         async for item in self._stream():
-            # backpressure: drop samples if queue is full
             try:
-                await self._queue.put(item)
+                await put_with_policy(
+                    self._queue,
+                    item,
+                    policy=self.overflow_policy,
+                    stats=self._queue_stats,
+                )
             except asyncio.CancelledError:
                 break
             if not self._running:
                 break
 
     async def __aiter__(self) -> AsyncIterator[tuple[float, np.ndarray]]:
-        """Return an asynchronous iterator over timestamped samples."""
+        """Legacy iterator yielding ``(timestamp_seconds, data)`` tuples."""
         while self._running:
             try:
                 item = await self._queue.get()
+                self._queue.task_done()
                 yield item
             except asyncio.CancelledError:
                 break
 
+    async def frames(self) -> AsyncIterator[SignalFrame]:
+        """Yield canonical :class:`SignalFrame` objects."""
+        sequence_id = 0
+        async for timestamp, data in self:
+            yield SignalFrame.from_legacy(
+                stream_id=self.stream_id,
+                sequence_id=sequence_id,
+                timestamp_seconds=float(timestamp),
+                data=np.asarray(data),
+                sample_rate_hz=self.sampling_rate,
+                clock_domain=ClockDomain.UNKNOWN,
+                metadata={"driver": self.__class__.__name__},
+            )
+            sequence_id += 1
+
     @abstractmethod
     async def _stream(self) -> AsyncIterator[tuple[float, np.ndarray]]:
-        """Concrete drivers override this coroutine to produce data.
-
-        This coroutine should yield timestamped data indefinitely while the
-        driver is running.  Yields must be produced at intervals consistent
-        with the sampling rate.  The base class handles queuing and iteration.
-        """
-
         raise NotImplementedError
