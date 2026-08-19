@@ -1,0 +1,174 @@
+name: neuros-mechint research evidence
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-mechint/**"
+      - "tutorials/mechint/**"
+      - "experiments/mechint/**"
+      - ".github/workflows/neuros-mechint-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-mechint/**"
+      - "tutorials/mechint/**"
+      - "experiments/mechint/**"
+      - ".github/workflows/neuros-mechint-ci.yml"
+
+concurrency:
+  group: neuros-mechint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stable-core:
+    name: Stable core (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install workspace kernel and mech-int
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile kernel --test-tools
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e "packages/neuros-mechint[dev]"
+      - name: Import and compile contracts
+        run: |
+          python - <<'PY'
+          import neuros_mechint
+          assert neuros_mechint.__version__ == "1.0.0"
+          assert neuros_mechint.CURRENT_MANIFEST_SCHEMA == "3"
+          print(neuros_mechint.__version__)
+          PY
+          python -m compileall -q packages/neuros-mechint/src/neuros_mechint
+      - name: Run maintained package tests
+        run: |
+          cd packages/neuros-mechint
+          pytest
+      - name: Run scientific CLI gates
+        run: |
+          neuros-mechint ground-truth --json > /tmp/mechint-ground-truth.json
+          neuros-mechint shared-computation-ground-truth --json > /tmp/mechint-shared.json
+          neuros-mechint mechanism-emergence-ground-truth --json > /tmp/mechint-emergence.json
+          neuros-mechint circuit-faithfulness-ground-truth --json > /tmp/mechint-faithfulness.json
+          neuros-mechint evidence-pack-generalization-ground-truth --json > /tmp/mechint-held-out.json
+          neuros-mechint factorial-ground-truth --json > /tmp/mechint-factorial.json
+          neuros-mechint correspondence-ground-truth --json > /tmp/mechint-correspondence.json
+          neuros-mechint replication-ground-truth --json > /tmp/mechint-replication.json
+          neuros-mechint v1-ground-truth --json > /tmp/mechint-v1.json
+          neuros-mechint schemas --json > /tmp/mechint-schemas.json
+          neuros-mechint release-status --json > /tmp/mechint-release-status.json
+          neuros-mechint evidence-recipes --json > /tmp/mechint-evidence-recipes.json
+      - name: Run focused lint
+        run: |
+          ruff check \
+            packages/neuros-mechint/src/neuros_mechint/core \
+            packages/neuros-mechint/src/neuros_mechint/adapters \
+            packages/neuros-mechint/src/neuros_mechint/benchmarks \
+            packages/neuros-mechint/src/neuros_mechint/integrations \
+            packages/neuros-mechint/src/neuros_mechint/release.py \
+            packages/neuros-mechint/src/neuros_mechint/circuits/__init__.py \
+            packages/neuros-mechint/src/neuros_mechint/circuits/acdc.py \
+            packages/neuros-mechint/src/neuros_mechint/circuits/path_patching.py \
+            packages/neuros-mechint/src/neuros_mechint/cli.py
+
+  tutorial-evidence:
+    name: Executed CPU evidence tutorials
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU tutorial environment
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile kernel --test-tools
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e "packages/neuros-mechint[dev,tutorial-ci]"
+          python -m ipykernel install --user --name python3
+      - name: Execute maintained CPU tutorials
+        run: python packages/neuros-mechint/scripts/execute_cpu_tutorials.py
+
+  orion-integration:
+    name: ORION + NeuroFM mechanism laboratory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ORION and mech-int
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile orion --test-tools
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e "packages/neuros-mechint[dev,orion]"
+      - name: Run ORION and NeuroFM integration tests
+        run: |
+          pytest -q \
+            packages/neuros-mechint/tests/test_mechint_orion_integration.py \
+            packages/neuros-mechint/tests/test_mechint_orion_shared_computation.py \
+            packages/neuros-mechint/tests/test_mechint_orion_tokenizer_study.py \
+            packages/neuros-mechint/tests/test_mechint_neurofm_lab.py \
+            packages/neuros-mechint/tests/test_mechint_evidence_pack.py \
+            packages/neuros-mechint/tests/test_mechint_factorial.py \
+            packages/neuros-mechint/tests/test_mechint_factorial_integration.py \
+            packages/neuros-mechint/tests/test_mechint_correspondence.py \
+            packages/neuros-mechint/tests/test_mechint_correspondence_integration.py \
+            packages/neuros-mechint/tests/test_mechint_replication.py \
+            packages/neuros-mechint/tests/test_mechint_v1_contracts.py
+          neuros-mechint v1-ground-truth --json > /tmp/mechint-v1.json
+          neuros-mechint methods --json > /tmp/mechint-methods.json
+          neuros-mechint evidence --json > /tmp/mechint-evidence.json
+          neuros-mechint release-status --json > /tmp/mechint-release-status.json
+      - name: Repository hygiene
+        run: python scripts/check_repo_hygiene.py
+
+  ecosystem-imports:
+    name: Ecosystem import (${{ matrix.extra }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - extra: transformer-lens
+            import_name: transformer_lens
+          - extra: nnsight
+            import_name: nnsight
+          - extra: sae-lens
+            import_name: sae_lens
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ecosystem extra
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile kernel --test-tools
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e "packages/neuros-mechint[${{ matrix.extra }}]"
+      - name: Import external package and neuros adapter
+        env:
+          IMPORT_NAME: ${{ matrix.import_name }}
+        run: |
+          python - <<'PY'
+          import importlib
+          import os
+          import neuros_mechint
+
+          module = importlib.import_module(os.environ["IMPORT_NAME"])
+          print(os.environ["IMPORT_NAME"], getattr(module, "__version__", "unknown"))
+          assert neuros_mechint.__version__ == "1.0.0"
+          PY

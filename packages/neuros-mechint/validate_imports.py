@@ -1,184 +1,74 @@
-"""
-Import Validation Script
+"""Lightweight import validation for the maintained neuros-mechint surface.
 
-Tests that all new modules can be imported successfully.
-Run this to verify the package expansion is working.
-
-Usage:
-    python validate_imports.py
+This script is retained for developer convenience. The authoritative maintained
+contract is exercised by `pytest` and `.github/workflows/neuros-mechint-ci.yml`.
+Historical exploratory modules may require optional dependencies and are not
+implicitly promoted by this validator.
 """
 
+from __future__ import annotations
+
+import importlib
 import sys
-from pathlib import Path
-
-# Add src to path
-src_path = Path(__file__).parent / 'src'
-sys.path.insert(0, str(src_path))
-
-def test_biophysical_imports():
-    """Test biophysical module imports."""
-    print("Testing biophysical imports...")
-    try:
-        from neuros_mechint.biophysical import (
-            # Ion channels
-            SodiumChannel, PotassiumChannel, CalciumChannel,
-            AMPAReceptor, NMDAReceptor, GABAAReceptor,
-            # Compartments
-            Compartment, MultiCompartmentNeuron, PrefabNeurons,
-            # Neuron models
-            AdExNeuron, QuadraticIFNeuron, ResonateAndFireNeuron,
-            # Plasticity
-            STDP, ShortTermPlasticity, HomeostaticPlasticity,
-            # Metabolism
-            ATPDynamics, MetabolicConstraint, EnergyEfficiencyAnalyzer
-        )
-        print("[OK] Biophysical imports successful")
-        return True
-    except Exception as e:
-        print(f"[FAIL] Biophysical import failed: {e}")
-        return False
+from dataclasses import dataclass
 
 
-def test_intervention_imports():
-    """Test intervention module imports."""
-    print("\nTesting intervention imports...")
-    try:
-        from neuros_mechint.interventions import (
-            # Optogenetics
-            ChR2, NpHR, ArchT, OptoStimulator,
-            # Pharmacology
-            Drug, Drugs, PharmacologyExperiment,
-            # Stimulation
-            TMS, DBS, TDCS, StimulationExperiment
-        )
-        print("✓ Intervention imports successful")
-        return True
-    except Exception as e:
-        print(f"✗ Intervention import failed: {e}")
-        return False
+@dataclass(frozen=True)
+class ImportCheck:
+    module: str
+    required: bool = True
 
 
-def test_alignment_imports():
-    """Test alignment module imports."""
-    print("\nTesting alignment imports...")
-    try:
-        from neuros_mechint.alignment import (
-            # Basic
-            CCA, RSA, PLS,
-            # Cross-species
-            ProcrustesAlignment, HomologyMapping, PhylogeneticDistance,
-            # Temporal
-            DynamicTimeWarping, InterSubjectSynchronization, TimeResolvedCCA
-        )
-        print("✓ Alignment imports successful")
-        return True
-    except Exception as e:
-        print(f"✗ Alignment import failed: {e}")
-        return False
+CHECKS = (
+    ImportCheck("neuros_mechint"),
+    ImportCheck("neuros_mechint.core"),
+    ImportCheck("neuros_mechint.adapters"),
+    ImportCheck("neuros_mechint.benchmarks"),
+    ImportCheck("neuros_mechint.benchmarks.evidence_pack"),
+    ImportCheck("neuros_mechint.benchmarks.factorial"),
+    ImportCheck("neuros_mechint.benchmarks.correspondence"),
+    ImportCheck("neuros_mechint.benchmarks.replication"),
+    ImportCheck("neuros_mechint.benchmarks.dose_response"),
+    ImportCheck("neuros_mechint.integrations.factorial_study"),
+    ImportCheck("neuros_mechint.integrations.correspondence"),
+    ImportCheck("neuros_mechint.circuits"),
+)
 
 
-def test_fractal_imports():
-    """Test fractal module imports."""
-    print("\nTesting fractal imports...")
-    try:
-        from neuros_mechint.fractals import (
-            # Basic metrics
-            HiguchiFractalDimension, HurstExponent,
-            # Criticality
-            NeuronalAvalanche, BranchingProcess, CriticalityDetector,
-            # Wavelet
-            WaveletMultifractal, MultifractalDetrendedFluctuationAnalysis
-        )
-        print("✓ Fractal imports successful")
-        return True
-    except Exception as e:
-        print(f"✗ Fractal import failed: {e}")
-        return False
-
-
-def test_syntax_all_files():
-    """Test syntax of all Python files."""
-    print("\nChecking syntax of all files...")
-    import py_compile
-
-    files_to_check = [
-        'src/neuros_mechint/biophysical/ion_channels.py',
-        'src/neuros_mechint/biophysical/compartmental.py',
-        'src/neuros_mechint/biophysical/neuron_models.py',
-        'src/neuros_mechint/biophysical/synaptic_models.py',
-        'src/neuros_mechint/biophysical/metabolic.py',
-        'src/neuros_mechint/interventions/optogenetics.py',
-        'src/neuros_mechint/interventions/pharmacology.py',
-        'src/neuros_mechint/interventions/stimulation.py',
-        'src/neuros_mechint/alignment/cross_species.py',
-        'src/neuros_mechint/alignment/temporal.py',
-        'src/neuros_mechint/fractals/criticality.py',
-        'src/neuros_mechint/fractals/wavelet_multifractal.py',
-    ]
-
-    all_valid = True
-    for file_path in files_to_check:
-        full_path = Path(__file__).parent / file_path
+def main() -> int:
+    failures = []
+    for check in CHECKS:
         try:
-            py_compile.compile(str(full_path), doraise=True)
-            print(f"  [OK] {file_path}")
-        except py_compile.PyCompileError as e:
-            print(f"  [FAIL] {file_path}: {e}")
-            all_valid = False
+            importlib.import_module(check.module)
+        except Exception as exc:  # pragma: no cover - developer diagnostic
+            label = "required" if check.required else "optional"
+            print(f"FAIL [{label}] {check.module}: {exc}")
+            if check.required:
+                failures.append(check.module)
+        else:
+            print(f"PASS {check.module}")
 
-    return all_valid
-
-
-def main():
-    """Run all validation tests."""
-    print("=" * 60)
-    print("NeuroS-MechInt Package Validation")
-    print("=" * 60)
-
-    results = []
-
-    # Syntax check first
-    results.append(("Syntax validation", test_syntax_all_files()))
-
-    # Then import tests (skip if no dependencies installed)
     try:
-        import torch
-        import numpy
-        results.append(("Biophysical module", test_biophysical_imports()))
-        results.append(("Intervention module", test_intervention_imports()))
-        results.append(("Alignment module", test_alignment_imports()))
-        results.append(("Fractal module", test_fractal_imports()))
-    except ImportError as e:
-        print(f"\n⚠ Skipping import tests - missing dependency: {e}")
-        print("Install dependencies with: pip install torch numpy scipy pywt fastdtw")
+        import neuros_mechint
 
-    # Summary
-    print("\n" + "=" * 60)
-    print("VALIDATION SUMMARY")
-    print("=" * 60)
+        if neuros_mechint.__version__ != "0.9.0":
+            print(
+                "FAIL version: expected 0.9.0, "
+                f"observed {neuros_mechint.__version__}"
+            )
+            failures.append("version")
+        else:
+            print("PASS version 0.9.0")
+    except Exception as exc:  # pragma: no cover - diagnostic after import failure
+        print(f"FAIL version check: {exc}")
+        failures.append("version")
 
-    for test_name, passed in results:
-        status = "[PASS]" if passed else "[FAIL]"
-        print(f"{test_name:.<40} {status}")
+    if failures:
+        print("\nMaintained import validation failed:", ", ".join(failures))
+        return 1
 
-    all_passed = all(result[1] for result in results)
-
-    print("=" * 60)
-    if all_passed:
-        print("🎉 ALL TESTS PASSED!")
-        print("\nThe package expansion is complete and functional.")
-        print("\nNext steps:")
-        print("  1. Review EXPANSION_SUMMARY.md")
-        print("  2. Create notebooks for new features")
-        print("  3. Expand visualization module")
-        print("  4. Build integration tests")
-    else:
-        print("⚠ SOME TESTS FAILED")
-        print("\nPlease fix the errors above before proceeding.")
-
-    print("=" * 60)
-
-    return 0 if all_passed else 1
+    print("\nMaintained v0.9 import surface is available.")
+    return 0
 
 
 if __name__ == "__main__":

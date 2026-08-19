@@ -1,227 +1,346 @@
 # Contributing to neuros-mechint
 
-Thank you for your interest in contributing to neuros-mechint! This document provides guidelines for contributing to the project.
+`neuros-mechint` treats mechanistic interpretability as experimental science. Contributions are evaluated not only for code quality, but also for whether the implementation makes a clear, falsifiable scientific object.
 
-## Code of Conduct
+## Before adding a method
 
-Be respectful, inclusive, and professional in all interactions.
+State:
 
-## How to Contribute
+1. **What object does this method estimate?**
+2. **What intervention or measurement supports that estimate?**
+3. **What result would falsify the claim?**
+4. **What matched control is required?**
+5. **What is the independent scientific unit of the claim?**
+6. **What evidence tier does the current implementation actually reach?**
+7. **What method maturity should it receive?**
 
-### Reporting Bugs
+Do not attach a canonical method name to an approximation unless the approximation is explicitly qualified.
 
-1. Check if the bug has already been reported in [Issues](https://github.com/neuros-ai/neuros-mechint/issues)
-2. If not, create a new issue with:
-   - Clear title and description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Code snippet if applicable
-   - Environment details (OS, Python version, package versions)
+## Maturity is not evidence strength
 
-### Suggesting Features
+Method maturity describes the maintained implementation/claim surface:
 
-1. Check [Issues](https://github.com/neuros-ai/neuros-mechint/issues) for existing requests
-2. Create a new issue with:
-   - Clear use case and motivation
-   - Proposed API or interface
-   - Examples of how it would be used
-   - Any relevant research papers or references
+- Stable
+- Integrated
+- Research
+- Experimental
+- Deprecated
 
-### Pull Requests
+Evidence strength describes a particular run. A Stable API used on one toy example remains low evidence; real data does not automatically make an Experimental algorithm Stable.
 
-1. **Fork the repository** and create a branch from `main`
-2. **Make your changes** following our coding standards
-3. **Add tests** for new functionality
-4. **Update documentation** including docstrings and README if needed
-5. **Run tests** to ensure everything passes
-6. **Submit a pull request** with a clear description
-
-## Development Setup
+Use:
 
 ```bash
-# Clone your fork
-git clone https://github.com/YOUR_USERNAME/neuros-mechint
-cd neuros-mechint
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in development mode
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run type checking
-mypy src/neuros_mechint
-
-# Format code
-black src/neuros_mechint
-isort src/neuros_mechint
+neuros-mechint evidence
+neuros-mechint methods
 ```
 
-## Coding Standards
+## Required scientific habits
 
-### Style Guide
+### Candidate discovery and evidence must be separated
 
-- **PEP 8**: Follow Python's official style guide
-- **Line length**: Maximum 100 characters
-- **Formatting**: Use `black` and `isort`
-- **Type hints**: Required for all functions
-- **Docstrings**: Google-style docstrings for all public APIs
+If an algorithm searches for a mechanism or correspondence using examples, those examples belong to discovery.
 
-### Example
+A stronger claim freezes the candidate, mapping, projector choice, and learned perturbation donors before testing on held-out examples unavailable to discovery.
 
-```python
-from typing import Optional
-import torch
-from torch import Tensor
+Do not tune intervention donors, thresholds, mapping regularization, candidate size, feature sets, dose grids, or projector choices on the validation set.
 
+### Negative results are first-class
 
-def compute_metric(
-    signal: Tensor,
-    k_max: int = 10,
-    device: Optional[str] = None,
-) -> Tensor:
-    """
-    Compute some metric from a signal.
+Keep:
 
-    Args:
-        signal: Input signal tensor of shape (batch, time)
-        k_max: Maximum window size
-        device: Torch device ('cuda' or 'cpu')
+- held-out failures;
+- invalid perturbation normalizations;
+- failed random-control thresholds;
+- non-estimable comparative contrasts;
+- missing factorial cells;
+- high-similarity but causally rejected correspondence candidates;
+- failed shuffled-pair correspondence controls;
+- non-estimable replication analyses;
+- estimable but sign-inconsistent replication results;
+- confidence intervals crossing the preregistered null;
+- non-monotonic dose responses.
 
-    Returns:
-        Computed metric tensor of shape (batch,)
+A scientific API should be able to say:
 
-    Example:
-        >>> signal = torch.randn(32, 1000)
-        >>> metric = compute_metric(signal, k_max=10)
-        >>> print(f"Metric: {metric.mean():.3f}")
-    """
-    if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    signal = signal.to(device)
-    # Implementation...
-    return result
+```text
+no evidence
+not estimable
+similar but not causal
+causal within one unit but not replicated
 ```
 
-### Documentation Requirements
+### Match the control to the claim
 
-All public classes and functions must have:
+Examples:
 
-1. **One-line summary**
-2. **Detailed description** (if needed)
-3. **Args** section with types and descriptions
-4. **Returns** section with type and description
-5. **Example** section with working code
+- localization → known nuisance components;
+- circuit faithfulness → same-cardinality random circuits;
+- causal discovery → simple same-size baseline;
+- token intervention → temporal permutation or another matched token control;
+- SAE feature intervention → reconstruction baseline;
+- architecture/tokenizer comparison → matched information, capacity, compute, task performance, split semantics, and evidence protocol;
+- feature correspondence → source ablation + target ablation + shuffled semantic-pair donors + same-cardinality random source mappings;
+- higher-level replication → independent units at the scientific claim axis;
+- endpoint substitution → preregistered dose response when a graded intervention is meaningful;
+- in-manifold replacement claim → explicit donor/generator construction and provenance.
 
-### Testing Requirements
+### Do not count correlated observations as independent replication
 
-- **Unit tests** for all new functions
-- **Integration tests** for new features
-- **Coverage**: Aim for >80%
-- **Fixtures**: Use pytest fixtures for common setup
+The resampling unit follows the scientific claim.
 
-Example test:
+Examples:
 
-```python
-import pytest
-import torch
-from neuros_mechint.fractals import HiguchiFractalDimension
-
-
-def test_higuchi_fd_basic():
-    """Test Higuchi FD computation on simple signal."""
-    fd = HiguchiFractalDimension(k_max=10)
-    signal = torch.randn(32, 1000)
-    result = fd.compute(signal)
-
-    assert result.shape == (32,)
-    assert torch.all(result > 1.0)  # FD should be > 1
-    assert torch.all(result < 2.0)  # FD should be < 2
-
-
-def test_higuchi_fd_pure_noise():
-    """Test that pure white noise gives FD ≈ 1.5."""
-    fd = HiguchiFractalDimension(k_max=10)
-    signal = torch.randn(100, 10000)  # Large for stability
-    result = fd.compute(signal)
-
-    # White noise should have FD ≈ 1.5
-    assert torch.abs(result.mean() - 1.5) < 0.1
+```text
+300 trials from one model seed = 1 model seed
+20 sessions from one subject   = 1 subject
+4 independently trained seeds  = 4 model-seed units
 ```
 
-## Commit Messages
+Examples from one prompt, session, subject, model seed, SAE dictionary, or projector cannot silently become independent higher-level replications merely because many perturbations were run.
 
-Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+## v0.7 comparative-evidence rule
 
+A new architecture, tokenizer, checkpoint, or other factorial comparison defines its **estimability conditions before inspecting the requested effect**.
+
+For a primary architecture/tokenizer comparison, explicitly declare:
+
+- every intended factorial cell;
+- missing cells and reasons;
+- model/tokenizer/dataset revisions;
+- semantic discovery and validation partition IDs;
+- training seed;
+- checkpoint and maturity rule;
+- metric;
+- discovery method;
+- target universe;
+- token budget;
+- temporal resolution;
+- downstream capacity;
+- training compute;
+- additional matched covariates;
+- task-performance tolerance;
+- evidence protocol;
+- preregistered primary contrasts.
+
+If one of these dimensions violates the declared comparison policy, mark the primary effect non-estimable rather than reporting a number with a warning attached.
+
+## v0.8 causal-correspondence rule
+
+Do not use “correspondence” as a synonym for correlation, CKA, semantic-label agreement, or predictive transfer.
+
+A primary causal-correspondence study declares:
+
+- immutable source and target feature-space identities;
+- source and target feature sets;
+- one-to-one, one-to-many, or subspace shape;
+- every source/target context difference;
+- semantic discovery/validation trial partitions;
+- mapping discovery method and regularization;
+- feature projector and feature-axis semantics;
+- source/target scalar metrics and direction;
+- source ablation;
+- target ablation;
+- mapped substitution;
+- shuffled semantic-pair control;
+- same-cardinality random-source controls;
+- random-control budget and seed;
+- causal-relevance and recovery thresholds;
+- optional upstream factorial provenance.
+
+A source feature that predicts the target accurately but has no source-ablation effect receives no causal credit.
+
+Random source controls should get their own discovery-only map to the same target feature set. Do not compare a fit candidate against unfit random coordinates.
+
+For SAE-scale spaces, sample controls without materializing the entire combinatorial feature universe.
+
+## v0.9 replication rule
+
+A replication contribution must declare **which scientific unit is independent for the claim** before aggregating the source results.
+
+For a v0.9 study, explicitly declare:
+
+- replication family ID;
+- primary metric;
+- claim axis;
+- active hierarchy;
+- null value;
+- expected direction, if directional;
+- minimum independent-unit count;
+- confidence level and hierarchical-bootstrap budget;
+- minimum independent-unit sign agreement;
+- minimum estimable-source fraction;
+- minimum absolute effect;
+- whether the confidence interval must exclude the null;
+- source study fingerprints;
+- model-training seeds;
+- subject/session identities where relevant;
+- dictionary/projector identities where relevant;
+- dataset identity when a dataset-level claim is made.
+
+### Claim axis discipline
+
+Choose the axis from the claim, not from whichever axis has the largest sample count.
+
+Examples:
+
+- “stable across trials” → trial;
+- “stable across sessions” → session;
+- “subject-general” → subject;
+- “architecture-level” → independent model-training seed;
+- “dictionary robust” → independent dictionary conditions;
+- “cross-dataset” → dataset.
+
+Do not relabel a within-seed confidence interval as architecture uncertainty.
+
+### Preserve source estimability
+
+`observation_from_factorial_contrast(...)` preserves non-estimable v0.7 contrasts. Hierarchical aggregation must never repair a confounded design by averaging it with valid designs.
+
+A failed v0.8 correspondence can be a valid negative replica. Preserve it rather than filtering to promoted correspondences only.
+
+### Dose-response discipline
+
+When an intervention is meaningfully graded, preregister:
+
+- dose grid;
+- independent units;
+- expected direction;
+- endpoint criterion;
+- monotonicity criterion;
+- common-grid policy;
+- intervention-manifold assumption.
+
+Do not choose a dose grid after seeing the response curve.
+
+### Manifold discipline
+
+If an intervention uses empirical, nearest-neighbor, quantile, conditional, generative, causal-scrubbing-style, or custom replacement values, record the donor/generator semantics.
+
+Donor-based methods must identify the donor pool. Conditional and generative donors must identify the partition used to fit the donor model.
+
+Do not call an intervention “in manifold” merely because its replacement vector has plausible magnitude.
+
+## Tests
+
+Maintained package tests are named:
+
+```text
+test_mechint_*.py
 ```
-<type>(<scope>): <subject>
 
-<body>
+A maintained test should:
 
-<footer>
+- execute against the current public API;
+- have a clear scientific expected result;
+- include relevant controls;
+- use deterministic randomness;
+- avoid unnecessary network/model downloads;
+- state skip behavior for optional dependencies.
+
+Where possible, include both:
+
+1. a positive known-ground-truth case; and
+2. a negative/confounded/pseudoreplicated case the method must reject.
+
+Current scientific CLI gates:
+
+```bash
+neuros-mechint ground-truth --json
+neuros-mechint shared-computation-ground-truth --json
+neuros-mechint mechanism-emergence-ground-truth --json
+neuros-mechint circuit-faithfulness-ground-truth --json
+neuros-mechint evidence-pack-generalization-ground-truth --json
+neuros-mechint factorial-ground-truth --json
+neuros-mechint correspondence-ground-truth --json
+neuros-mechint replication-ground-truth --json
 ```
 
-**Types**:
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation only
-- `style`: Code style changes (formatting, no logic change)
-- `refactor`: Code refactoring
-- `test`: Adding tests
-- `chore`: Maintenance tasks
+The correspondence gate rejects a nearly perfectly predictive, semantically matched but causally unused decoy.
 
-**Examples**:
-```
-feat(fractals): add graph fractal dimension metric
+The replication gate rejects hundreds of strong trials from one seed as architecture/model-seed replication and rejects a four-seed 50/50 sign disagreement.
 
-Implement box-covering algorithm for computing fractal dimension
-of graphs/networks. Includes batched computation and GPU support.
+## Optional integrations
 
-Closes #42
-```
+Stable package import should not eagerly require large external interpretability stacks.
 
-```
-fix(sae): correct sparsity penalty computation
+Keep optional dependencies behind adapter/integration modules and extras where practical.
 
-The L1 penalty was not being normalized by batch size,
-leading to incorrect scaling.
+Protocol-faithful CPU fixtures can test adapter semantics; separate CI jobs can test real package solver/import compatibility.
 
-Fixes #156
+Avoid making routine PR checks dependent on downloading pretrained checkpoints.
+
+## Tutorials
+
+Maintained teaching notebooks live under:
+
+```text
+tutorials/mechint/
 ```
 
-## Review Process
+A maintained notebook should teach:
 
-1. **Automated checks** must pass (tests, linting, type checking)
-2. **Code review** by at least one maintainer
-3. **Documentation** review if docs changed
-4. **Approval** from maintainer before merge
+```text
+question
+→ hypothesis
+→ measurement
+→ intervention
+→ matched control
+→ falsification
+→ held-out validation
+→ conclusion + uncertainty
+```
 
-## Areas for Contribution
+Comparative notebooks additionally teach:
 
-We especially welcome contributions in:
+```text
+cell-level evidence
+→ preregistered contrast
+→ estimability audit
+→ effect or rejection
+```
 
-- **New interpretability methods**: Implement recent research
-- **Optimizations**: GPU/memory/speed improvements
-- **Documentation**: Tutorials, examples, docstrings
-- **Testing**: More comprehensive test coverage
-- **Visualizations**: Better plotting and visualization tools
-- **Integration examples**: With popular frameworks (HF, Lightning, etc.)
+Correspondence notebooks additionally teach:
 
-## Questions?
+```text
+statistical alignment
+→ freeze mapping
+→ source necessity
+→ target necessity
+→ held-out substitution
+→ shuffled/random controls
+→ causal promotion or rejection
+```
 
-- Open a [Discussion](https://github.com/neuros-ai/neuros-mechint/discussions)
-- Join our [Discord](https://discord.gg/neuros)
-- Email: team@neuros.ai
+Replication notebooks additionally teach:
 
-## License
+```text
+declare claim axis
+→ preserve source estimability
+→ balance lower hierarchy levels
+→ hierarchical uncertainty
+→ independent-unit sign agreement
+→ replicated OR rejected
+→ dose/manifold robustness
+```
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+Exploratory notebooks should normally live under `experiments/` until maintained against current APIs.
 
----
+## Artifacts and provenance
 
-**Thank you for contributing to neuros-mechint!** 🎉
+Prefer self-checking, versioned artifacts for real studies.
+
+```text
+experiments/mechint/evidence_packs/
+experiments/mechint/factorial_studies/
+experiments/mechint/correspondence_studies/
+experiments/mechint/replication_studies/
+```
+
+Pin immutable model, tokenizer, dataset, checkpoint, SAE/dictionary, projector, and transcoder revisions before publication. Do not rely on mutable aliases as the sole provenance record.
+
+## Historical modules
+
+The package retains a broad exploratory pre-v0.2 surface. Historical code is useful provenance, but code existence is not evidence of current Stable maturity.
+
+Promote historical methods one at a time by defining their scientific object, controls, known-ground-truth benchmark, dependencies, maintained tests, and independent-unit semantics where the claim involves replication.
