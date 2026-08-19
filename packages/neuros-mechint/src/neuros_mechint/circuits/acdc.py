@@ -1,446 +1,231 @@
+"""Scientifically explicit module-pruning circuit discovery.
+
+This module retains the historic ``AutomatedCircuitDiscovery`` name for source
+compatibility, but the implementation is intentionally labeled as
+ACDC-inspired module-output pruning. Canonical ACDC is edge-level and requires
+a model graph with addressable sender/receiver edges. Treating a whole module
+output as an edge would overstate the evidence.
 """
-Automated Circuit Discovery (ACDC) for Neural Networks.
 
-Implements the ACDC algorithm from Conmy et al. (2023) for automatically
-discovering minimal computational circuits in neural networks.
+from __future__ import annotations
 
-Key Idea:
-    Start with the full model graph and iteratively remove edges that don't
-    significantly affect the output. The result is a minimal sufficient circuit
-    that implements the computation.
-
-Algorithm:
-    1. Start with full graph of all connections
-    2. For each edge:
-        a. Temporarily ablate (remove) the edge
-        b. Measure effect on output
-        c. If effect is below threshold, permanently remove edge
-    3. Return minimal graph (circuit)
-
-Applications:
-    - Understand which connections are actually used
-    - Compare circuits across models/tasks
-    - Extract and export minimal subnetworks
-    - Debug unexpected behaviors
-
-References:
-    - Conmy et al. (2023): "Towards Automated Circuit Discovery for Mechanistic Interpretability"
-    - Wang et al. (2023): "Interpretability in the Wild: Finding Circuits in Language Models"
-
-Author: NeuroS Team
-Date: 2025-10-30
-"""
+import warnings
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any
 
 import torch
-import torch.nn as nn
-from typing import Dict, List, Set, Tuple, Optional, Callable, Any
-from dataclasses import dataclass, field
-import numpy as np
-from collections import defaultdict
-import logging
-
-logger = logging.getLogger(__name__)
+from torch import nn
+from torch.nn import functional as F
 
 
-@dataclass
+@dataclass(frozen=True)
 class Edge:
-    """
-    Represents an edge (connection) in the computational graph.
-
-    Attributes:
-        source: Source node (e.g., "layer2.attention.head3")
-        target: Target node (e.g., "layer3.mlp")
-        importance: Measured importance score
-        ablated: Whether this edge is ablated
-    """
     source: str
     target: str
     importance: float = 0.0
-    ablated: bool = False
 
-    def __hash__(self):
-        return hash((self.source, self.target))
-
-    def __eq__(self, other):
-        if not isinstance(other, Edge):
-            return False
-        return self.source == other.source and self.target == other.target
+    def with_importance(self, value: float) -> Edge:
+        return Edge(self.source, self.target, float(value))
 
 
 @dataclass
 class Circuit:
-    """
-    Minimal computational circuit.
-
-    Attributes:
-        edges: Set of edges in the circuit
-        nodes: Set of nodes in the circuit
-        performance: Circuit performance on task
-        sparsity: Fraction of original edges kept
-        metadata: Additional circuit information
-    """
-    edges: Set[Edge] = field(default_factory=set)
-    nodes: Set[str] = field(default_factory=set)
+    edges: set[Edge] = field(default_factory=set)
+    nodes: set[str] = field(default_factory=set)
     performance: float = 0.0
     sparsity: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def add_edge(self, edge: Edge):
-        """Add edge to circuit."""
+    def add_edge(self, edge: Edge) -> None:
         self.edges.add(edge)
-        self.nodes.add(edge.source)
-        self.nodes.add(edge.target)
+        self.nodes.update((edge.source, edge.target))
 
-    def remove_edge(self, edge: Edge):
-        """Remove edge from circuit."""
-        self.edges.discard(edge)
-        # Don't remove nodes - might be connected via other edges
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
+    def to_dict(self) -> dict[str, Any]:
         return {
-            'edges': [(e.source, e.target, e.importance) for e in self.edges],
-            'nodes': list(self.nodes),
-            'performance': self.performance,
-            'sparsity': self.sparsity,
-            'metadata': self.metadata
+            "edges": sorted((edge.source, edge.target, edge.importance) for edge in self.edges),
+            "nodes": sorted(self.nodes),
+            "performance": self.performance,
+            "sparsity": self.sparsity,
+            "metadata": dict(self.metadata),
         }
 
 
-class AutomatedCircuitDiscovery:
-    """
-    Automated Circuit Discovery (ACDC) algorithm.
+def _replace_output(output: Any, mode: str) -> Any:
+    if isinstance(output, torch.Tensor):
+        if mode == "zero":
+            return torch.zeros_like(output)
+        if mode == "mean":
+            return torch.full_like(output, output.mean())
+        raise ValueError(f"unsupported ablation mode: {mode!r}")
+    if isinstance(output, tuple):
+        values = list(output)
+        for index, value in enumerate(values):
+            if isinstance(value, torch.Tensor):
+                values[index] = _replace_output(value, mode)
+                return tuple(values)
+    raise TypeError(f"cannot ablate module output of type {type(output).__name__}")
 
-    Automatically finds minimal computational circuits in neural networks
-    by iteratively ablating edges and measuring their importance.
 
-    Args:
-        model: Neural network to analyze
-        threshold: Importance threshold (edges below this are removed)
-        metric: Function to measure output quality
-        ablation_method: How to ablate edges ('zero', 'mean', 'resample')
-        device: Torch device
+class ModuleCircuitDiscovery:
+    """Rank leaf modules by necessity and evaluate the retained subnetwork.
 
-    Example:
-        >>> acdc = AutomatedCircuitDiscovery(model, threshold=0.01)
-        >>> circuit = acdc.discover_circuit(inputs, targets)
-        >>> print(f"Circuit has {len(circuit.edges)} edges ({circuit.sparsity:.1%} of original)")
+    This is useful as a coarse localization baseline and as a teaching method.
+    It is not presented as faithful edge-level ACDC.
     """
 
     def __init__(
         self,
         model: nn.Module,
         threshold: float = 0.01,
-        metric: Optional[Callable] = None,
-        ablation_method: str = 'zero',
-        device: Optional[str] = None,
-        verbose: bool = True
-    ):
+        metric: Callable[[torch.Tensor, torch.Tensor], float] | None = None,
+        ablation_method: str = "zero",
+        device: str | None = None,
+        verbose: bool = False,
+        importance_threshold: float | None = None,
+    ) -> None:
+        if importance_threshold is not None:
+            threshold = importance_threshold
         self.model = model
-        self.threshold = threshold
+        self.threshold = float(threshold)
         self.metric = metric or self._default_metric
         self.ablation_method = ablation_method
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.verbose = verbose
 
-        # Internal state
-        self.edge_registry: Dict[Tuple[str, str], Edge] = {}
-        self.hooks = []
-        self.baseline_output = None
-
-    def _log(self, message: str):
-        """Log message if verbose."""
-        if self.verbose:
-            logger.info(f"[ACDC] {message}")
-
-    def _default_metric(self, output: torch.Tensor, target: torch.Tensor) -> float:
-        """Default metric: negative MSE (higher is better)."""
-        return -torch.mean((output - target) ** 2).item()
-
-    def _build_graph(self) -> Set[Edge]:
-        """
-        Build complete computational graph of the model.
-
-        Returns:
-            Set of all edges in the model
-        """
-        edges = set()
-
-        # Iterate through named modules to build graph
-        modules = dict(self.model.named_modules())
-
-        for name, module in modules.items():
-            if name == '':  # Skip root
-                continue
-
-            # Identify connections based on module type
-            if isinstance(module, nn.Linear):
-                # Linear layers connect input to output
-                parent = '.'.join(name.split('.')[:-1])
-                edge = Edge(source=parent if parent else 'input', target=name)
-                edges.add(edge)
-                self.edge_registry[(edge.source, edge.target)] = edge
-
-            elif isinstance(module, nn.MultiheadAttention):
-                # Attention has multiple heads
-                parent = '.'.join(name.split('.')[:-1])
-                for head in range(module.num_heads):
-                    source = f"{name}.head{head}"
-                    target = f"{parent}.output" if parent else 'output'
-                    edge = Edge(source=source, target=target)
-                    edges.add(edge)
-                    self.edge_registry[(edge.source, edge.target)] = edge
-
-        self._log(f"Built graph with {len(edges)} edges")
-        return edges
-
-    def _register_hooks(self, edge: Edge):
-        """
-        Register forward hooks to ablate a specific edge.
-
-        Args:
-            edge: Edge to ablate
-        """
-        # Find the module corresponding to this edge
-        source_module = None
-        target_module = None
-
+    def _candidate_modules(self) -> list[str]:
+        candidates = []
         for name, module in self.model.named_modules():
-            if name == edge.source:
-                source_module = module
-            if name == edge.target:
-                target_module = module
+            if not name or len(list(module.children())) != 0:
+                continue
+            if any(parameter.numel() for parameter in module.parameters(recurse=False)):
+                candidates.append(name)
+        return candidates
 
-        if target_module is None:
-            return
+    @staticmethod
+    def _default_metric(output: torch.Tensor, target: torch.Tensor) -> float:
+        if (
+            output.ndim >= 2
+            and target.ndim == output.ndim - 1
+            and target.dtype in {torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8}
+        ):
+            return float(-F.cross_entropy(output, target).detach().cpu().item())
+        if output.shape != target.shape:
+            raise ValueError(
+                "default metric requires regression targets with the same shape as output "
+                "or integer class-index targets"
+            )
+        return float(-F.mse_loss(output, target).detach().cpu().item())
 
-        # Hook that ablates the connection
-        def ablation_hook(module, input, output):
-            if self.ablation_method == 'zero':
-                # Zero out the output
-                return torch.zeros_like(output)
-            elif self.ablation_method == 'mean':
-                # Replace with mean activation
-                return torch.ones_like(output) * output.mean()
-            elif self.ablation_method == 'resample':
-                # Resample from distribution
-                return torch.randn_like(output) * output.std() + output.mean()
-            else:
-                return output
+    @contextmanager
+    def _ablated(self, names: Sequence[str]) -> Iterator[None]:
+        modules = dict(self.model.named_modules())
+        handles = []
+        try:
+            for name in names:
+                if name not in modules:
+                    raise KeyError(f"unknown module: {name}")
 
-        handle = target_module.register_forward_hook(ablation_hook)
-        self.hooks.append(handle)
+                def _hook(module, args, output, *, _mode: str = self.ablation_method):
+                    del module, args
+                    return _replace_output(output, _mode)
 
-    def _remove_hooks(self):
-        """Remove all registered hooks."""
-        for hook in self.hooks:
-            hook.remove()
-        self.hooks = []
+                handles.append(modules[name].register_forward_hook(_hook))
+            yield
+        finally:
+            for handle in handles:
+                handle.remove()
 
-    def _measure_edge_importance(
-        self,
-        edge: Edge,
-        inputs: torch.Tensor,
-        targets: torch.Tensor
-    ) -> float:
-        """
-        Measure importance of an edge by ablating it.
-
-        Args:
-            edge: Edge to test
-            inputs: Input data
-            targets: Target outputs
-
-        Returns:
-            Importance score (higher = more important)
-        """
-        # Get baseline output (no ablation)
-        if self.baseline_output is None:
-            with torch.no_grad():
-                self.baseline_output = self.model(inputs)
-
-        baseline_metric = self.metric(self.baseline_output, targets)
-
-        # Register ablation hook
-        self._register_hooks(edge)
-
-        # Get output with ablation
+    def _score(self, inputs: torch.Tensor, targets: torch.Tensor) -> float:
         with torch.no_grad():
-            ablated_output = self.model(inputs)
-
-        ablated_metric = self.metric(ablated_output, targets)
-
-        # Remove hooks
-        self._remove_hooks()
-
-        # Importance = drop in performance when ablated
-        importance = baseline_metric - ablated_metric
-
-        return importance
+            return float(self.metric(self.model(inputs), targets))
 
     def discover_circuit(
         self,
         inputs: torch.Tensor,
         targets: torch.Tensor,
-        max_iterations: Optional[int] = None
+        max_iterations: int | None = None,
     ) -> Circuit:
-        """
-        Discover minimal computational circuit.
+        candidates = self._candidate_modules()
+        if max_iterations is not None:
+            evaluated = candidates[:max_iterations]
+            unevaluated = candidates[max_iterations:]
+        else:
+            evaluated = candidates
+            unevaluated = []
 
-        Args:
-            inputs: Input data for evaluation
-            targets: Target outputs
-            max_iterations: Maximum number of edges to test (None = all)
+        baseline = self._score(inputs, targets)
+        importances: dict[str, float] = {}
+        removed: list[str] = []
+        kept: list[str] = list(unevaluated)
 
-        Returns:
-            Discovered circuit
-        """
-        self._log("Starting circuit discovery...")
-
-        # Build initial full graph
-        all_edges = self._build_graph()
-        circuit = Circuit()
-        for edge in all_edges:
-            circuit.add_edge(edge)
-
-        # Compute baseline performance
-        with torch.no_grad():
-            self.baseline_output = self.model(inputs)
-        baseline_performance = self.metric(self.baseline_output, targets)
-
-        self._log(f"Baseline performance: {baseline_performance:.4f}")
-
-        # Iteratively test and remove unimportant edges
-        edges_to_test = list(all_edges)
-        n_iterations = max_iterations or len(edges_to_test)
-
-        for i in range(min(n_iterations, len(edges_to_test))):
-            edge = edges_to_test[i]
-
-            # Measure importance
-            importance = self._measure_edge_importance(edge, inputs, targets)
-            edge.importance = importance
-
-            # Remove if below threshold
-            if importance < self.threshold:
-                circuit.remove_edge(edge)
-                edge.ablated = True
-                self._log(f"Removed edge {edge.source} → {edge.target} (importance: {importance:.4f})")
+        for name in evaluated:
+            with self._ablated([name]):
+                ablated_score = self._score(inputs, targets)
+            importance = baseline - ablated_score
+            importances[name] = importance
+            if importance >= self.threshold:
+                kept.append(name)
             else:
-                self._log(f"Kept edge {edge.source} → {edge.target} (importance: {importance:.4f})")
+                removed.append(name)
 
-        # Compute final circuit performance and sparsity
-        with torch.no_grad():
-            final_output = self.model(inputs)
-        circuit.performance = self.metric(final_output, targets)
-        circuit.sparsity = len(circuit.edges) / len(all_edges) if all_edges else 0.0
+        # Crucially, final performance is measured with all rejected modules
+        # ablated together. The legacy implementation removed hooks before
+        # measuring this value, which accidentally reported full-model quality.
+        with self._ablated(removed):
+            final_performance = self._score(inputs, targets)
 
-        self._log(f"Circuit discovery complete!")
-        self._log(f"  Edges: {len(circuit.edges)}/{len(all_edges)} ({circuit.sparsity:.1%})")
-        self._log(f"  Performance: {circuit.performance:.4f} (baseline: {baseline_performance:.4f})")
-
+        ordered_kept = [name for name in candidates if name in kept]
+        circuit = Circuit(
+            performance=final_performance,
+            sparsity=(len(ordered_kept) / len(candidates)) if candidates else 0.0,
+            metadata={
+                "algorithm": "acdc_inspired_module_pruning",
+                "faithful_acdc": False,
+                "threshold": self.threshold,
+                "ablation_method": self.ablation_method,
+                "baseline_performance": baseline,
+                "removed_modules": removed,
+                "evaluated_modules": evaluated,
+                "unevaluated_modules": unevaluated,
+            },
+        )
+        previous = "input"
+        for name in ordered_kept:
+            edge = Edge(previous, name, importances.get(name, float("nan")))
+            circuit.add_edge(edge)
+            previous = name
+        if ordered_kept:
+            circuit.add_edge(Edge(previous, "output", 0.0))
         return circuit
 
-    def compare_circuits(self, circuit1: Circuit, circuit2: Circuit) -> Dict[str, Any]:
-        """
-        Compare two circuits.
-
-        Args:
-            circuit1: First circuit
-            circuit2: Second circuit
-
-        Returns:
-            Dictionary of comparison metrics
-        """
-        # Edge overlap
-        edges1 = {(e.source, e.target) for e in circuit1.edges}
-        edges2 = {(e.source, e.target) for e in circuit2.edges}
-
-        intersection = edges1 & edges2
+    @staticmethod
+    def compare_circuits(circuit1: Circuit, circuit2: Circuit) -> dict[str, Any]:
+        edges1 = {(edge.source, edge.target) for edge in circuit1.edges}
+        edges2 = {(edge.source, edge.target) for edge in circuit2.edges}
         union = edges1 | edges2
-
-        overlap = len(intersection) / len(union) if union else 0.0
-
-        # Performance comparison
-        perf_diff = abs(circuit1.performance - circuit2.performance)
-
-        # Node overlap
-        node_intersection = circuit1.nodes & circuit2.nodes
         node_union = circuit1.nodes | circuit2.nodes
-        node_overlap = len(node_intersection) / len(node_union) if node_union else 0.0
-
         return {
-            'edge_overlap': overlap,
-            'node_overlap': node_overlap,
-            'performance_difference': perf_diff,
-            'edges_only_in_1': edges1 - edges2,
-            'edges_only_in_2': edges2 - edges1,
-            'shared_edges': intersection
+            "edge_overlap": len(edges1 & edges2) / len(union) if union else 0.0,
+            "node_overlap": len(circuit1.nodes & circuit2.nodes) / len(node_union) if node_union else 0.0,
+            "performance_difference": abs(circuit1.performance - circuit2.performance),
+            "shared_edges": edges1 & edges2,
         }
 
-    def visualize_circuit(self, circuit: Circuit, save_path: Optional[str] = None):
-        """
-        Visualize circuit as a graph.
 
-        Args:
-            circuit: Circuit to visualize
-            save_path: Optional path to save figure
-        """
-        try:
-            import networkx as nx
-            import matplotlib.pyplot as plt
-        except ImportError:
-            self._log("networkx and matplotlib required for visualization")
-            return
+class AutomatedCircuitDiscovery(ModuleCircuitDiscovery):
+    """Compatibility name for the ACDC-inspired module-pruning baseline."""
 
-        # Create directed graph
-        G = nx.DiGraph()
-
-        # Add edges with importance weights
-        for edge in circuit.edges:
-            G.add_edge(edge.source, edge.target, weight=edge.importance)
-
-        # Layout
-        pos = nx.spring_layout(G, k=2, iterations=50)
-
-        # Draw
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        # Draw nodes
-        nx.draw_networkx_nodes(G, pos, node_color='lightblue',
-                              node_size=500, alpha=0.9, ax=ax)
-
-        # Draw edges (width based on importance)
-        edges = G.edges()
-        weights = [G[u][v]['weight'] for u, v in edges]
-        max_weight = max(weights) if weights else 1.0
-
-        nx.draw_networkx_edges(
-            G, pos,
-            width=[3 * w / max_weight for w in weights],
-            alpha=0.6,
-            edge_color='gray',
-            arrows=True,
-            arrowsize=20,
-            ax=ax
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        warnings.warn(
+            "AutomatedCircuitDiscovery is currently an ACDC-inspired module-output "
+            "pruning baseline, not canonical edge-level ACDC. Use ModuleCircuitDiscovery "
+            "for explicit semantics.",
+            FutureWarning,
+            stacklevel=2,
         )
-
-        # Draw labels
-        nx.draw_networkx_labels(G, pos, font_size=8, font_weight='bold', ax=ax)
-
-        ax.set_title(f"Circuit ({len(circuit.edges)} edges, {circuit.sparsity:.1%} sparsity)")
-        ax.axis('off')
-        plt.tight_layout()
-
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-            self._log(f"Circuit visualization saved to {save_path}")
-
-        return fig
+        super().__init__(*args, **kwargs)
 
 
-__all__ = [
-    'Edge',
-    'Circuit',
-    'AutomatedCircuitDiscovery',
-]
+__all__ = ["AutomatedCircuitDiscovery", "Circuit", "Edge", "ModuleCircuitDiscovery"]

@@ -1,345 +1,152 @@
-# neuros-mechint: Mechanistic Interpretability Toolkit
+# neuros-mechint v1.0
 
-**The world's most comprehensive mechanistic interpretability suite for neural networks.**
+**Reproducible causal experiments for testing how computation is implemented, learned, shared, and replicated across artificial and neural-data models.**
 
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status: Active Development](https://img.shields.io/badge/status-active%20development-brightgreen.svg)]()
+`neuros-mechint` is the mechanistic-evidence layer of neurOS. It can operate on ordinary PyTorch modules, ORION/NeuroFM representations, and optional TransformerLens, NNsight, SAELens, or circuit-tracer surfaces while keeping causal claims narrower than the tools used to discover them.
 
-## 🎯 Overview
+## The v1 evidence ladder
 
-`neuros-mechint` provides a unified framework for understanding how neural networks compute. From sparse autoencoders to thermodynamic analysis, from circuit discovery to biophysical modeling—everything you need for mechanistic interpretability research.
+```text
+known-answer falsification fixtures
+→ causal interventions + matched controls
+→ quantitative circuit faithfulness
+→ frozen discovery / held-out validation
+→ self-checking evidence packs
+→ matched architecture × tokenizer contrasts
+→ held-out causal feature correspondence
+→ claim-aware hierarchical replication
+→ dose response + explicit manifold assumptions
+→ independent execution reproduction
+→ explicit empirical evidence closure
+```
 
-### Key Features
+The central v1 rule is simple:
 
-- **🔬 Sparse Autoencoders**: Decompose polysemantic neurons into interpretable features
-- **⚡ Circuit Discovery**: Extract minimal computational circuits via ACDC and path patching
-- **🌊 Energy Flow Analysis**: Thermodynamics of computation, Landauer's principle, NESS
-- **🧠 Brain Alignment**: Compare model representations to neural recordings (CCA, RSA, Procrustes)
-- **📊 Fractal Analysis**: Scale-free dynamics, 1/f noise, temporal fractals
-- **🔄 Dynamical Systems**: Koopman operators, Lyapunov exponents, Neural ODEs
-- **🎭 Counterfactuals**: Causal interventions, latent surgery, do-calculus
-- **🏗️ Topology & Geometry**: Manifold analysis, persistent homology, curvature
+> **Software readiness is not empirical neuroscience evidence.**
 
-## 📦 Installation
+The package can certify its schema, migration, falsification, artifact-integrity, tutorial, and reproduction contracts in CI. It cannot certify a real neural mechanism until real evidence artifacts exist.
+
+## Frozen schemas and migrations
+
+`ExperimentManifest` schema v3 separates:
+
+- `scientific_fingerprint`: deterministic identity of the frozen scientific design;
+- `run_hash`: execution-specific identity including host/time/environment provenance.
+
+Historical schema-v2 manifests can be upgraded with:
+
+```python
+from neuros_mechint import migrate_manifest_payload
+migrated = migrate_manifest_payload(old_manifest)
+```
+
+The frozen artifact catalog covers:
+
+```text
+evidence_pack
+factorial
+correspondence
+replication
+dose_response
+```
+
+Inspect it with:
 
 ```bash
-# From source (recommended for development)
-git clone https://github.com/your-org/neurOS-v1.git
-cd neurOS-v1/packages/neuros-mechint
-pip install -e .
-
-# Or via pip (when published)
-pip install neuros-mechint
+neuros-mechint schemas --json
 ```
 
-### Requirements
+v0.6-v0.9 artifact result schemas remain valid. v1 migration attaches canonical envelope contract metadata without rewriting the scientific result or changing its integrity hash.
 
-- Python 3.8+
-- PyTorch 2.0+
-- NumPy, SciPy, scikit-learn
-- Matplotlib, seaborn (visualization)
-- Optional: ripser (topology), persim (persistence diagrams)
+## Independent reproduction
 
-## 🚀 Quick Start
+A reproduction should not require byte-identical floating-point output across hardware. It should require:
+
+1. the same scientific fingerprint;
+2. a distinct run hash and execution identity;
+3. the same preregistered qualitative decision;
+4. specified metrics within preregistered absolute/relative tolerances.
+
+Use `ReproductionSpec`, `ReproductionSnapshot`, and `assess_independent_reproduction(...)` to make that comparison executable.
+
+## Dose-response artifacts
+
+v1 promotes dose-response studies to self-checking artifacts:
 
 ```python
-import torch
-from neuros_mechint import SparseAutoencoder
-from neuros_mechint.circuits import AutomatedCircuitDiscovery
-from neuros_mechint.energy_flow import LandauerAnalyzer
-
-# 1. Sparse Autoencoder Analysis
-model = ... # Your PyTorch model
-activations = ... # Collect activations
-
-sae = SparseAutoencoder(input_dim=512, latent_dim=2048, sparsity=0.05)
-sae_result = sae.train(activations, epochs=100)
-features = sae.encode(activations)  # Interpretable features
-
-# 2. Circuit Discovery
-acdc = AutomatedCircuitDiscovery(model, importance_threshold=0.01)
-circuit = acdc.discover_circuit(inputs, targets)
-print(f"Discovered circuit: {len(circuit.edges)} edges")
-
-# 3. Thermodynamic Analysis
-landauer = LandauerAnalyzer(model, temperature=300)
-result = landauer.analyze_forward_pass(inputs)
-print(f"Bits erased: {result.total_bits_erased:.0f}")
-print(f"Minimum energy: {result.minimum_energy_joules:.2e} J")
+write_dose_response_artifact(result, "dose-response.json")
 ```
 
-## 📚 Documentation & Examples
-
-### 22 Comprehensive Jupyter Notebooks
-
-We provide extensive tutorial notebooks covering all aspects of mechanistic interpretability:
-
-**Foundation (Notebooks 1-6)**
-- 01: Introduction and Quickstart
-- 02: Sparse Autoencoders
-- 03: Causal Interventions
-- 04: Fractal Analysis
-- 05: Brain Alignment
-- 06: Dynamical Systems
-
-**Advanced Analysis (Notebooks 7-16)**
-- 07: Circuit Extraction & Latent Models
-- 08: Biophysical Modeling
-- 09: Information Theory
-- 10: Advanced Topics (Meta-dynamics, Geometry)
-- 11: Path Patching & ACDC
-- 12: Thermodynamic Analysis
-- 13: Circuit Comparison & Motifs
-- 14: Neural ODEs & Slow Features
-- 15: Energy Cascades & Hamiltonian
-- 16: Pipeline & Database Integration
-
-**Specialized Topics (Notebooks 17-22)**
-- 17: Advanced Biophysical Modeling
-- 18: Intervention Strategies
-- 19: Cross-Species Alignment
-- 20: Temporal Dynamics
-- 21: Criticality Analysis
-- 22: Multifractal Analysis
-
-### Running the Notebooks
+Verify later with:
 
 ```bash
-cd examples/
-jupyter lab
-# Open 01_introduction_and_quickstart.ipynb to begin
+neuros-mechint verify-dose-response-artifact dose-response.json --json
 ```
 
-## 🧩 Module Overview
+Manifold assumptions remain explicit. “Empirical donor,” “conditional resample,” or “generative” is provenance, not automatic proof that an intervention is valid or biologically natural.
 
-### Core Modules
-
-```python
-neuros_mechint/
-├── sae/                          # Sparse autoencoder analysis
-├── circuits/                     # Circuit discovery & analysis
-├── energy_flow/                  # Thermodynamics & energy analysis
-├── dynamics/                     # Dynamical systems analysis
-├── alignment/                    # Brain-model alignment
-├── fractals/                     # Fractal & scale-free analysis
-├── biophysical/                  # Biophysical neuron models
-├── interventions/                # Causal interventions
-├── counterfactuals/              # Counterfactual analysis
-├── meta_dynamics/                # Training trajectory analysis
-├── geometry_topology/            # Manifold & topology analysis
-└── visualization/                # Visualization tools
-```
-
-### Key Classes
-
-**Sparse Autoencoders**
-```python
-from neuros_mechint.sae import SparseAutoencoder, SAETrainer, SAEVisualizer
-```
-
-**Circuit Discovery**
-```python
-from neuros_mechint.circuits import (
-    AutomatedCircuitDiscovery,  # ACDC algorithm
-    PathPatcher,                 # Activation patching
-    CircuitComparator,          # Compare circuits
-    MotifDetector              # Find recurring patterns
-)
-```
-
-**Thermodynamics**
-```python
-from neuros_mechint.energy_flow import (
-    LandauerAnalyzer,           # Landauer's principle
-    NESSAnalyzer,               # Non-equilibrium steady states
-    FluctuationTheoremAnalyzer, # Fluctuation theorems
-    EnergyCascadeAnalyzer,      # Energy flow through layers
-    HamiltonianDecomposer       # Conservative vs dissipative
-)
-```
-
-**Dynamics**
-```python
-from neuros_mechint.dynamics import (
-    NeuralODEIntegrator,        # Continuous-time dynamics
-    SlowFeatureAnalyzer,        # Temporal hierarchies
-    KoopmanAnalyzer,           # Koopman operator
-    LyapunovAnalyzer           # Stability analysis
-)
-```
-
-**Brain Alignment**
-```python
-from neuros_mechint.alignment import (
-    CCAAlignment,               # Canonical correlation
-    RSAAnalyzer,               # Representational similarity
-    ProcrustesAlignment        # Orthogonal alignment
-)
-```
-
-## 🎓 Research Applications
-
-### Interpretability Research
-- Understand how transformers process language
-- Discover computational circuits in vision models
-- Map features to human-interpretable concepts
-
-### Neuroscience
-- Compare artificial and biological neural networks
-- Design better brain-computer interfaces
-- Test theories of neural computation
-
-### Safety & Alignment
-- Detect deceptive or unintended behaviors
-- Verify model reasoning
-- Build more transparent AI systems
-
-### Architecture Design
-- Design networks with desired computational properties
-- Optimize for energy efficiency
-- Create biologically-inspired architectures
-
-## 📊 Results & Database
-
-Store and compare analysis results:
-
-```python
-from neuros_mechint.database import MechIntDatabase
-
-db = MechIntDatabase(root_dir="./results")
-
-# Store analysis
-result_id = db.store(circuit_result, tags=["gpt2", "layer3", "acdc"])
-
-# Query results
-results = db.query(tags=["acdc"], method="ACDC")
-
-# Compare across experiments
-comparison = db.compare_results([id1, id2, id3])
-```
-
-## 🔬 Advanced Features
-
-### Thermodynamics of Computation
-```python
-# Landauer's Principle: minimum energy per bit erased
-landauer = LandauerAnalyzer(model)
-result = landauer.analyze_forward_pass(inputs)
-
-# Non-Equilibrium Steady States
-ness = NESSAnalyzer(model)
-steady_state = ness.analyze_steady_state(inputs)
-
-# Fluctuation Theorems
-ft = FluctuationTheoremAnalyzer(model)
-crooks = ft.test_crooks_theorem(forward_data, reverse_data)
-```
-
-### Counterfactual Interventions
-```python
-from neuros_mechint.counterfactuals import LatentSurgery, SyntheticLesions
-
-# Modify specific neurons
-surgery = LatentSurgery(model)
-original, intervened = surgery.intervene(x, "layer2", neuron_idx=42, value=1.0)
-
-# Identify critical components
-lesion = SyntheticLesions(model)
-critical_neurons = lesion.identify_critical_neurons(x, "layer3")
-```
-
-### Meta-Dynamics
-```python
-from neuros_mechint.meta_dynamics import RepresentationalTrajectory
-
-# Track representations during training
-trajectory = RepresentationalTrajectory(checkpoints, data)
-phases = trajectory.detect_phases()  # Fitting vs compression
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Development Setup
+## Nine synthetic scientific gates
 
 ```bash
-# Clone repository
-git clone https://github.com/your-org/neurOS-v1.git
-cd neurOS-v1/packages/neuros-mechint
-
-# Install in editable mode with dev dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest tests/
-
-# Check code quality
-black src/
-flake8 src/
-mypy src/
+neuros-mechint ground-truth --json
+neuros-mechint shared-computation-ground-truth --json
+neuros-mechint mechanism-emergence-ground-truth --json
+neuros-mechint circuit-faithfulness-ground-truth --json
+neuros-mechint evidence-pack-generalization-ground-truth --json
+neuros-mechint factorial-ground-truth --json
+neuros-mechint correspondence-ground-truth --json
+neuros-mechint replication-ground-truth --json
+neuros-mechint v1-ground-truth --json
 ```
 
-## 📖 Citation
+The v1 gate specifically checks manifest migration, legacy artifact migration, duplicate-run rejection, decision-flip rejection, schema completeness, and the anti-overclaim rule that real empirical evidence must remain pending until artifacts exist.
 
-If you use `neuros-mechint` in your research, please cite:
+## Executed teaching evidence
 
-```bibtex
-@software{neuros_mechint2025,
-  title = {neuros-mechint: Comprehensive Mechanistic Interpretability Toolkit},
-  author = {neurOS Team},
-  year = {2025},
-  url = {https://github.com/your-org/neurOS-v1}
-}
+Routine tests still validate every maintained notebook as notebook JSON. Release/evidence CI goes further and **executes** the CPU-safe lessons for known causal localization, circuit faithfulness, held-out rejection, hierarchical replication, and independent reproduction.
+
+```bash
+pip install -e "packages/neuros-mechint[dev,notebooks]"
+python packages/neuros-mechint/scripts/execute_cpu_tutorials.py
 ```
 
-## 📝 License
+## Real v1 evidence program
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+The recommended first empirical grid is deliberately small:
 
-## 🌟 Acknowledgments
+```text
+Transformer × SSM
+      crossed with
+Event × Relative-ISI
+      crossed with
+>= 3 independent training seeds
+```
 
-Built on foundational work from:
-- Anthropic's mechanistic interpretability research
-- OpenAI's sparse autoencoder work
-- The Distill.pub team's visualization techniques
-- Computational neuroscience community
+For each cell, freeze neural-data revisions, semantic discovery/validation partitions, task metric, capacity/compute budget, tokenizer budget and temporal resolution. Produce v0.6 evidence packs, v0.7 matched contrasts, v0.8 held-out causal correspondences, and v0.9/v1 hierarchical replication artifacts. Then add dose-response and a stronger manifold-aware control.
 
-## 📬 Contact & Support
+Track what has actually been completed with:
 
-- **Issues**: [GitHub Issues](https://github.com/your-org/neurOS-v1/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/neurOS-v1/discussions)
-- **Email**: neuros@example.com
+```bash
+neuros-mechint release-status --json
+```
 
----
+The repository intentionally reports the real neural evidence requirements as **pending** until those artifacts exist. See `docs/V1_EMPIRICAL_EVIDENCE_STATUS.md` and `experiments/mechint/v1_evidence/README.md`.
 
-## 🗺️ Roadmap
+## Quick start
 
-See [CHANGELOG.md](CHANGELOG.md) for version history and [docs/planning/](docs/planning/) for future plans.
+```bash
+python scripts/bootstrap.py --profile kernel --test-tools
+pip install -e "packages/neuros-mechint[dev]"
+neuros-mechint v1-ground-truth --json
+```
 
-### Current Status: Phase 2 Complete ✅
+With ORION:
 
-- ✅ Core SAE, circuits, alignment, fractals
-- ✅ Thermodynamics & energy flow analysis
-- ✅ Advanced dynamics (Neural ODEs, slow features)
-- ✅ Counterfactuals & causal interventions
-- ✅ 22 comprehensive tutorial notebooks
-- ✅ Complete API documentation
-- ⏳ Package reorganization (planned)
-- ⏳ Performance optimization (planned)
-- ⏳ Extended test coverage (planned)
+```bash
+python scripts/bootstrap.py --profile orion --test-tools
+pip install -e "packages/neuros-mechint[dev,orion]"
+```
 
-### Future Enhancements
+## Scientific claim boundary
 
-- Real-time analysis dashboard
-- Integration with popular frameworks (HuggingFace, PyTorch Lightning)
-- Cloud-based analysis pipeline
-- Multi-GPU support for large models
-- Extended model zoo with pre-trained analyzers
-
----
-
-**Built with ❤️ by the neurOS team**
-
-*Making neural networks interpretable, one circuit at a time.*
+Passing v1 software gates means the framework can express, serialize, migrate, falsify, compare, and independently reproduce the declared experiment contracts. It does **not** establish biological homology, universal neural meaning, architecture-general mechanisms, cross-dataset transfer, or a superior neural tokenization without the corresponding real held-out and independently replicated intervention evidence.
