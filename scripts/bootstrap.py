@@ -22,6 +22,7 @@ PROFILES = {
         "neuros-core",
         "neuros-models",
         "neuros-foundation",
+        "neuros-sourceweigher",
         "neuros-mechint",
         "neuros-neurofm",
         "orion",
