@@ -1,105 +1,171 @@
-"""
-Pseudo‑EEGNet model implementation for neurOS.
-
-This module provides a lightweight approximation of the EEGNet deep learning
-architecture using scikit‑learn's `MLPClassifier`.  While it does not
-implement convolutional layers, it serves as a drop‑in replacement within
-neurOS to demonstrate integration of advanced models.  When full deep
-learning frameworks such as TensorFlow or PyTorch are available, this class
-can be replaced with a true EEGNet implementation.
-"""
+"""Faithful compact EEGNet-style decoder with stable mechanistic hook points."""
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any
 
 import numpy as np
-from sklearn.neural_network import MLPClassifier
 
-from neuros.models.base_model import BaseModel
-
-try:
-    # Attempt to import TensorFlow for a real deep learning implementation.
-    import tensorflow as _tf  # pragma: no cover
-    _TENSORFLOW_AVAILABLE = True
-except Exception:  # ImportError or other errors
-    _tf = None  # type: ignore
-    _TENSORFLOW_AVAILABLE = False
+from neuros.models.analysis import AnalysisCapability, AnalysisSurface, InterpretabilityManifest
+from neuros.models.torch_base import TorchDecoderModel
 
 
-class EEGNetModel(BaseModel):
-    """Approximate EEGNet classifier using a multilayer perceptron.
+class EEGNetModel(TorchDecoderModel):
+    """Compact temporal/spatial depthwise-separable EEG classifier.
 
-    Parameters
-    ----------
-    hidden_layer_sizes : tuple[int, ...], optional
-        Sizes of hidden layers.  Defaults to (64, 32).
-    max_iter : int, optional
-        Maximum number of iterations for training.  Defaults to 200.
+    Inputs use the neurOS neural-window convention ``(batch, channels, time)``.
+    The implementation follows the defining EEGNet ingredients: temporal
+    filtering, depthwise spatial filtering, separable temporal convolution, and
+    a compact linear readout. Adaptive pooling keeps the decoder usable across
+    compatible window lengths while preserving named analysis surfaces.
     """
 
-    def __init__(self, hidden_layer_sizes: tuple[int, ...] = (64, 32), max_iter: int = 200) -> None:
-        super().__init__()
-        self.hidden_layer_sizes = hidden_layer_sizes
-        self.max_iter = max_iter
-        self.clf: Optional[MLPClassifier] = None
-        # underlying model object for compatibility with ModelAgent
-        self._model: Optional[object] = None
-        # flag indicating whether a deep learning backend is used
-        self._use_deep: bool = False
+    def __init__(
+        self,
+        n_channels: int,
+        n_classes: int = 2,
+        *,
+        temporal_filters: int = 8,
+        depth_multiplier: int = 2,
+        separable_filters: int = 16,
+        temporal_kernel: int = 63,
+        separable_kernel: int = 15,
+        dropout: float = 0.25,
+        learning_rate: float = 1e-3,
+        n_epochs: int = 20,
+        batch_size: int = 32,
+        device: str = "auto",
+        random_state: int = 0,
+    ) -> None:
+        if n_channels <= 0:
+            raise ValueError("n_channels must be positive")
+        if temporal_kernel % 2 == 0 or separable_kernel % 2 == 0:
+            raise ValueError("temporal kernels must be odd so same-length padding is unambiguous")
+        super().__init__(
+            n_classes=n_classes,
+            learning_rate=learning_rate,
+            n_epochs=n_epochs,
+            batch_size=batch_size,
+            device=device,
+            random_state=random_state,
+        )
+        self.n_channels = int(n_channels)
+        self.temporal_filters = int(temporal_filters)
+        self.depth_multiplier = int(depth_multiplier)
+        self.separable_filters = int(separable_filters)
+        self.temporal_kernel = int(temporal_kernel)
+        self.separable_kernel = int(separable_kernel)
+        self.dropout = float(dropout)
 
-    def train(self, X: np.ndarray, y: np.ndarray) -> None:
-        # Use a real deep learning model if TensorFlow is available.  EEGNet
-        # normally requires 2D convolutional layers with depthwise and
-        # separable filters.  Here we implement a simplified 1D CNN to
-        # approximate EEGNet when TensorFlow is installed.  Otherwise fall
-        # back to an MLP.
-        if _TENSORFLOW_AVAILABLE:
-            # reshape features to (samples, channels, 1) where channels = features
-            import numpy as np  # local import to satisfy Pyright
-            n_samples, n_features = X.shape
-            X_r = X.reshape((n_samples, n_features, 1)).astype('float32')
-            # one‑hot encode labels
-            y_cat = _tf.keras.utils.to_categorical(y)
-            # build a simple 1D CNN
-            model = _tf.keras.models.Sequential([
-                _tf.keras.layers.Conv1D(16, 3, activation='relu', input_shape=(n_features, 1)),
-                _tf.keras.layers.BatchNormalization(),
-                _tf.keras.layers.MaxPooling1D(2),
-                _tf.keras.layers.Conv1D(32, 3, activation='relu'),
-                _tf.keras.layers.BatchNormalization(),
-                _tf.keras.layers.GlobalAveragePooling1D(),
-                _tf.keras.layers.Dense(y_cat.shape[1], activation='softmax'),
-            ])
-            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-            # train for a few epochs silently
-            model.fit(X_r, y_cat, epochs=5, batch_size=32, verbose=0)
-            self._model = model
-            self._use_deep = True
-            self.is_trained = True
-            return
-        # fallback: normalise features to zero mean and unit variance for MLP stability
-        X_norm = (X - X.mean(axis=0)) / (X.std(axis=0) + 1e-6)
-        clf = MLPClassifier(hidden_layer_sizes=self.hidden_layer_sizes, max_iter=self.max_iter, random_state=42)
-        clf.fit(X_norm, y)
-        self.clf = clf
-        # assign to _model for compatibility with ModelAgent
-        self._model = clf
-        self.is_trained = True
+    def _validate_X(self, X: np.ndarray) -> np.ndarray:
+        arr = super()._validate_X(X)
+        if arr.ndim != 3:
+            raise ValueError("EEGNetModel expects X with shape (batch, channels, time)")
+        if arr.shape[1] != self.n_channels:
+            raise ValueError(f"Expected {self.n_channels} channels, received {arr.shape[1]}")
+        return arr
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        if not self.is_trained:
-            raise RuntimeError("Model has not been trained")
-        # if using deep model, perform inference via TensorFlow
-        if self._use_deep and _TENSORFLOW_AVAILABLE and isinstance(self._model, _tf.keras.Model):
-            # reshape and predict
-            import numpy as np  # ensure numpy available locally
-            X_r = X.reshape((X.shape[0], X.shape[1], 1)).astype('float32')
-            probs = self._model.predict(X_r, verbose=0)
-            return np.argmax(probs, axis=1)
-        # otherwise, fallback to MLP
-        if self.clf is None:
-            raise RuntimeError("Model has not been trained")
-        # normalise features as during training
-        X_norm = (X - X.mean(axis=0)) / (X.std(axis=0) + 1e-6)
-        return self.clf.predict(X_norm)
+    def _build_model(self) -> Any:
+        _, nn = self._torch()
+        n_channels = self.n_channels
+        f1 = self.temporal_filters
+        d = self.depth_multiplier
+        f2 = self.separable_filters
+        temporal_kernel = self.temporal_kernel
+        separable_kernel = self.separable_kernel
+        dropout = self.dropout
+        n_classes = self.n_classes
+
+        class EEGNet(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.temporal = nn.Conv2d(
+                    1, f1, kernel_size=(1, temporal_kernel),
+                    padding=(0, temporal_kernel // 2), bias=False
+                )
+                self.temporal_bn = nn.BatchNorm2d(f1)
+                self.spatial = nn.Conv2d(
+                    f1, f1 * d, kernel_size=(n_channels, 1), groups=f1, bias=False
+                )
+                self.spatial_bn = nn.BatchNorm2d(f1 * d)
+                self.spatial_activation = nn.ELU()
+                self.pool1 = nn.AvgPool2d(kernel_size=(1, 4), stride=(1, 4))
+                self.dropout1 = nn.Dropout(dropout)
+                self.separable_depthwise = nn.Conv2d(
+                    f1 * d,
+                    f1 * d,
+                    kernel_size=(1, separable_kernel),
+                    padding=(0, separable_kernel // 2),
+                    groups=f1 * d,
+                    bias=False,
+                )
+                self.separable_pointwise = nn.Conv2d(f1 * d, f2, kernel_size=(1, 1), bias=False)
+                self.separable_bn = nn.BatchNorm2d(f2)
+                self.separable_activation = nn.ELU()
+                self.pool2 = nn.AvgPool2d(kernel_size=(1, 8), stride=(1, 8))
+                self.dropout2 = nn.Dropout(dropout)
+                self.embedding_pool = nn.AdaptiveAvgPool2d((1, 1))
+                self.classifier = nn.Linear(f2, n_classes)
+
+            def forward_features(self, x: Any) -> Any:
+                x = x.unsqueeze(1)
+                x = self.temporal_bn(self.temporal(x))
+                x = self.spatial_activation(self.spatial_bn(self.spatial(x)))
+                x = self.dropout1(self.pool1(x))
+                x = self.separable_depthwise(x)
+                x = self.separable_pointwise(x)
+                x = self.separable_activation(self.separable_bn(x))
+                x = self.dropout2(self.pool2(x))
+                x = self.embedding_pool(x)
+                return x.flatten(1)
+
+            def forward(self, x: Any) -> Any:
+                return self.classifier(self.forward_features(x))
+
+        return EEGNet()
+
+    def analysis_manifest(self) -> InterpretabilityManifest:
+        capture = (
+            AnalysisCapability.ACTIVATION_CAPTURE,
+            AnalysisCapability.ACTIVATION_REPLACEMENT,
+            AnalysisCapability.GRADIENT_ATTRIBUTION,
+        )
+        return InterpretabilityManifest(
+            model_type=type(self).__name__,
+            architecture="EEGNet-style depthwise-separable temporal/spatial CNN",
+            backend="pytorch",
+            input_axes=("batch", "channel", "time"),
+            output_semantics="class logits",
+            capabilities=capture + (AnalysisCapability.REPRESENTATIONS,),
+            surfaces=(
+                AnalysisSurface(
+                    "temporal", "temporal_filter_bank", ("batch", "filter", "channel", "time"),
+                    "Learned temporal filters before cross-electrode mixing.", capture,
+                    ("activation patching", "gradient attribution", "frequency response audit"),
+                ),
+                AnalysisSurface(
+                    "spatial", "electrode_spatial_projection", ("batch", "filter", "virtual_channel", "time"),
+                    "Depthwise projection across the complete electrode montage.", capture,
+                    ("channel ablation", "activation patching", "topographic weight analysis"),
+                ),
+                AnalysisSurface(
+                    "separable_pointwise", "feature_mixing", ("batch", "feature", "virtual_channel", "time"),
+                    "Pointwise mixing after depthwise temporal refinement.", capture,
+                    ("activation patching", "sparse feature decomposition"),
+                ),
+                AnalysisSurface(
+                    "embedding_pool", "pooled_representation", ("batch", "feature", "one", "one"),
+                    "Compact representation consumed by the classifier.", capture,
+                    ("linear probes", "RSA/CKA", "concept attribution"),
+                ),
+                AnalysisSurface(
+                    "classifier", "decision_readout", ("batch", "class"),
+                    "Linear readout from the pooled EEG representation.", capture,
+                    ("logit attribution", "necessity/sufficiency"),
+                ),
+            ),
+            method_notes={
+                "attention": "Not applicable; EEGNet is convolutional.",
+                "causal": "Prefer interventions on held-out trials and report accuracy/logit effects, not saliency alone.",
+            },
+        )
