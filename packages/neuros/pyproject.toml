@@ -29,6 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 all = [
     "neuros-foundation>=2.0.0",
+    "neuros-sourceweigher>=0.2.0",
     "neuros-ui>=2.0.0",
     "neuros-cloud>=2.0.0",
 ]
@@ -41,6 +42,7 @@ recording = ["neuros-core[recording]>=2.0.0"]
 research = [
     "neuros-models[all]>=2.0.0",
     "neuros-foundation[all]>=2.0.0",
+    "neuros-sourceweigher>=0.2.0",
 ]
 deployment = [
     "neuros-ui[all]>=2.0.0",
