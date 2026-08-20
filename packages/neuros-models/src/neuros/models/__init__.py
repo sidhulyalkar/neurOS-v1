@@ -1,30 +1,53 @@
-"""
-Model definitions for neurOS.
+"""Task-specific decoders and analysis contracts for neurOS."""
 
-Models encapsulate training and prediction logic.  The base class defines a
-common interface so that custom algorithms can be dropped in easily.  A simple
-logistic regression classifier is provided as a baseline.
-"""
+from neuros.models.analysis import (
+    AnalysisCapability,
+    AnalysisSurface,
+    InterpretabilityManifest,
+    MechanisticallyInspectable,
+    validate_manifest_paths,
+)
+from neuros.models.base_model import BaseModel
+from neuros.models.catalog import DecoderCard, get_decoder_card, list_decoder_cards
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.models.eegnet_model import EEGNetModel
+from neuros.models.cnn_model import CNNModel
+from neuros.models.random_forest_model import RandomForestModel
+from neuros.models.svm_model import SVMModel
+from neuros.models.knn_model import KNNModel
+from neuros.models.gbdt_model import GBDTModel
+from neuros.models.transformer_model import TemporalTransformerModel, TransformerModel
+from neuros.models.eeg_conformer_model import EEGConformerModel
+from neuros.models.dino_v3_model import DinoV3Model
+from neuros.models.lstm_model import LSTMModel
+from neuros.models.composite_model import CompositeModel
+from neuros.models.attention_fusion_model import AttentionFusionModel
+from neuros.models.model_registry import ModelMetadata, ModelRegistry
 
-from neuros.models.base_model import BaseModel  # noqa: F401
-from neuros.models.simple_classifier import SimpleClassifier  # noqa: F401
-
-# extended models
-from neuros.models.eegnet_model import EEGNetModel  # noqa: F401
-from neuros.models.cnn_model import CNNModel  # noqa: F401
-from neuros.models.random_forest_model import RandomForestModel  # noqa: F401
-from neuros.models.svm_model import SVMModel  # noqa: F401
-from neuros.models.knn_model import KNNModel  # noqa: F401
-from neuros.models.gbdt_model import GBDTModel  # noqa: F401
-
-# additional advanced models
-from neuros.models.transformer_model import TransformerModel  # noqa: F401
-from neuros.models.dino_v3_model import DinoV3Model  # noqa: F401
-from neuros.models.lstm_model import LSTMModel  # noqa: F401
-
-# composite multi‑modal models
-from neuros.models.composite_model import CompositeModel  # noqa: F401
-from neuros.models.attention_fusion_model import AttentionFusionModel  # noqa: F401
-
-# model management
-from neuros.models.model_registry import ModelRegistry, ModelMetadata  # noqa: F401
+__all__ = [
+    "AnalysisCapability",
+    "AnalysisSurface",
+    "AttentionFusionModel",
+    "BaseModel",
+    "CNNModel",
+    "CompositeModel",
+    "DecoderCard",
+    "DinoV3Model",
+    "EEGConformerModel",
+    "EEGNetModel",
+    "GBDTModel",
+    "InterpretabilityManifest",
+    "KNNModel",
+    "LSTMModel",
+    "MechanisticallyInspectable",
+    "ModelMetadata",
+    "ModelRegistry",
+    "RandomForestModel",
+    "SVMModel",
+    "SimpleClassifier",
+    "TemporalTransformerModel",
+    "TransformerModel",
+    "get_decoder_card",
+    "list_decoder_cards",
+    "validate_manifest_paths",
+]

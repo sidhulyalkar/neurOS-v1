@@ -1,33 +1,59 @@
 # Ecosystem adapters
 
-`neuros-mechint` integrates external interpretability ecosystems through narrow adapter boundaries so scientific intervention logic does not depend on framework-specific execution details.
+`neuros-mechint` integrates model ecosystems through narrow adapter boundaries so scientific intervention logic does not depend on framework-specific execution details.
 
-The current integrated surfaces include:
+The integrated surfaces include:
 
+- neurOS task-specific decoders (`NeurOSModelAdapter`);
+- ordinary PyTorch modules;
 - TransformerLens;
 - NNsight;
 - SAELens;
 - circuit-tracer attribution normalization.
 
-These integrations remain important in v0.7, but their role is deliberately bounded:
+The governing evidence flow is:
 
 ```text
-external tool
-    |
- candidate / activation surface
-    |
-ModelAdapter or feature adapter
-    |
+model / external tool
+        |
+candidate activation or feature surface
+        |
+ModelAdapter
+        |
 causal intervention
-    |
+        |
 quantitative faithfulness
-    |
-v0.6 held-out evidence pack
-    |
-v0.7 matched factorial comparison
+        |
+held-out evidence pack
+        |
+matched comparison / replication
 ```
 
-An adapter being Integrated means the package maintains the relevant execution contract. It does **not** mean that every mechanism discovered through the external tool is correct.
+An adapter being integrated means the package maintains the execution contract. It does **not** mean every mechanism discovered through it is correct.
+
+## neurOS models
+
+`NeurOSModelAdapter` is the native bridge from `neuros-models` v2.1+.
+
+A neurOS decoder declares an `InterpretabilityManifest` and exposes its underlying research backend through `analysis_model()`. The adapter validates that every declared path exists in the backend model before running experiments.
+
+```python
+from neuros.models import EEGConformerModel
+
+model = EEGConformerModel(n_channels=22, n_classes=4)
+adapter = model.mechint_adapter()
+print(adapter.recommended_paths)
+```
+
+The dependency direction is intentionally duck-typed: `neuros-mechint` does not import or depend on `neuros-models`. This keeps mech-int usable with external models while letting neurOS decoders opt into the common experiment layer.
+
+`recommended_paths` contains only tensor-output hook points safe for the generic PyTorch capture/replacement adapter. Structured modules such as raw `nn.LSTM` or `nn.MultiheadAttention` remain declared in the manifest but require selector-aware tooling for direct replacement.
+
+The most important boundary is semantic:
+
+> a model manifest identifies where an experiment can intervene; it does not certify what a component means.
+
+Meaning and mechanism must be established through analysis plus held-out causal tests.
 
 ## TransformerLens
 
@@ -37,8 +63,8 @@ Typical use:
 
 - discover or nominate hook-point candidates;
 - run necessity/sufficiency through the generic faithfulness API;
-- package the frozen result into v0.6 held-out evidence;
-- compare matched cells in v0.7 only when the experimental design is estimable.
+- package the frozen result into held-out evidence;
+- compare matched cells only when the experimental design is estimable.
 
 Optional install:
 
@@ -70,7 +96,7 @@ Optional install:
 pip install -e "packages/neuros-mechint[sae-lens]"
 ```
 
-A future v0.8 feature-correspondence study should also freeze SAE/dictionary revisions and discover feature mappings separately from held-out causal-transfer validation.
+Future feature-correspondence studies should freeze SAE/dictionary revisions and discover feature mappings separately from held-out causal-transfer validation.
 
 ## circuit-tracer
 
@@ -86,11 +112,7 @@ A circuit-tracer candidate must still pass intervention-based faithfulness and h
 
 ## Real-package CI
 
-The dedicated mech-int workflow includes real-package dependency/import checks for the published optional extras:
-
-- TransformerLens 3.x;
-- NNsight 0.7.x;
-- SAELens 6.x.
+The dedicated mech-int workflow includes real-package dependency/import checks for published optional extras including TransformerLens, NNsight, and SAELens. neurOS model compatibility is tested in the main monorepo CI against the local `neuros-models` package.
 
 These jobs validate dependency compatibility and import surfaces. They deliberately do not download pretrained checkpoints during normal PR CI.
 
@@ -106,30 +128,9 @@ The recipes identify candidate model surfaces and recommended execution environm
 
 Before publishing a study, resolve mutable model/tokenizer/SAE/transcoder names to immutable revisions.
 
-## Using external models in v0.7
-
-For factorial architecture/tokenizer science, produce one v0.6 evidence pack for every observed cell.
-
-The pack metadata should record the factorial design information expected by `run_factorial_evidence_study(...)`:
-
-- architecture;
-- checkpoint;
-- checkpoint maturity;
-- session and subject;
-- training seed;
-- semantic discovery partition ID;
-- semantic validation partition ID;
-- token budget;
-- temporal resolution;
-- downstream capacity;
-- training compute;
-- additional preregistered matched covariates.
-
-The v0.7 bridge validates those fields rather than trusting filenames or human notes.
-
 ## Claim boundary
 
-External integration alone establishes none of the following:
+External or native integration alone establishes none of the following:
 
 - correct causal localization;
 - a faithful circuit;

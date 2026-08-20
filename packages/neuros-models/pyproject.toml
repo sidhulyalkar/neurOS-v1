@@ -4,13 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros-models"
-version = "2.0.0"
-description = "Task-specific decoders and model adapters for neurOS"
+version = "2.1.0"
+description = "Task-specific neural decoders with mechanistic analysis contracts for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "neurOS Development Team"}]
-keywords = ["neuroscience", "deep-learning", "eegnet", "transformer", "neural-decoding"]
+keywords = [
+    "neuroscience",
+    "brain-computer-interface",
+    "eeg",
+    "neural-decoding",
+    "mechanistic-interpretability",
+    "eegnet",
+    "transformer",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -28,7 +36,19 @@ dependencies = [
 
 [project.optional-dependencies]
 pytorch = ["torch>=2.1.0"]
-all = ["torch>=2.1.0"]
+mechint = [
+    "torch>=2.1.0",
+    "neuros-mechint>=1.0.0",
+]
+dev = [
+    "torch>=2.1.0",
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+all = [
+    "torch>=2.1.0",
+    "neuros-mechint>=1.0.0",
+]
 test = ["pytest>=7.4"]
 
 [project.entry-points."neuros.decoders"]
@@ -41,9 +61,14 @@ gbdt = "neuros.models.gbdt_model:GBDTModel"
 eegnet = "neuros.models.eegnet_model:EEGNetModel"
 cnn = "neuros.models.cnn_model:CNNModel"
 transformer = "neuros.models.transformer_model:TransformerModel"
+eeg_conformer = "neuros.models.eeg_conformer_model:EEGConformerModel"
+attention_fusion = "neuros.models.attention_fusion_model:AttentionFusionModel"
+
+[project.scripts]
+neuros-models = "neuros.models.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1/tree/main/packages/neuros-models"
 Repository = "https://github.com/sidhulyalkar/neurOS-v1"
 Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
