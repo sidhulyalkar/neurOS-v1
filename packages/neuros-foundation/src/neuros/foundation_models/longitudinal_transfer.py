@@ -1,9 +1,9 @@
 """Frozen-representation transfer methods for longitudinal BCI evidence.
 
-The encoder is trained once on source history and then frozen. Target-session
-calibration can change only the low-capacity readout and, for SourceWeigher, the
-source-domain weights. This keeps representation adaptation distinct from
-end-to-end target fine-tuning.
+A frozen encoder is trained once on source history and materialized as a
+``PreparedFrozenEncoderCase``. Multiple transfer strategies can then consume the
+exact same representation tensors, making SourceWeigher-vs-unweighted readout a
+clean comparison rather than two nominally identical encoder trainings.
 """
 
 from __future__ import annotations
@@ -31,15 +31,23 @@ from .real_world import GroupedEvaluationData
 FrozenTransferStrategy = Literal["frozen-logistic", "sourceweigher-mean"]
 
 
+def _readonly_array(values: Any, *, dtype: Any | None = None) -> np.ndarray:
+    array = np.asarray(values, dtype=dtype).copy()
+    array.setflags(write=False)
+    return array
+
+
+def _hash_array(digest: Any, name: str, values: np.ndarray) -> None:
+    array = np.ascontiguousarray(values)
+    digest.update(name.encode("utf-8"))
+    digest.update(str(array.dtype).encode("ascii"))
+    digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
+    digest.update(array.tobytes(order="C"))
+
+
 @dataclass(frozen=True, slots=True)
 class FrozenTransferMethodSpec:
-    """Identity for a source-trained frozen encoder plus matched linear readout.
-
-    ``method_id`` identifies the public comparison lane, for example
-    ``frozen-eegnet`` or ``sourceweigher-eeg-conformer``. ``strategy`` names the
-    transfer algorithm independently. Keeping the two fields separate prevents
-    aggregation from collapsing distinct encoders into one curve.
-    """
+    """Identity for a frozen representation plus one transfer/readout strategy."""
 
     method_id: str
     strategy: FrozenTransferStrategy
@@ -87,18 +95,102 @@ class FrozenTransferMethodSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class FrozenTransferCaseResult:
+class PreparedFrozenEncoderCase:
+    """One source-trained encoder and immutable representation tensors for a case."""
+
     authority_fingerprint: str
-    method_spec: FrozenTransferMethodSpec
+    encoder_id: str
+    encoder_seed: int
+    encoder_spec_fingerprint: str
     encoder_config: Mapping[str, Any]
     encoder_parameter_count: int
     analysis_manifest_fingerprint: str
     encoder_fit_s: float
-    rows: tuple[Mapping[str, Any], ...]
-    schema_version: int = 2
+    class_labels: tuple[str, ...]
+    y_encoded: np.ndarray
+    source_indices: np.ndarray
+    evaluation_indices: np.ndarray
+    target_pool_indices: np.ndarray
+    source_embedding: np.ndarray
+    evaluation_embedding: np.ndarray
+    target_pool_embedding: np.ndarray
+    source_session: np.ndarray
+    source_embeddings_by_session: Mapping[str, np.ndarray]
+    schema_version: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "encoder_config", MappingProxyType(dict(self.encoder_config)))
+        object.__setattr__(self, "y_encoded", _readonly_array(self.y_encoded, dtype=np.int64))
+        object.__setattr__(self, "source_indices", _readonly_array(self.source_indices, dtype=np.int64))
+        object.__setattr__(self, "evaluation_indices", _readonly_array(self.evaluation_indices, dtype=np.int64))
+        object.__setattr__(self, "target_pool_indices", _readonly_array(self.target_pool_indices, dtype=np.int64))
+        object.__setattr__(self, "source_embedding", _readonly_array(self.source_embedding))
+        object.__setattr__(self, "evaluation_embedding", _readonly_array(self.evaluation_embedding))
+        object.__setattr__(self, "target_pool_embedding", _readonly_array(self.target_pool_embedding))
+        object.__setattr__(self, "source_session", _readonly_array(self.source_session))
+        frozen_sources = {
+            str(key): _readonly_array(value)
+            for key, value in self.source_embeddings_by_session.items()
+        }
+        object.__setattr__(self, "source_embeddings_by_session", MappingProxyType(frozen_sources))
+
+    @property
+    def representation_sha256(self) -> str:
+        digest = hashlib.sha256()
+        _hash_array(digest, "source_indices", self.source_indices)
+        _hash_array(digest, "evaluation_indices", self.evaluation_indices)
+        _hash_array(digest, "target_pool_indices", self.target_pool_indices)
+        _hash_array(digest, "source_embedding", self.source_embedding)
+        _hash_array(digest, "evaluation_embedding", self.evaluation_embedding)
+        _hash_array(digest, "target_pool_embedding", self.target_pool_embedding)
+        return digest.hexdigest()
+
+    @property
+    def fingerprint(self) -> str:
+        payload = {
+            "schema_version": self.schema_version,
+            "authority_fingerprint": self.authority_fingerprint,
+            "encoder_id": self.encoder_id,
+            "encoder_seed": int(self.encoder_seed),
+            "encoder_spec_fingerprint": self.encoder_spec_fingerprint,
+            "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
+            "representation_sha256": self.representation_sha256,
+        }
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+    def manifest(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "authority_fingerprint": self.authority_fingerprint,
+            "encoder_id": self.encoder_id,
+            "encoder_seed": int(self.encoder_seed),
+            "encoder_spec_fingerprint": self.encoder_spec_fingerprint,
+            "encoder_config": dict(self.encoder_config),
+            "encoder_parameter_count": int(self.encoder_parameter_count),
+            "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
+            "encoder_fit_s": float(self.encoder_fit_s),
+            "class_labels": list(self.class_labels),
+            "source_samples": int(len(self.source_indices)),
+            "target_pool_samples": int(len(self.target_pool_indices)),
+            "evaluation_samples": int(len(self.evaluation_indices)),
+            "representation_sha256": self.representation_sha256,
+            "encoder_state_fingerprint": self.fingerprint,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenTransferCaseResult:
+    authority_fingerprint: str
+    method_spec: FrozenTransferMethodSpec
+    encoder_state_manifest: Mapping[str, Any]
+    rows: tuple[Mapping[str, Any], ...]
+    schema_version: int = 3
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "encoder_state_manifest", MappingProxyType(dict(self.encoder_state_manifest))
+        )
         object.__setattr__(self, "rows", tuple(MappingProxyType(dict(row)) for row in self.rows))
 
     def to_dict(self) -> dict[str, Any]:
@@ -107,10 +199,7 @@ class FrozenTransferCaseResult:
             "authority_fingerprint": self.authority_fingerprint,
             "method_spec": self.method_spec.to_dict(),
             "method_spec_fingerprint": self.method_spec.fingerprint,
-            "encoder_config": dict(self.encoder_config),
-            "encoder_parameter_count": int(self.encoder_parameter_count),
-            "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
-            "encoder_fit_s": float(self.encoder_fit_s),
+            "encoder_state": dict(self.encoder_state_manifest),
             "rows": [dict(row) for row in self.rows],
         }
 
@@ -125,6 +214,93 @@ def _encode_labels(y: np.ndarray, source_indices: np.ndarray) -> tuple[np.ndarra
     if unknown:
         raise ValueError(f"target contains class labels absent from source history: {unknown}")
     return np.asarray([mapping[value] for value in values], dtype=np.int64), labels
+
+
+def prepare_frozen_encoder_case(
+    data: GroupedEvaluationData,
+    authority: LongitudinalCaseAuthority,
+    *,
+    encoder_id: Literal["eegnet", "eeg-conformer"],
+    encoder_seed: int,
+    encoder_kwargs: Mapping[str, Any] | None = None,
+) -> PreparedFrozenEncoderCase:
+    """Train one encoder on source history and materialize immutable embeddings."""
+    split = authority.restore(data)
+    if authority.split_unit != "session":
+        raise ValueError("frozen longitudinal transfer currently requires session authority")
+    X = np.asarray(data.X, dtype=np.float32)
+    if X.ndim != 3:
+        raise ValueError("frozen EEG transfer expects X=(sample, channel, time)")
+    y_encoded, class_labels = _encode_labels(np.asarray(data.y), split.source_train_indices)
+
+    encoder_spec = TaskDecoderMethodSpec(
+        method_id=encoder_id,
+        model_seed=int(encoder_seed),
+        model_kwargs=dict(encoder_kwargs or {}),
+    )
+    encoder = _model_for(
+        encoder_spec,
+        n_channels=int(X.shape[1]),
+        n_classes=len(class_labels),
+    )
+    encoder_config = _resolved_config(encoder)
+    parameter_count = _parameter_count(encoder)
+    manifest_fingerprint = encoder.analysis_manifest().fingerprint()
+
+    started = time.perf_counter()
+    encoder.train(X[split.source_train_indices], y_encoded[split.source_train_indices])
+    encoder_fit_s = time.perf_counter() - started
+
+    source_embedding = encoder.encode(X[split.source_train_indices])
+    evaluation_embedding = encoder.encode(X[split.evaluation_indices])
+    target_pool_indices = np.sort(
+        np.concatenate(
+            [np.asarray(values, dtype=np.int64) for values in split.calibration_order_by_class.values()]
+        )
+    )
+    target_pool_embedding = encoder.encode(X[target_pool_indices])
+    source_session = np.asarray(data.groups["session"])[split.source_train_indices].astype(str)
+    source_embeddings_by_session = {
+        session: source_embedding[source_session == session]
+        for session in authority.source_group_values
+    }
+
+    return PreparedFrozenEncoderCase(
+        authority_fingerprint=authority.authority_fingerprint,
+        encoder_id=encoder_id,
+        encoder_seed=int(encoder_seed),
+        encoder_spec_fingerprint=encoder_spec.fingerprint,
+        encoder_config=encoder_config,
+        encoder_parameter_count=parameter_count,
+        analysis_manifest_fingerprint=manifest_fingerprint,
+        encoder_fit_s=float(encoder_fit_s),
+        class_labels=class_labels,
+        y_encoded=y_encoded,
+        source_indices=split.source_train_indices,
+        evaluation_indices=split.evaluation_indices,
+        target_pool_indices=target_pool_indices,
+        source_embedding=source_embedding,
+        evaluation_embedding=evaluation_embedding,
+        target_pool_embedding=target_pool_embedding,
+        source_session=source_session,
+        source_embeddings_by_session=source_embeddings_by_session,
+    )
+
+
+def _validate_prepared(
+    prepared: PreparedFrozenEncoderCase,
+    authority: LongitudinalCaseAuthority,
+    spec: FrozenTransferMethodSpec,
+) -> None:
+    if prepared.authority_fingerprint != authority.authority_fingerprint:
+        raise ValueError("prepared encoder authority does not match requested case authority")
+    encoder_spec = TaskDecoderMethodSpec(
+        method_id=spec.encoder_id,
+        model_seed=spec.encoder_seed,
+        model_kwargs=spec.encoder_kwargs,
+    )
+    if prepared.encoder_spec_fingerprint != encoder_spec.fingerprint:
+        raise ValueError("prepared encoder spec does not match transfer method encoder spec")
 
 
 def _fit_logistic(
@@ -152,27 +328,22 @@ def _sourceweigher_result(
 ):
     try:
         from neuros_sourceweigher import RepresentationSourceWeigher
-    except ImportError as exc:  # pragma: no cover - optional package boundary
+    except ImportError as exc:  # pragma: no cover
         raise ImportError(
             "sourceweigher-mean requires neuros-sourceweigher. Install the local "
             "package or the matching published distribution."
         ) from exc
-
-    estimator = RepresentationSourceWeigher(statistics=("mean",))
-    return estimator.estimate(source_embeddings, target_embeddings)
+    return RepresentationSourceWeigher(statistics=("mean",)).estimate(
+        source_embeddings,
+        target_embeddings,
+    )
 
 
 def _source_sample_weights(
     source_sessions: np.ndarray,
     by_source: Mapping[str, float],
 ) -> np.ndarray:
-    """Redistribute fixed total source sample mass across source sessions.
-
-    Unweighted fitting gives every source example weight 1, for total source mass
-    ``N``. This helper preserves total mass ``N`` while making each source
-    session's aggregate mass equal ``N * source_weight``. No free target/source
-    mass hyperparameter is introduced.
-    """
+    """Redistribute fixed total source mass across source sessions."""
     sessions = np.asarray(source_sessions).astype(str)
     total = len(sessions)
     result = np.zeros(total, dtype=np.float64)
@@ -195,21 +366,10 @@ def run_frozen_transfer_case(
     *,
     spec: FrozenTransferMethodSpec,
     budgets_per_class: Sequence[int],
+    prepared: PreparedFrozenEncoderCase | None = None,
 ) -> FrozenTransferCaseResult:
-    """Run one frozen encoder across all calibration budgets.
-
-    ``frozen-logistic`` uses labels from source history plus the declared target
-    calibration examples.
-
-    ``sourceweigher-mean`` additionally estimates source-session weights from
-    source embeddings and the declared target calibration embeddings. Final
-    evaluation embeddings are never passed to SourceWeigher. At budget 0 this
-    target-dependent method emits an explicit unavailable row rather than using
-    the evaluation set as unlabeled target data.
-    """
+    """Run one transfer strategy on an exact frozen encoder representation."""
     split = authority.restore(data)
-    if authority.split_unit != "session":
-        raise ValueError("frozen longitudinal transfer currently requires session authority")
     budgets = tuple(sorted(set(int(value) for value in budgets_per_class)))
     if not budgets or budgets[0] < 0:
         raise ValueError("budgets_per_class must contain non-negative values")
@@ -219,70 +379,47 @@ def run_frozen_transfer_case(
             f"{split.max_budget_per_class}/class"
         )
 
-    X = np.asarray(data.X, dtype=np.float32)
-    if X.ndim != 3:
-        raise ValueError("frozen EEG transfer expects X=(sample, channel, time)")
-    y_encoded, class_labels = _encode_labels(np.asarray(data.y), split.source_train_indices)
-
-    encoder_spec = TaskDecoderMethodSpec(
-        method_id=spec.encoder_id,
-        model_seed=spec.encoder_seed,
-        model_kwargs=spec.encoder_kwargs,
+    state = prepared or prepare_frozen_encoder_case(
+        data,
+        authority,
+        encoder_id=spec.encoder_id,
+        encoder_seed=spec.encoder_seed,
+        encoder_kwargs=spec.encoder_kwargs,
     )
-    encoder = _model_for(
-        encoder_spec,
-        n_channels=int(X.shape[1]),
-        n_classes=len(class_labels),
-    )
-    encoder_config = _resolved_config(encoder)
-    parameter_count = _parameter_count(encoder)
-    manifest_fingerprint = encoder.analysis_manifest().fingerprint()
+    _validate_prepared(state, authority, spec)
 
-    started = time.perf_counter()
-    encoder.train(X[split.source_train_indices], y_encoded[split.source_train_indices])
-    encoder_fit_s = time.perf_counter() - started
-
-    source_embedding = encoder.encode(X[split.source_train_indices])
-    evaluation_embedding = encoder.encode(X[split.evaluation_indices])
-    target_pool_indices = np.sort(
-        np.concatenate(
-            [np.asarray(values, dtype=np.int64) for values in split.calibration_order_by_class.values()]
-        )
-    )
-    target_pool_embedding = encoder.encode(X[target_pool_indices])
     target_embedding_by_index = {
-        int(index): target_pool_embedding[position]
-        for position, index in enumerate(target_pool_indices.tolist())
+        int(index): state.target_pool_embedding[position]
+        for position, index in enumerate(state.target_pool_indices.tolist())
     }
-
-    source_session = np.asarray(data.groups["session"])[split.source_train_indices].astype(str)
-    source_embeddings_by_session = {
-        session: source_embedding[source_session == session]
-        for session in authority.source_group_values
-    }
-
     rows: list[dict[str, Any]] = []
     for budget in budgets:
         calibration_indices = split.calibration_indices(budget)
         calibration_embedding = (
             np.stack([target_embedding_by_index[int(index)] for index in calibration_indices])
             if len(calibration_indices)
-            else np.empty((0, source_embedding.shape[1]), dtype=source_embedding.dtype)
+            else np.empty((0, state.source_embedding.shape[1]), dtype=state.source_embedding.dtype)
         )
+
+        common_identity = {
+            "case_id": authority.case_id,
+            "authority_fingerprint": authority.authority_fingerprint,
+            "processed_data_sha256": authority.processed_data_sha256,
+            "partition_fingerprint": authority.partition_fingerprint,
+            "calibration_split_fingerprint": authority.calibration_split_fingerprint,
+            "method_id": spec.method_id,
+            "transfer_strategy": spec.strategy,
+            "method_spec_fingerprint": spec.fingerprint,
+            "encoder_id": spec.encoder_id,
+            "encoder_seed": int(spec.encoder_seed),
+            "encoder_state_fingerprint": state.fingerprint,
+            "representation_sha256": state.representation_sha256,
+        }
 
         if spec.strategy == "sourceweigher-mean" and budget == 0:
             rows.append(
                 {
-                    "case_id": authority.case_id,
-                    "authority_fingerprint": authority.authority_fingerprint,
-                    "processed_data_sha256": authority.processed_data_sha256,
-                    "partition_fingerprint": authority.partition_fingerprint,
-                    "calibration_split_fingerprint": authority.calibration_split_fingerprint,
-                    "method_id": spec.method_id,
-                    "transfer_strategy": spec.strategy,
-                    "method_spec_fingerprint": spec.fingerprint,
-                    "encoder_id": spec.encoder_id,
-                    "encoder_seed": int(spec.encoder_seed),
+                    **common_identity,
                     "calibration_per_class": 0,
                     "status": "unavailable_no_target_observations",
                     "failure_reason": (
@@ -293,32 +430,32 @@ def run_frozen_transfer_case(
             )
             continue
 
-        train_embedding = source_embedding
-        train_labels = y_encoded[split.source_train_indices]
+        train_embedding = state.source_embedding
+        train_labels = state.y_encoded[state.source_indices]
         sample_weight: np.ndarray | None = None
         weighting_payload: dict[str, Any] | None = None
 
         if spec.strategy == "sourceweigher-mean":
             weighting = _sourceweigher_result(
-                source_embeddings=source_embeddings_by_session,
+                source_embeddings=state.source_embeddings_by_session,
                 target_embeddings=calibration_embedding,
             )
-            source_weights = _source_sample_weights(source_session, weighting.by_source())
+            source_weights = _source_sample_weights(state.source_session, weighting.by_source())
             weighting_payload = weighting.to_dict()
         else:
-            source_weights = np.ones(len(source_embedding), dtype=np.float64)
+            source_weights = np.ones(len(state.source_embedding), dtype=np.float64)
 
         if len(calibration_indices):
-            train_embedding = np.concatenate([source_embedding, calibration_embedding], axis=0)
-            train_labels = np.concatenate(
-                [train_labels, y_encoded[calibration_indices]], axis=0
+            train_embedding = np.concatenate(
+                [state.source_embedding, calibration_embedding], axis=0
             )
-            # Calibration labels retain ordinary per-example mass. SourceWeigher
-            # only redistributes the source-history mass across source sessions.
+            train_labels = np.concatenate(
+                [train_labels, state.y_encoded[calibration_indices]], axis=0
+            )
             sample_weight = np.concatenate(
                 [source_weights, np.ones(len(calibration_indices), dtype=np.float64)]
             )
-        elif spec.strategy == "sourceweigher-mean":  # guarded above; defensive
+        elif spec.strategy == "sourceweigher-mean":
             raise RuntimeError("SourceWeigher reached zero budget unexpectedly")
 
         started = time.perf_counter()
@@ -330,34 +467,25 @@ def run_frozen_transfer_case(
         )
         readout_fit_s = time.perf_counter() - started
         started = time.perf_counter()
-        probability = readout.predict_proba(evaluation_embedding)
+        probability = readout.predict_proba(state.evaluation_embedding)
         inference_s = time.perf_counter() - started
-        metrics = _score(y_encoded[split.evaluation_indices], probability)
+        metrics = _score(state.y_encoded[state.evaluation_indices], probability)
 
         rows.append(
             {
-                "case_id": authority.case_id,
-                "authority_fingerprint": authority.authority_fingerprint,
-                "processed_data_sha256": authority.processed_data_sha256,
-                "partition_fingerprint": authority.partition_fingerprint,
-                "calibration_split_fingerprint": authority.calibration_split_fingerprint,
-                "method_id": spec.method_id,
-                "transfer_strategy": spec.strategy,
-                "method_spec_fingerprint": spec.fingerprint,
-                "encoder_id": spec.encoder_id,
-                "encoder_seed": int(spec.encoder_seed),
+                **common_identity,
                 "calibration_per_class": int(budget),
                 "status": "ok",
                 "failure_reason": None,
-                "source_train_samples": int(len(split.source_train_indices)),
+                "source_train_samples": int(len(state.source_indices)),
                 "calibration_samples": int(len(calibration_indices)),
-                "evaluation_samples": int(len(split.evaluation_indices)),
-                "class_labels": list(class_labels),
+                "evaluation_samples": int(len(state.evaluation_indices)),
+                "class_labels": list(state.class_labels),
                 **metrics,
                 "readout_fit_s": float(readout_fit_s),
                 "inference_s": float(inference_s),
                 "inference_ms_per_trial": float(
-                    1000.0 * inference_s / max(len(split.evaluation_indices), 1)
+                    1000.0 * inference_s / max(len(state.evaluation_indices), 1)
                 ),
                 "sourceweigher": weighting_payload,
             }
@@ -366,9 +494,6 @@ def run_frozen_transfer_case(
     return FrozenTransferCaseResult(
         authority_fingerprint=authority.authority_fingerprint,
         method_spec=spec,
-        encoder_config=encoder_config,
-        encoder_parameter_count=parameter_count,
-        analysis_manifest_fingerprint=manifest_fingerprint,
-        encoder_fit_s=float(encoder_fit_s),
+        encoder_state_manifest=state.manifest(),
         rows=tuple(rows),
     )
