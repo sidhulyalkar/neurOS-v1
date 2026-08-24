@@ -70,7 +70,7 @@ class TaskDecoderCaseResult:
     resolved_model_config: Mapping[str, Any]
     parameter_count: int
     analysis_manifest_fingerprint: str
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
         if self.parameter_count <= 0:
@@ -163,6 +163,27 @@ def _resolved_config(model: Any) -> dict[str, Any]:
 def _parameter_count(model: Any) -> int:
     module = model.analysis_model()
     return int(sum(parameter.numel() for parameter in module.parameters()))
+
+
+def _model_state_sha256(model: Any) -> str:
+    """Hash the actual learned PyTorch state, including registered buffers.
+
+    Config/seed identity is not sufficient evidence of learned-state identity on
+    every accelerator. The state hash includes every ``state_dict`` tensor name,
+    dtype, shape and raw CPU bytes in sorted-key order, including BatchNorm
+    running statistics and other registered buffers.
+    """
+    module = model.analysis_model()
+    state = module.state_dict()
+    digest = hashlib.sha256()
+    for name in sorted(state):
+        tensor = state[name].detach().cpu().contiguous()
+        array = tensor.numpy()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
+        digest.update(array.tobytes(order="C"))
+    return digest.hexdigest()
 
 
 def _encode_labels(y: np.ndarray, source_indices: np.ndarray) -> tuple[np.ndarray, tuple[str, ...]]:
@@ -292,6 +313,7 @@ def run_task_decoder_case(
         started = time.perf_counter()
         model.train(X[train_indices], y_encoded[train_indices])
         fit_s = time.perf_counter() - started
+        model_state_sha256 = _model_state_sha256(model)
 
         started = time.perf_counter()
         probability = model.predict_proba(X[evaluation_indices])
@@ -314,6 +336,7 @@ def run_task_decoder_case(
                 "method_id": spec.method_id,
                 "method_spec_fingerprint": spec.fingerprint,
                 "model_seed": int(spec.model_seed),
+                "model_state_sha256": model_state_sha256,
                 "calibration_per_class": int(budget),
                 "source_train_samples": int(len(split.source_train_indices)),
                 "calibration_samples": int(len(calibration_indices)),
