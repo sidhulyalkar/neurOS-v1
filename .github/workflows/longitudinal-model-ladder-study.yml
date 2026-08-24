@@ -1,0 +1,188 @@
+name: neurOS longitudinal EEG model ladder
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Public MOABB dataset key
+        required: true
+        type: choice
+        default: kumar2024
+        options:
+          - kumar2024
+          - ma2020
+          - lee2019-mi
+          - wang2026
+      subjects:
+        description: Comma-separated MOABB subject IDs
+        required: true
+        type: string
+        default: "1,10"
+      held_out_sessions:
+        description: Optional comma-separated target sessions; blank uses all eligible targets
+        required: false
+        type: string
+        default: ""
+      methods:
+        description: Comma-separated method IDs
+        required: true
+        type: string
+        default: "csp-lda,eegnet,eeg-conformer,frozen-eegnet,frozen-eeg-conformer,sourceweigher-eegnet,sourceweigher-eeg-conformer"
+      model_seeds:
+        description: Comma-separated optimization seeds for neural methods
+        required: true
+        type: string
+        default: "101"
+      budgets:
+        description: Labeled target-session calibration examples per class
+        required: true
+        type: string
+        default: "0,1,2,5,10"
+      history_policy:
+        description: Prior-only is prospective-style; all-other is symmetric cross-session
+        required: true
+        type: choice
+        default: prior
+        options:
+          - prior
+          - all-other
+      split_seed:
+        description: Base split/calibration seed
+        required: true
+        type: string
+        default: "2026"
+      evaluation_fraction:
+        description: Fraction of each held-out class frozen for final evaluation
+        required: true
+        type: string
+        default: "0.5"
+      epochs:
+        description: Fixed training epochs for neural encoders/decoders
+        required: true
+        type: string
+        default: "20"
+      batch_size:
+        description: Neural training batch size
+        required: true
+        type: string
+        default: "32"
+      csp_components:
+        description: CSP component count for transparent baseline
+        required: true
+        type: string
+        default: "8"
+      readout_c:
+        description: Logistic readout inverse regularization strength
+        required: true
+        type: string
+        default: "1.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: longitudinal-model-ladder-${{ github.ref }}-${{ inputs.dataset }}-${{ inputs.subjects }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    name: ${{ inputs.dataset }} / ${{ inputs.history_policy }} / model ladder
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install complete local evidence ladder
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-models[pytorch]"
+          python -m pip install -e packages/neuros-sourceweigher
+          python -m pip install -e "packages/neuros-foundation[evidence,ladder]"
+
+      - name: Record execution environment
+        run: |
+          mkdir -p evidence-run
+          python -VV > evidence-run/python.txt
+          python -m pip freeze > evidence-run/pip-freeze.txt
+          git rev-parse HEAD > evidence-run/git-revision.txt
+          printf '%s\n' "${{ inputs.methods }}" > evidence-run/requested-methods.txt
+          printf '%s\n' "${{ inputs.model_seeds }}" > evidence-run/requested-model-seeds.txt
+
+      - name: Run real-dataset model ladder
+        env:
+          MNE_DATA: ${{ runner.temp }}/mne-data
+        shell: bash
+        run: |
+          EXTRA=()
+          if [[ -n "${{ inputs.held_out_sessions }}" ]]; then
+            EXTRA+=(--held-out-sessions "${{ inputs.held_out_sessions }}")
+          fi
+          python scripts/evidence/run_moabb_model_ladder.py \
+            --dataset "${{ inputs.dataset }}" \
+            --subjects "${{ inputs.subjects }}" \
+            --methods "${{ inputs.methods }}" \
+            --model-seeds "${{ inputs.model_seeds }}" \
+            --budgets "${{ inputs.budgets }}" \
+            --history-policy "${{ inputs.history_policy }}" \
+            --split-seed "${{ inputs.split_seed }}" \
+            --evaluation-fraction "${{ inputs.evaluation_fraction }}" \
+            --epochs "${{ inputs.epochs }}" \
+            --batch-size "${{ inputs.batch_size }}" \
+            --csp-components "${{ inputs.csp_components }}" \
+            --readout-c "${{ inputs.readout_c }}" \
+            --device cpu \
+            --output evidence-run/study \
+            "${EXTRA[@]}"
+
+      - name: Verify emitted authority and evidence artifacts
+        run: |
+          for name in \
+            study_manifest.json \
+            split_authority.json \
+            method_runs.json \
+            results.csv \
+            summary.json \
+            report.md \
+            artifact_hashes.json; do
+            test -s "evidence-run/study/$name"
+          done
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("evidence-run/study")
+          declared = json.loads((root / "artifact_hashes.json").read_text())["sha256"]
+          for name, expected in declared.items():
+              actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
+              assert actual == expected, (name, actual, expected)
+
+          manifest = json.loads((root / "study_manifest.json").read_text())
+          summary = json.loads((root / "summary.json").read_text())
+          authority = json.loads((root / "split_authority.json").read_text())
+          assert manifest["authority_fingerprints"] == [
+              item["authority_fingerprint"] for item in authority["cases"]
+          ]
+          assert summary["unexpected_unavailable_rows"] == 0
+          print(
+              "model ladder verified; descriptive promotion gate =",
+              summary["promotion_ready_descriptive"],
+          )
+          PY
+
+      - name: Upload immutable model-ladder evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: longitudinal-model-ladder-${{ inputs.dataset }}-${{ inputs.history_policy }}-${{ github.run_id }}
+          path: evidence-run/
+          if-no-files-found: error
+          retention-days: 30

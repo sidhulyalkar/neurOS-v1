@@ -8,7 +8,10 @@ on:
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
       - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
       - ".github/workflows/evidence-ci.yml"
+      - ".github/workflows/longitudinal-evidence-study.yml"
+      - ".github/workflows/longitudinal-model-ladder-study.yml"
   push:
     branches:
       - main
@@ -19,7 +22,10 @@ on:
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
       - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
       - ".github/workflows/evidence-ci.yml"
+      - ".github/workflows/longitudinal-evidence-study.yml"
+      - ".github/workflows/longitudinal-model-ladder-study.yml"
 
 permissions:
   contents: read
@@ -48,14 +54,16 @@ jobs:
         run: |
           pytest -q \
             packages/neuros-foundation/tests/test_real_world.py \
-            packages/neuros-foundation/tests/test_longitudinal.py
-      - name: Exercise evidence discovery, manifest example, and runner CLI
+            packages/neuros-foundation/tests/test_longitudinal.py \
+            packages/neuros-foundation/tests/test_longitudinal_authority.py
+      - name: Exercise evidence discovery and runner CLIs
         run: |
           neuros-foundation evidence
           neuros-foundation evidence --role longitudinal_bci --json
           neuros-foundation evidence --role cross_site_transfer --json
           python packages/neuros-foundation/examples/05_real_world_evidence.py
           python scripts/evidence/run_moabb_longitudinal.py --help
+          python scripts/evidence/run_moabb_model_ladder.py --help
 
   moabb-profile:
     name: MOABB evidence profile
@@ -72,7 +80,7 @@ jobs:
           python -m pip install -e packages/neuros-core
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros-foundation[evidence,dev]"
-      - name: Verify external benchmark ecosystem and runner dependencies
+      - name: Verify external benchmark ecosystem and baseline runner
         run: |
           python - <<'PY'
           import moabb
@@ -102,3 +110,32 @@ jobs:
             packages/neuros-foundation/tests/test_longitudinal.py \
             packages/neuros-foundation/tests/test_longitudinal_runner.py
           python scripts/evidence/run_moabb_longitudinal.py --help
+
+  model-ladder-profile:
+    name: Longitudinal model ladder / Python 3.11
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install complete local ladder stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-models[dev]"
+          python -m pip install -e packages/neuros-sourceweigher
+          python -m pip install -e "packages/neuros-foundation[evidence,ladder,dev]"
+      - name: Verify authority, task decoders, frozen transfer, and full bundle
+        run: |
+          pytest -q \
+            packages/neuros-foundation/tests/test_longitudinal_authority.py \
+            packages/neuros-foundation/tests/test_longitudinal_methods.py \
+            packages/neuros-foundation/tests/test_longitudinal_transfer.py \
+            packages/neuros-foundation/tests/test_longitudinal_zero_calibration.py \
+            packages/neuros-foundation/tests/test_longitudinal_model_identity.py \
+            packages/neuros-foundation/tests/test_longitudinal_model_ladder.py
+      - name: Exercise ladder CLI
+        run: |
+          python scripts/evidence/run_moabb_model_ladder.py --help

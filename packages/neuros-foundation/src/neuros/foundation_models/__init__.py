@@ -22,6 +22,41 @@ from neuros.foundation_models.longitudinal import (
     make_nested_calibration_split,
     ordered_group_values,
 )
+from neuros.foundation_models.longitudinal_authority import (
+    LongitudinalCaseAuthority,
+    processed_data_sha256,
+)
+from neuros.foundation_models.longitudinal_baseline import CSPCaseResult, run_csp_case
+from neuros.foundation_models.longitudinal_ladder import (
+    LADDER_METHODS,
+    SOURCEWEIGHER_METHODS,
+    LadderRuntimeConfig,
+    frontier_auc,
+    paired_case_set_audit,
+    render_ladder_report,
+    run_ladder_method,
+    seed_averaged_case_rows,
+    summarize_ladder_rows,
+)
+from neuros.foundation_models.longitudinal_methods import (
+    TaskDecoderCaseResult,
+    TaskDecoderMethodSpec,
+    run_task_decoder_case,
+)
+from neuros.foundation_models.longitudinal_transfer import (
+    FrozenTransferCaseResult,
+    FrozenTransferMethodSpec,
+    PreparedFrozenEncoderCase,
+    prepare_frozen_encoder_case,
+    run_frozen_transfer_case,
+)
+from neuros.foundation_models.moabb_longitudinal import (
+    MOABB_LONGITUDINAL_DATASETS,
+    MOABBLongitudinalDatasetSpec,
+    build_moabb_longitudinal_dataset,
+    get_moabb_longitudinal_spec,
+    validate_observed_sessions,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -84,8 +119,8 @@ try:
     from neuros.foundation_models.cebra_model import CEBRAModel
     CEBRA_AVAILABLE = True
 except ImportError:
-    CEBRA_AVAILABLE = False
     CEBRAModel = None
+    CEBRA_AVAILABLE = False
 
 try:
     from neuros.foundation_models.neuroformer_model import NeuroformerModel
@@ -144,6 +179,32 @@ __all__ = [
     "chronological_partition",
     "NestedCalibrationSplit",
     "make_nested_calibration_split",
+    "LongitudinalCaseAuthority",
+    "processed_data_sha256",
+    "CSPCaseResult",
+    "run_csp_case",
+    "TaskDecoderMethodSpec",
+    "TaskDecoderCaseResult",
+    "run_task_decoder_case",
+    "FrozenTransferMethodSpec",
+    "FrozenTransferCaseResult",
+    "PreparedFrozenEncoderCase",
+    "prepare_frozen_encoder_case",
+    "run_frozen_transfer_case",
+    "LADDER_METHODS",
+    "SOURCEWEIGHER_METHODS",
+    "LadderRuntimeConfig",
+    "run_ladder_method",
+    "seed_averaged_case_rows",
+    "frontier_auc",
+    "paired_case_set_audit",
+    "summarize_ladder_rows",
+    "render_ladder_report",
+    "MOABBLongitudinalDatasetSpec",
+    "MOABB_LONGITUDINAL_DATASETS",
+    "get_moabb_longitudinal_spec",
+    "build_moabb_longitudinal_dataset",
+    "validate_observed_sessions",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",
