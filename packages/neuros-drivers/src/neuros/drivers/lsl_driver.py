@@ -47,7 +47,9 @@ class LSLDriver(BaseDriver):
     channels:
         Optional expected channel count. It is an assertion, not a selector.
     resolve_timeout:
-        Maximum seconds spent resolving the primary selector at startup.
+        Maximum seconds spent resolving the primary selector at startup. The
+        complete window is deliberately used to detect a second matching
+        outlet before a stream is accepted.
     open_timeout:
         Maximum seconds spent opening the selected inlet.
     time_correction_timeout:
@@ -192,11 +194,15 @@ class LSLDriver(BaseDriver):
         else:
             prop, value = "type", self._stream_type
 
+        # pylsl's resolver may return as soon as ``minimum`` candidates are
+        # found. Request two so the full timeout is spent checking for a second
+        # matching outlet when only one is initially visible. This makes the
+        # fail-on-ambiguity contract deterministic within the discovery window.
         candidates = list(
             self._resolve_byprop(
                 prop,
                 value,
-                minimum=1,
+                minimum=2,
                 timeout=self._resolve_timeout,
             )
         )
@@ -316,8 +322,8 @@ class LSLDriver(BaseDriver):
                 channel_types=tuple(self.modality for _ in range(channel_count)),
                 clock_domain=ClockDomain.SYNCHRONIZED,
                 device=name,
-                manufacturer="Lab Streaming Layer",
                 metadata={
+                    "transport": "lsl",
                     "lsl_name": name,
                     "lsl_type": stream_type,
                     "lsl_source_id": source_id,
