@@ -57,6 +57,7 @@ nav:
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
       - Longitudinal EEG Showcase: LONGITUDINAL_EEG_SHOWCASE.md
       - Longitudinal Model Ladder: LONGITUDINAL_MODEL_LADDER.md
+  - Research Extensions: RESEARCH_EXTENSIONS.md
   - Installation: getting-started/installation.md
   - Architecture: ARCHITECTURE.md
   - API Surface: API_REFERENCE.md
