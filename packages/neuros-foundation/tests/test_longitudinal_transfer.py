@@ -31,8 +31,6 @@ def _fixture() -> GroupedEvaluationData:
                 x = rng.normal(scale=0.45, size=(4, 128)).astype(np.float32)
                 sign = -1.0 if label_index == 0 else 1.0
                 x[label_index, 20:92] += sign * (1.0 + 0.07 * session_index)
-                # Session-specific nuisance shift gives SourceWeigher something
-                # nontrivial to summarize in representation space.
                 x[3] += 0.03 * session_index
                 X.append(x)
                 y.append(label)
@@ -82,7 +80,8 @@ def test_frozen_logistic_reuses_one_source_trained_encoder_across_budgets():
     data = _fixture()
     authority = _authority(data)
     spec = FrozenTransferMethodSpec(
-        method_id="frozen-logistic",
+        method_id="frozen-eegnet",
+        strategy="frozen-logistic",
         encoder_id="eegnet",
         encoder_seed=101,
         encoder_kwargs=_encoder_kwargs(),
@@ -100,6 +99,8 @@ def test_frozen_logistic_reuses_one_source_trained_encoder_across_budgets():
     assert result.encoder_fit_s >= 0.0
     assert len(result.rows) == 3
     assert {row["status"] for row in result.rows} == {"ok"}
+    assert {row["method_id"] for row in result.rows} == {"frozen-eegnet"}
+    assert {row["transfer_strategy"] for row in result.rows} == {"frozen-logistic"}
     assert [row["calibration_per_class"] for row in result.rows] == [0, 1, 2]
     assert all(row["sourceweigher"] is None for row in result.rows)
     for row in result.rows:
@@ -107,6 +108,24 @@ def test_frozen_logistic_reuses_one_source_trained_encoder_across_budgets():
         assert 0.0 <= row["balanced_accuracy"] <= 1.0
         assert 0.0 <= row["brier_score"] <= 2.0
     json.dumps(result.to_dict(), sort_keys=True)
+
+
+def test_distinct_encoders_can_have_distinct_ladder_method_ids():
+    first = FrozenTransferMethodSpec(
+        method_id="frozen-eegnet",
+        strategy="frozen-logistic",
+        encoder_id="eegnet",
+        encoder_seed=101,
+    )
+    second = FrozenTransferMethodSpec(
+        method_id="frozen-eeg-conformer",
+        strategy="frozen-logistic",
+        encoder_id="eeg-conformer",
+        encoder_seed=101,
+    )
+    assert first.method_id != second.method_id
+    assert first.strategy == second.strategy
+    assert first.fingerprint != second.fingerprint
 
 
 def test_sourceweigher_uses_only_declared_target_calibration_embeddings(monkeypatch):
@@ -126,7 +145,8 @@ def test_sourceweigher_uses_only_declared_target_calibration_embeddings(monkeypa
 
     monkeypatch.setattr(transfer, "_sourceweigher_result", wrapped)
     spec = FrozenTransferMethodSpec(
-        method_id="sourceweigher-mean",
+        method_id="sourceweigher-eegnet",
+        strategy="sourceweigher-mean",
         encoder_id="eegnet",
         encoder_seed=101,
         encoder_kwargs=_encoder_kwargs(),
@@ -138,13 +158,18 @@ def test_sourceweigher_uses_only_declared_target_calibration_embeddings(monkeypa
         budgets_per_class=(0, 1, 2),
     )
 
-    assert observed_target_sizes == [2, 4]  # 1/class then 2/class; never evaluation set
+    assert observed_target_sizes == [2, 4]
     zero, one, two = result.rows
     assert zero["status"] == "unavailable_no_target_observations"
+    assert zero["method_id"] == "sourceweigher-eegnet"
+    assert zero["transfer_strategy"] == "sourceweigher-mean"
+    assert zero["partition_fingerprint"] == authority.partition_fingerprint
+    assert zero["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
     assert "evaluation examples are forbidden" in zero["failure_reason"]
 
     for row in (one, two):
         assert row["status"] == "ok"
+        assert row["method_id"] == "sourceweigher-eegnet"
         payload = row["sourceweigher"]
         assert payload is not None
         assert payload["source_ids"] == ["0", "1"]
@@ -156,11 +181,12 @@ def test_sourceweigher_uses_only_declared_target_calibration_embeddings(monkeypa
         assert diagnostics["iterations"] >= 1
 
 
-def test_sourceweigher_rejects_zero_only_run_without_using_eval_data():
+def test_sourceweigher_zero_only_run_is_explicitly_unavailable():
     data = _fixture()
     authority = _authority(data)
     spec = FrozenTransferMethodSpec(
-        method_id="sourceweigher-mean",
+        method_id="sourceweigher-eegnet",
+        strategy="sourceweigher-mean",
         encoder_id="eegnet",
         encoder_seed=101,
         encoder_kwargs=_encoder_kwargs(),
@@ -171,7 +197,11 @@ def test_sourceweigher_rejects_zero_only_run_without_using_eval_data():
         spec=spec,
         budgets_per_class=(0,),
     )
-    assert result.rows[0]["status"] == "unavailable_no_target_observations"
+    row = result.rows[0]
+    assert row["status"] == "unavailable_no_target_observations"
+    assert row["authority_fingerprint"] == authority.authority_fingerprint
+    assert row["partition_fingerprint"] == authority.partition_fingerprint
+    assert row["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
 
 
 def test_frozen_transfer_validates_authority_before_encoder_training():
@@ -187,7 +217,8 @@ def test_frozen_transfer_validates_authority_before_encoder_training():
         metadata=data.metadata,
     )
     spec = FrozenTransferMethodSpec(
-        method_id="frozen-logistic",
+        method_id="frozen-eegnet",
+        strategy="frozen-logistic",
         encoder_id="eegnet",
         encoder_seed=101,
         encoder_kwargs=_encoder_kwargs(),
