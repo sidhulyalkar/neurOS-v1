@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros-drivers"
-version = "2.0.0"
+version = "2.1.0"
 description = "Hardware and dataset sources for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,6 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 eeg = ["brainflow>=5.10.0", "pylsl>=1.16.1"]
+lsl = ["pylsl>=1.16.1"]
 video = ["opencv-python>=4.8.0"]
 audio = ["pyaudio>=0.2.13"]
 nwb = ["pynwb>=2.2.0", "hdmf>=3.10.0"]
@@ -43,6 +44,7 @@ test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
 [project.entry-points."neuros.sources"]
 mock = "neuros.drivers.mock_driver:MockDriver"
 brainflow = "neuros.drivers.brainflow_driver:BrainFlowDriver"
+lsl = "neuros.drivers.lsl_driver:LSLDriver"
 dataset = "neuros.drivers.dataset_driver:DatasetDriver"
 ecg = "neuros.drivers.ecg_driver:ECGDriver"
 ecog = "neuros.drivers.ecog_driver:ECoGDriver"
