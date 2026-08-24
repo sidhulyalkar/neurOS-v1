@@ -213,9 +213,31 @@ class BrainFlowDriver(BaseDriver):
             raise
 
     async def stop(self) -> None:
-        """Stop neurOS streaming and release the BrainFlow session."""
-        await super().stop()
-        await self._cleanup_board(raise_errors=True)
+        """Stop neurOS streaming and release the BrainFlow session.
+
+        Hardware cleanup is attempted even if the background acquisition task
+        has already failed. The original acquisition failure remains the
+        primary exception unless cleanup is the only failure.
+        """
+        runtime_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+
+        try:
+            await super().stop()
+        except BaseException as exc:
+            runtime_error = exc
+
+        try:
+            await self._cleanup_board(raise_errors=True)
+        except BaseException as exc:
+            cleanup_error = exc
+
+        if runtime_error is not None:
+            if cleanup_error is not None:
+                runtime_error.add_note(f"BrainFlow cleanup also failed: {cleanup_error!r}")
+            raise runtime_error
+        if cleanup_error is not None:
+            raise cleanup_error
 
     async def _cleanup_board(self, *, raise_errors: bool) -> None:
         errors: list[BaseException] = []
@@ -264,10 +286,10 @@ class BrainFlowDriver(BaseDriver):
                     await asyncio.sleep(idle_sleep)
                     continue
 
-                max_required_row = max(
-                    (*self._eeg_channels,)
-                    + ((self._timestamp_channel,) if self._timestamp_channel is not None else ())
-                )
+                required_rows = list(self._eeg_channels)
+                if self._timestamp_channel is not None:
+                    required_rows.append(self._timestamp_channel)
+                max_required_row = max(required_rows)
                 if max_required_row >= matrix.shape[0]:
                     raise RuntimeError(
                         "BrainFlow payload row count does not match the board metadata: "
