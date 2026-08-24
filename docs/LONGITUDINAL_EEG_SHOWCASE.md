@@ -1,290 +1,341 @@
 # Longitudinal EEG Evidence Showcase
 
-This study is the first executable real-dataset showcase for the neurOS evidence plane.
+The longitudinal EEG showcase is the first public-facing demonstration of the neurOS evidence plane.
 
-The goal is not to manufacture a flattering EEG accuracy number. The goal is to answer a deployment question that a BCI engineer, researcher, or buyer can understand immediately:
+The central question remains deliberately concrete:
 
-> **If this decoder worked yesterday, how much data does it need tomorrow?**
+> **If this neural decoder worked on prior sessions, how much new target-session data does it need now?**
 
-## First study: Kumar2024
+The showcase now has two executable layers:
 
-The recommended first run is the MOABB `Kumar2024` motor-imagery dataset because it contains repeated separate-day sessions and an offline-to-online training progression.
+1. a transparent CSP + LDA evidence floor;
+2. an authoritative multi-method model ladder under the exact same deployment semantics.
 
-Start with a small evidence run to validate the complete artifact chain:
+For the implementation contract and seven comparison lanes, see [Longitudinal Model Ladder](LONGITUDINAL_MODEL_LADDER.md).
 
-```bash
-python -m pip install -e "packages/neuros-foundation[evidence]"
+## Flagship study: Kumar2024
 
-python scripts/evidence/run_moabb_longitudinal.py \
-  --dataset kumar2024 \
-  --subjects 1,2,3 \
-  --budgets 0,1,2,5,10 \
-  --history-policy prior \
-  --output evidence/kumar2024-csp-lda
-```
+Kumar2024 remains the recommended first longitudinal EEG study because it provides six separate-day sessions from 18 BCI-naive participants, with MOABB session `0` representing the offline session and sessions `1` through `5` the chronological online sessions.
 
-Then scale to the predeclared subject set only after the artifact identities and dataset chronology have been inspected.
+The original experiment also contains two different training/adaptation cohorts:
 
-## Two different questions, two explicit policies
+- MOABB subjects 1–9: `GR`;
+- MOABB subjects 10–18: `PAR`.
 
-### `prior` — prospective-style longitudinal evidence
+neurOS preserves that cohort identity in every promoted case rather than pooling the trajectories blindly.
 
-This is the default.
-
-For a target session `S3`:
+The preregistered promoted frontier in Issue #27 uses:
 
 ```text
-S1          S2          S3                         S4          S5
-|-----------|-----------|--------------------------|-----------|
-   HISTORY      HISTORY     CALIBRATION + EVAL        EXCLUDED
-
-fit source data: S1 + S2
-calibration:     declared subset of S3
-final test:      frozen disjoint subset of S3
-future data:     S4 + S5 never enters fitting
+0, 1, 2, 5, 10 labeled target examples / class
 ```
 
-The first observed session cannot be evaluated under this policy because no prior history exists.
+with prospective-style prior-session history.
 
-This is the appropriate default for claims such as:
+## Prospective chronology
 
-- next-session robustness;
-- next-day calibration burden;
-- prospective adaptation;
-- degradation as time since initial calibration grows.
+`history_policy = prior` is the primary policy.
 
-First-observed upstream metadata order is treated as chronology by the software. Before publishing or promoting a result, verify that ordering assumption against the dataset documentation and preserve the exact upstream data/version identity.
-
-### `all-other` — symmetric cross-session evaluation
-
-For the same target session `S3`:
+For target session `S3`:
 
 ```text
-S1          S2          S3                         S4          S5
-|-----------|-----------|--------------------------|-----------|
-   TRAIN        TRAIN      CALIBRATION + EVAL          TRAIN       TRAIN
+S0             S1             S2             S3             S4
+|--------------|--------------|--------------|--------------|
+  SOURCE          SOURCE         TARGET          FUTURE
+                                  |   |           EXCLUDED
+                            calibration eval
 ```
 
-This mode is useful for conventional cross-session comparison, but it may learn from recordings collected after the target session. It must never be labeled as prospective or next-session deployment evidence.
+Only sessions preceding the target may enter source fitting.
 
-Run it explicitly:
-
-```bash
-python scripts/evidence/run_moabb_longitudinal.py \
-  --dataset kumar2024 \
-  --subjects 1,2,3 \
-  --history-policy all-other \
-  --output evidence/kumar2024-csp-lda-all-other
-```
-
-## Fixed evaluation identity
-
-Within the held-out session, neurOS freezes two disjoint sets once:
+The target session is partitioned once into:
 
 ```text
-held-out session
-      |
-      +--> ordered calibration pool
-      |
-      +--> frozen evaluation set
+target session
+   |
+   +--> ordered calibration pool
+   |
+   +--> immutable final evaluation set
 ```
 
-The evaluation set never changes when calibration budget changes.
+Future sessions never enter fitting under a prospective claim.
 
-For a two-class task:
+`history_policy = all-other` remains available as a separately labeled symmetric cross-session sensitivity analysis. It may use sessions recorded after the target and therefore is not next-session deployment evidence.
+
+## One authority, every method
+
+The multi-method showcase no longer relies on each model recreating a split from configuration.
+
+For every subject/target-session case neurOS serializes a `LongitudinalCaseAuthority` containing the actual source, calibration and evaluation indices plus a hash of the processed EEG.
 
 ```text
-0 / class   -> source history only
-1 / class   -> source history + 2 calibration trials
-2 / class   -> source history + 4 calibration trials
-5 / class   -> source history + 10 calibration trials
-10 / class  -> source history + 20 calibration trials
+processed EEG + labels + groups
+             |
+             v
+ LongitudinalCaseAuthority
+             |
+    +--------+---------+----------+
+    |        |         |          |
+ CSP+LDA   EEGNet   Conformer   frozen transfer
+                                  |
+                             SourceWeigher
 ```
 
-All five models are evaluated on exactly the same frozen held-out examples.
+A method must restore this authority before fitting.
 
-This prevents a calibration curve from quietly becoming easier as more calibration examples are consumed.
+If processed samples or identity change, the benchmark fails before training rather than producing an incomparable result.
 
-## Initial baseline
+## Current executable ladder
 
-The first benchmark intentionally uses:
+The Evidence Console can now render:
 
-**CSP + Linear Discriminant Analysis**
+- CSP + LDA;
+- EEGNet;
+- EEG-Conformer;
+- frozen EEGNet + matched logistic readout;
+- frozen EEG-Conformer + matched logistic readout;
+- SourceWeigher on the exact frozen EEGNet representation;
+- SourceWeigher on the exact frozen EEG-Conformer representation.
 
-This gives neurOS a transparent floor before introducing higher-capacity models.
+The frozen and SourceWeigher versions of one encoder share the exact same trained encoder state and representation tensors. The evidence bundle records both the learned-state SHA-256 and representation SHA-256.
 
-The progression should be:
+That lets the weighted-vs-unweighted comparison isolate the transfer strategy instead of quietly retraining two different encoders.
+
+## SourceWeigher is not secretly transductive
+
+SourceWeigher may use:
 
 ```text
-CSP + LDA
-    |
-    +--> EEGNet
-    +--> EEG-Conformer
-    +--> frozen foundation representation + matched readout
-    +--> SourceWeigher transfer
-    +--> ORION EEG representation, only after an explicit EEG contract exists
+prior-session frozen embeddings
+              +
+declared target calibration embeddings
 ```
 
-Every method must consume the same frozen split and calibration identities.
+It may not inspect final evaluation embeddings when estimating target similarity.
 
-## Artifact contract
+At labeled calibration budget `0`, target-dependent SourceWeigher is therefore explicitly unavailable.
 
-A completed study emits:
+The UI should display that absence rather than drawing a fabricated zero-shot point.
+
+## Evidence identity stack
+
+Every promoted neural operating point should expose three different identities:
+
+### Data identity
+
+- dataset/version;
+- processed-data SHA-256;
+- source/calibration/evaluation indices;
+- authority, partition and calibration fingerprints.
+
+### Learned-model identity
+
+- method configuration;
+- model seed;
+- parameter count;
+- complete trained `state_dict` SHA-256;
+- analysis-manifest fingerprint.
+
+### Representation identity
+
+For frozen-transfer lanes:
+
+- exact source embedding SHA contribution;
+- exact target calibration-pool embedding SHA contribution;
+- exact final evaluation embedding SHA contribution;
+- combined `representation_sha256`;
+- `encoder_state_fingerprint`.
+
+A configuration hash is not presented as a substitute for a learned-model hash.
+
+## The Evidence Console
+
+The strongest public interface is not a generic leaderboard. It is a linked explanation of **chronology, recalibration burden, source trust and provenance**.
+
+### 1. Chronology ribbon
 
 ```text
-evidence/kumar2024-csp-lda/
-├── study_manifest.json
-├── results.csv
-├── summary.json
-├── report.md
-└── artifact_hashes.json
+PAST                               TARGET                        FUTURE
+S0 -------- S1 -------- S2 -------- S3 -------- S4 -------- S5
+source      source      source      held out     excluded    excluded
+                                     |
+                              calibration | eval
 ```
 
-### `study_manifest.json`
+Selecting a target should reveal:
 
-Contains the evidence authority:
+- source sessions;
+- excluded future sessions;
+- calibration examples consumed;
+- immutable evaluation fingerprint;
+- GR/PAR cohort for Kumar2024.
 
-- dataset/source card;
-- Git/package/platform identity;
-- paradigm and event semantics;
-- chronological or symmetric history policy;
-- upstream-observed session order;
-- source sessions for every target session;
-- partition fingerprints;
-- fixed calibration/evaluation split fingerprints;
-- requested calibration budgets;
-- preprocessing and model identity;
-- explicit limitations.
-
-### `results.csv`
-
-One row per:
+### 2. Calibration frontier
 
 ```text
-subject × held-out session × calibration budget
-```
-
-with at least:
-
-- accuracy;
-- balanced accuracy;
-- ROC-AUC where valid;
-- fit time;
-- inference time per trial;
-- partition fingerprint;
-- calibration-split fingerprint.
-
-### `summary.json`
-
-Contains the aggregate calibration frontier used by the report/UI.
-
-### `report.md`
-
-Human-readable rendering of the same result rows. It is a view, not a second source of truth.
-
-### `artifact_hashes.json`
-
-SHA-256 identities for the evidence files.
-
-## Evidence Console design
-
-The public visualization should consume the artifact bundle directly.
-
-### Panel 1 — Session chronology
-
-Show a horizontal session timeline:
-
-```text
-PAST                              TARGET                         FUTURE
-S1 -------- S2 -------- S3 -------- S4 -------- S5 -------- S6
-history     history     history     held out      excluded    excluded
-                                      |
-                              calibration | evaluation
-```
-
-Selecting a target session should reveal:
-
-- which sessions were allowed into source training;
-- how many calibration examples were consumed;
-- the immutable evaluation fingerprint;
-- any excluded future sessions.
-
-The future-excluded region should be visibly different from train data. This makes leakage semantics inspectable rather than buried in a methods paragraph.
-
-### Panel 2 — Calibration frontier
-
-Primary chart:
-
-```text
-held-out balanced accuracy
+balanced accuracy
 ^
-|                         ORION / best validated method
+|                         method A
 |                  *------*
-|            *-----
-|      *-----         foundation representation
-|  *---
-| *        CSP+LDA
-+---------------------------------> labeled calibration / class
- 0        1       2        5       10
+|             *----        method B
+|        *----
+|   *----                    CSP+LDA
++------------------------------------> labels / class
+   0    1    2       5          10
 ```
 
-Do not display only the final point.
+Do not reduce the result to the largest-budget endpoint.
 
-Useful derived quantities:
+The primary Kumar comparison for methods defined at zero target calibration is normalized area under the full `0 -> 10` frontier.
 
-- zero-calibration score;
-- largest-budget score;
-- area under the calibration frontier;
-- labels needed to reach a predeclared performance threshold;
-- adaptation wall-clock required to reach that threshold.
+Target-dependent adaptation methods additionally receive a separate **positive-budget adaptation AUC**. These two quantities must remain visibly distinct.
 
-The economically legible BCI metric is often **calibration saved**, not raw accuracy gained.
+### 3. Source trust panel
 
-### Panel 3 — Session drift
+For SourceWeigher show:
 
-Display zero-calibration performance versus session index/time.
+```text
+S0  ███████░  0.41
+S1  ███░░░░░  0.18
+S2  ████████  0.41
+```
 
-This reveals whether a method is actually stable or merely easy to recalibrate.
+alongside:
 
-### Panel 4 — Evidence identity
+- effective sample size;
+- entropy;
+- largest source weight;
+- moment-matching residual;
+- convergence diagnostics.
 
-Keep the following visible beside every chart:
+This turns adaptation from a black box into an inspectable statement about which historical neural states the system considered useful.
+
+### 4. Drift and cohort views
+
+The same artifact bundle should provide:
+
+- pooled frontier;
+- GR frontier;
+- PAR frontier;
+- zero-calibration performance by target-session index;
+- failure rate by method/session;
+- fit/adaptation time and inference latency.
+
+These are views of one authority, not separately maintained analyses.
+
+### 5. Model and representation diagnostics
+
+Beside task score expose:
+
+- model parameter count;
+- learned-state SHA;
+- training wall-clock;
+- trial inference latency;
+- representation effective rank;
+- feature variance;
+- mean norm;
+- anisotropy proxy.
+
+This is particularly important because the current EEGNet and EEG-Conformer baselines are not capacity matched. A performance difference must not automatically be narrated as an attention-vs-convolution mechanism.
+
+### 6. Reproducibility drawer
+
+Keep visible or one click away:
 
 ```text
 dataset revision
 Git revision
-method/model revision
+package versions
 history policy
-partition fingerprint
-calibration split fingerprint
-artifact hash status
+split seed
+model seed
+processed-data SHA
+model-state SHA
+representation SHA when applicable
+authority fingerprint
+artifact verification status
 ```
 
-A screenshot without these identities should not be treated as promoted neurOS evidence.
+A screenshot without evidence identity is a visualization, not a promoted neurOS result.
 
-## Comparison promotion rules
+## Artifact bundle
 
-A new model may be added to the longitudinal figure only when:
+The multi-method study emits:
 
-1. it consumes the exact same partition/calibration manifests;
-2. preprocessing fit boundaries are declared;
-3. hyperparameter/model selection does not inspect final evaluation examples;
-4. random seeds and uncertainty are reported where relevant;
-5. failures are retained in the artifact rather than filtered from the plot;
-6. model identity and weight/artifact hashes are pinned;
-7. the result is clearly labeled offline real-dataset evidence, not hardware or clinical qualification.
+```text
+study_manifest.json
+split_authority.json
+method_runs.json
+results.csv
+summary.json
+report.md
+artifact_hashes.json
+```
 
-## Next implementation sequence
+The `report.md` and eventual web Evidence Console must be rendered from these machine-readable artifacts.
 
-After the CSP+LDA runner is qualified:
+The scientific record and polished demonstration must not become two hand-maintained surfaces.
 
-1. freeze one small Kumar2024 evidence bundle;
-2. add EEGNet and EEG-Conformer under identical manifests;
-3. add representation-only foundation-model comparisons using matched linear readouts;
-4. add SourceWeigher using prior sessions as candidate sources and the target-session calibration pool only for allowed adaptation;
-5. measure subject/session leakage and representation geometry;
-6. scale the predeclared study across participants;
-7. render the final evidence bundle in the neurOS Evidence Console;
-8. repeat the same calibration-frontier idea on FALCON with its native chronological day split.
+## Failure preservation
 
-The showcase succeeds when a viewer can understand, in seconds, **what data the model was allowed to know, how badly it drifted, how much calibration recovered it, and whether every number can be reproduced.**
+Failures remain part of the evidence.
+
+If a model fails for a case/seed, the result table contains failed operating points instead of silently deleting that subject/session.
+
+A descriptive bundle passes its promotion gate only when:
+
+- method failures are absent;
+- unexpected unavailable points are absent;
+- every method preserves identical case membership across the calibration budgets it claims to support.
+
+## How to run the two layers
+
+### Transparent floor
+
+```bash
+python scripts/evidence/run_moabb_longitudinal.py \
+  --dataset kumar2024 \
+  --subjects 1,10 \
+  --budgets 0,1,2,5,10 \
+  --history-policy prior \
+  --output evidence/kumar-csp-pilot
+```
+
+### Full model ladder
+
+Install the sibling SourceWeigher workspace package explicitly, then the foundation evidence/ladder profile:
+
+```bash
+python -m pip install -e packages/neuros-core
+python -m pip install -e "packages/neuros-models[pytorch]"
+python -m pip install -e packages/neuros-sourceweigher
+python -m pip install -e "packages/neuros-foundation[evidence,ladder]"
+
+python scripts/evidence/run_moabb_model_ladder.py \
+  --dataset kumar2024 \
+  --subjects 1,10 \
+  --methods csp-lda,eegnet,eeg-conformer,frozen-eegnet,frozen-eeg-conformer,sourceweigher-eegnet,sourceweigher-eeg-conformer \
+  --model-seeds 101 \
+  --budgets 0,1,2,5,10 \
+  --history-policy prior \
+  --split-seed 2026 \
+  --output evidence/kumar-model-ladder-pilot
+```
+
+The GitHub Actions workflow **neurOS longitudinal EEG model ladder** provides the same real-dataset study as an explicit manual run and uploads the complete evidence bundle.
+
+## What comes next
+
+Once the Kumar provenance pilot is inspected and the exact study dependencies are frozen:
+
+1. execute the complete CSP floor across all preregistered cases;
+2. scale the task-decoder and frozen-transfer lanes under the same authorities;
+3. add subject/session leakage and cross-session CKA under those same frozen examples;
+4. add montage/channel perturbation robustness;
+5. connect the existing mechanistic evidence-pack format to the same case authority;
+6. move the calibration-frontier concept to FALCON's native chronological cross-day splits;
+7. admit an ORION EEG representation only after ORION has an explicit EEG input/token contract.
+
+The public claim should grow only as the evidence grows.
+
+The showcase succeeds when a viewer can understand in seconds **what the system was allowed to know, how the neural distribution moved, how much calibration was needed, which prior sources were trusted, and exactly what data/model/code produced the result.**
