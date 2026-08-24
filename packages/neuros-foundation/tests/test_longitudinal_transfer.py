@@ -13,6 +13,7 @@ from neuros.foundation_models import (
 )
 from neuros.foundation_models.longitudinal_transfer import (
     FrozenTransferMethodSpec,
+    prepare_frozen_encoder_case,
     run_frozen_transfer_case,
 )
 
@@ -76,9 +77,20 @@ def _encoder_kwargs():
     }
 
 
+def _prepared(data, authority):
+    return prepare_frozen_encoder_case(
+        data,
+        authority,
+        encoder_id="eegnet",
+        encoder_seed=101,
+        encoder_kwargs=_encoder_kwargs(),
+    )
+
+
 def test_frozen_logistic_reuses_one_source_trained_encoder_across_budgets():
     data = _fixture()
     authority = _authority(data)
+    prepared = _prepared(data, authority)
     spec = FrozenTransferMethodSpec(
         method_id="frozen-eegnet",
         strategy="frozen-logistic",
@@ -92,22 +104,100 @@ def test_frozen_logistic_reuses_one_source_trained_encoder_across_budgets():
         authority,
         spec=spec,
         budgets_per_class=(0, 1, 2),
+        prepared=prepared,
     )
 
     assert result.authority_fingerprint == authority.authority_fingerprint
-    assert result.encoder_parameter_count > 0
-    assert result.encoder_fit_s >= 0.0
+    assert result.encoder_state_manifest["encoder_parameter_count"] > 0
+    assert result.encoder_state_manifest["encoder_fit_s"] >= 0.0
+    assert result.encoder_state_manifest["encoder_state_fingerprint"] == prepared.fingerprint
+    assert result.encoder_state_manifest["representation_sha256"] == prepared.representation_sha256
     assert len(result.rows) == 3
     assert {row["status"] for row in result.rows} == {"ok"}
     assert {row["method_id"] for row in result.rows} == {"frozen-eegnet"}
     assert {row["transfer_strategy"] for row in result.rows} == {"frozen-logistic"}
     assert [row["calibration_per_class"] for row in result.rows] == [0, 1, 2]
     assert all(row["sourceweigher"] is None for row in result.rows)
+    assert {row["encoder_state_fingerprint"] for row in result.rows} == {prepared.fingerprint}
+    assert {row["representation_sha256"] for row in result.rows} == {prepared.representation_sha256}
     for row in result.rows:
         assert row["authority_fingerprint"] == authority.authority_fingerprint
         assert 0.0 <= row["balanced_accuracy"] <= 1.0
         assert 0.0 <= row["brier_score"] <= 2.0
     json.dumps(result.to_dict(), sort_keys=True)
+
+
+def test_sourceweigher_and_unweighted_transfer_share_exact_prepared_encoder(monkeypatch):
+    import neuros.foundation_models.longitudinal_transfer as transfer
+
+    data = _fixture()
+    authority = _authority(data)
+    prepared = _prepared(data, authority)
+    observed_target_sizes = []
+    real = transfer._sourceweigher_result
+
+    def wrapped(*, source_embeddings, target_embeddings):
+        observed_target_sizes.append(len(target_embeddings))
+        return real(
+            source_embeddings=source_embeddings,
+            target_embeddings=target_embeddings,
+        )
+
+    monkeypatch.setattr(transfer, "_sourceweigher_result", wrapped)
+    frozen = run_frozen_transfer_case(
+        data,
+        authority,
+        spec=FrozenTransferMethodSpec(
+            method_id="frozen-eegnet",
+            strategy="frozen-logistic",
+            encoder_id="eegnet",
+            encoder_seed=101,
+            encoder_kwargs=_encoder_kwargs(),
+        ),
+        budgets_per_class=(0, 1, 2),
+        prepared=prepared,
+    )
+    weighted = run_frozen_transfer_case(
+        data,
+        authority,
+        spec=FrozenTransferMethodSpec(
+            method_id="sourceweigher-eegnet",
+            strategy="sourceweigher-mean",
+            encoder_id="eegnet",
+            encoder_seed=101,
+            encoder_kwargs=_encoder_kwargs(),
+        ),
+        budgets_per_class=(0, 1, 2),
+        prepared=prepared,
+    )
+
+    assert observed_target_sizes == [2, 4]
+    assert frozen.encoder_state_manifest["encoder_state_fingerprint"] == weighted.encoder_state_manifest["encoder_state_fingerprint"]
+    assert frozen.encoder_state_manifest["representation_sha256"] == weighted.encoder_state_manifest["representation_sha256"]
+    assert frozen.encoder_state_manifest["representation_sha256"] == prepared.representation_sha256
+
+    zero, one, two = weighted.rows
+    assert zero["status"] == "unavailable_no_target_observations"
+    assert zero["method_id"] == "sourceweigher-eegnet"
+    assert zero["transfer_strategy"] == "sourceweigher-mean"
+    assert zero["partition_fingerprint"] == authority.partition_fingerprint
+    assert zero["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
+    assert zero["encoder_state_fingerprint"] == prepared.fingerprint
+    assert "evaluation examples are forbidden" in zero["failure_reason"]
+
+    for row in (one, two):
+        assert row["status"] == "ok"
+        assert row["method_id"] == "sourceweigher-eegnet"
+        assert row["representation_sha256"] == prepared.representation_sha256
+        payload = row["sourceweigher"]
+        assert payload is not None
+        assert payload["source_ids"] == ["0", "1"]
+        assert np.isclose(sum(payload["weights"]), 1.0)
+        diagnostics = payload["diagnostics"]
+        assert diagnostics["effective_sample_size"] >= 1.0
+        assert diagnostics["entropy"] >= 0.0
+        assert diagnostics["max_weight"] <= 1.0 + 1e-9
+        assert diagnostics["iterations"] >= 1
 
 
 def test_distinct_encoders_can_have_distinct_ladder_method_ids():
@@ -128,62 +218,10 @@ def test_distinct_encoders_can_have_distinct_ladder_method_ids():
     assert first.fingerprint != second.fingerprint
 
 
-def test_sourceweigher_uses_only_declared_target_calibration_embeddings(monkeypatch):
-    import neuros.foundation_models.longitudinal_transfer as transfer
-
-    data = _fixture()
-    authority = _authority(data)
-    observed_target_sizes = []
-    real = transfer._sourceweigher_result
-
-    def wrapped(*, source_embeddings, target_embeddings):
-        observed_target_sizes.append(len(target_embeddings))
-        return real(
-            source_embeddings=source_embeddings,
-            target_embeddings=target_embeddings,
-        )
-
-    monkeypatch.setattr(transfer, "_sourceweigher_result", wrapped)
-    spec = FrozenTransferMethodSpec(
-        method_id="sourceweigher-eegnet",
-        strategy="sourceweigher-mean",
-        encoder_id="eegnet",
-        encoder_seed=101,
-        encoder_kwargs=_encoder_kwargs(),
-    )
-    result = run_frozen_transfer_case(
-        data,
-        authority,
-        spec=spec,
-        budgets_per_class=(0, 1, 2),
-    )
-
-    assert observed_target_sizes == [2, 4]
-    zero, one, two = result.rows
-    assert zero["status"] == "unavailable_no_target_observations"
-    assert zero["method_id"] == "sourceweigher-eegnet"
-    assert zero["transfer_strategy"] == "sourceweigher-mean"
-    assert zero["partition_fingerprint"] == authority.partition_fingerprint
-    assert zero["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
-    assert "evaluation examples are forbidden" in zero["failure_reason"]
-
-    for row in (one, two):
-        assert row["status"] == "ok"
-        assert row["method_id"] == "sourceweigher-eegnet"
-        payload = row["sourceweigher"]
-        assert payload is not None
-        assert payload["source_ids"] == ["0", "1"]
-        assert np.isclose(sum(payload["weights"]), 1.0)
-        diagnostics = payload["diagnostics"]
-        assert diagnostics["effective_sample_size"] >= 1.0
-        assert diagnostics["entropy"] >= 0.0
-        assert diagnostics["max_weight"] <= 1.0 + 1e-9
-        assert diagnostics["iterations"] >= 1
-
-
 def test_sourceweigher_zero_only_run_is_explicitly_unavailable():
     data = _fixture()
     authority = _authority(data)
+    prepared = _prepared(data, authority)
     spec = FrozenTransferMethodSpec(
         method_id="sourceweigher-eegnet",
         strategy="sourceweigher-mean",
@@ -196,6 +234,7 @@ def test_sourceweigher_zero_only_run_is_explicitly_unavailable():
         authority,
         spec=spec,
         budgets_per_class=(0,),
+        prepared=prepared,
     )
     row = result.rows[0]
     assert row["status"] == "unavailable_no_target_observations"
@@ -204,9 +243,10 @@ def test_sourceweigher_zero_only_run_is_explicitly_unavailable():
     assert row["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
 
 
-def test_frozen_transfer_validates_authority_before_encoder_training():
+def test_prepared_encoder_validates_authority_before_transfer():
     data = _fixture()
     authority = _authority(data)
+    prepared = _prepared(data, authority)
     changed_x = data.X.copy()
     changed_x[0, 0, 0] += 0.2
     changed = GroupedEvaluationData(
@@ -229,4 +269,5 @@ def test_frozen_transfer_validates_authority_before_encoder_training():
             authority,
             spec=spec,
             budgets_per_class=(0,),
+            prepared=prepared,
         )
