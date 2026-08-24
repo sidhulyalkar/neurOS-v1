@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from neuros.compatibility import IntegrationStatus, compatibility_inventory, compatibility_payload
 from neuros.errors import ConfigurationError
 from neuros.plugins import PluginKind
 
@@ -25,7 +26,7 @@ def _add_json_flag(parser: argparse.ArgumentParser) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="neuros", description="neurOS BCI runtime CLI")
+    parser = argparse.ArgumentParser(prog="neuros", description="neurOS neural runtime CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     doctor_parser = subparsers.add_parser("doctor", help="Inspect installation and plugin health")
@@ -37,6 +38,23 @@ def _parse_args() -> argparse.Namespace:
 
     devices_parser = subparsers.add_parser("devices", help="List installed source/device plugins")
     _add_json_flag(devices_parser)
+
+    compatibility_parser = subparsers.add_parser(
+        "compatibility",
+        help="Inspect evidence-backed compatibility with external neuroscience ecosystems",
+    )
+    compatibility_parser.add_argument(
+        "integration",
+        nargs="?",
+        choices=[item.integration_id for item in compatibility_inventory()],
+        help="Optional integration id to inspect",
+    )
+    compatibility_parser.add_argument(
+        "--status",
+        choices=[item.value for item in IntegrationStatus],
+        help="Filter the inventory by public support state",
+    )
+    _add_json_flag(compatibility_parser)
 
     validate_parser = subparsers.add_parser("validate", help="Validate and resolve a runtime YAML config")
     validate_parser.add_argument("config", type=str)
@@ -170,6 +188,24 @@ def _emit(value: Any, *, machine: bool = False) -> None:
     print(value)
 
 
+def _emit_compatibility(records: list[dict[str, object]], *, machine: bool) -> None:
+    if machine:
+        _emit(records, machine=True)
+        return
+    if not records:
+        print("No integrations match the requested filter.")
+        return
+    for record in records:
+        evidence = record["evidence_tier"] or "none"
+        print(
+            f"{record['integration_id']:<18} {record['status']:<12} "
+            f"evidence={evidence:<18} {record['name']}"
+        )
+        print(f"  {record['notes']}")
+        if record["install_hint"]:
+            print(f"  install: {record['install_hint']}")
+
+
 async def _print_output(output: Any) -> None:
     print(json.dumps(_jsonable(output), default=str, separators=(",", ":")))
 
@@ -195,6 +231,11 @@ def main() -> None:
 
         if args.command == "devices":
             _emit(devices(), machine=args.json)
+            return
+
+        if args.command == "compatibility":
+            result = compatibility_payload(args.integration, status=args.status)
+            _emit_compatibility(result, machine=args.json)
             return
 
         if args.command == "validate":
