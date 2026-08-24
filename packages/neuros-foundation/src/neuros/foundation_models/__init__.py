@@ -26,6 +26,16 @@ from neuros.foundation_models.probes import (
     pairwise_cka,
     representation_report,
 )
+from neuros.foundation_models.real_world import (
+    REAL_WORLD_EVIDENCE_SOURCES,
+    EvaluationPartition,
+    EvidenceSource,
+    GroupedEvaluationData,
+    collect_moabb,
+    find_evidence_sources,
+    get_evidence_source,
+    hold_out_groups,
+)
 from neuros.foundation_models.registry import (
     DEFAULT_REGISTRY,
     AdapterUnavailableError,
@@ -116,6 +126,14 @@ __all__ = [
     "BenchmarkReport",
     "benchmark_embeddings",
     "sample_efficiency_curve",
+    "EvidenceSource",
+    "REAL_WORLD_EVIDENCE_SOURCES",
+    "get_evidence_source",
+    "find_evidence_sources",
+    "GroupedEvaluationData",
+    "EvaluationPartition",
+    "collect_moabb",
+    "hold_out_groups",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",

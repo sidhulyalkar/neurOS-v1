@@ -1,4 +1,4 @@
-"""Command-line discovery tools for the neural foundation-model landscape."""
+"""Command-line discovery tools for neural models and real-world evidence sources."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import json
 from typing import Any
 
+from .real_world import find_evidence_sources
 from .registry import DEFAULT_REGISTRY
 
 
@@ -48,10 +49,38 @@ def _print_cards(cards: tuple[Any, ...]) -> None:
         print("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
 
 
+def _print_evidence_sources(sources: tuple[Any, ...]) -> None:
+    if not sources:
+        print("No evidence sources matched the requested filters.")
+        return
+    rows = [
+        (
+            source.id,
+            source.ecosystem,
+            source.modality,
+            _compact(source.roles, limit=3),
+            source.title,
+        )
+        for source in sources
+    ]
+    header = ("ID", "ECOSYSTEM", "MODALITY", "ROLES", "TITLE")
+    widths = [
+        max(len(row[index]) for row in rows + [header])
+        for index in range(len(header))
+    ]
+    print("  ".join(value.ljust(widths[index]) for index, value in enumerate(header)))
+    print("  ".join("-" * width for width in widths))
+    for row in rows:
+        print("  ".join(value.ljust(widths[index]) for index, value in enumerate(row)))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="neuros-foundation",
-        description="Discover, compare, and inspect neural foundation models across modalities.",
+        description=(
+            "Discover, compare, and inspect neural foundation models and curated "
+            "real-world evidence sources."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -76,6 +105,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local execution adapters")
     doctor_parser.add_argument("--json", action="store_true")
+
+    evidence_parser = subparsers.add_parser(
+        "evidence",
+        help="List curated public sources selected for real-world neurOS evidence",
+    )
+    evidence_parser.add_argument("--modality")
+    evidence_parser.add_argument("--ecosystem")
+    evidence_parser.add_argument("--role")
+    evidence_parser.add_argument("--json", action="store_true")
 
     return parser
 
@@ -132,6 +170,18 @@ def main(argv: list[str] | None = None) -> int:
             for row in rows:
                 mark = "OK" if row["available"] else "MISSING"
                 print(f"[{mark}] {row['model_id']}: {row['reason']}")
+        return 0
+
+    if args.command == "evidence":
+        sources = find_evidence_sources(
+            modality=args.modality,
+            ecosystem=args.ecosystem,
+            role=args.role,
+        )
+        if args.json:
+            _emit_json([source.to_dict() for source in sources])
+        else:
+            _print_evidence_sources(sources)
         return 0
 
     return 2

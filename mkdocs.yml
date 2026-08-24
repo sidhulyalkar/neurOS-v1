@@ -52,6 +52,9 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Project Status: PROJECT_STATUS.md
+  - Real-World Evidence:
+      - Evidence Program: REAL_WORLD_EVIDENCE.md
+      - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
   - Installation: getting-started/installation.md
   - Architecture: ARCHITECTURE.md
   - API Surface: API_REFERENCE.md
