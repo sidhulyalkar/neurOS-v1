@@ -217,7 +217,7 @@ class BrainFlowDriver(BaseDriver):
 
         Hardware cleanup is attempted even if the background acquisition task
         has already failed. The original acquisition failure remains the
-        primary exception unless cleanup is the only failure.
+        primary exception unless cleanup also fails.
         """
         runtime_error: BaseException | None = None
         cleanup_error: BaseException | None = None
@@ -232,9 +232,12 @@ class BrainFlowDriver(BaseDriver):
         except BaseException as exc:
             cleanup_error = exc
 
+        if runtime_error is not None and cleanup_error is not None:
+            raise RuntimeError(
+                "BrainFlow acquisition failed and hardware cleanup also failed: "
+                f"{cleanup_error!r}"
+            ) from runtime_error
         if runtime_error is not None:
-            if cleanup_error is not None:
-                runtime_error.add_note(f"BrainFlow cleanup also failed: {cleanup_error!r}")
             raise runtime_error
         if cleanup_error is not None:
             raise cleanup_error
