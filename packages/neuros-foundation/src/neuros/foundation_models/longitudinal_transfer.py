@@ -26,26 +26,34 @@ from .longitudinal_methods import (
     _resolved_config,
     _score,
 )
-from .probes import representation_report
 from .real_world import GroupedEvaluationData
 
-FrozenTransferId = Literal["frozen-logistic", "sourceweigher-mean"]
+FrozenTransferStrategy = Literal["frozen-logistic", "sourceweigher-mean"]
 
 
 @dataclass(frozen=True, slots=True)
 class FrozenTransferMethodSpec:
-    """Identity for a source-trained frozen encoder plus matched linear readout."""
+    """Identity for a source-trained frozen encoder plus matched linear readout.
 
-    method_id: FrozenTransferId
+    ``method_id`` identifies the public comparison lane, for example
+    ``frozen-eegnet`` or ``sourceweigher-eeg-conformer``. ``strategy`` names the
+    transfer algorithm independently. Keeping the two fields separate prevents
+    aggregation from collapsing distinct encoders into one curve.
+    """
+
+    method_id: str
+    strategy: FrozenTransferStrategy
     encoder_id: Literal["eegnet", "eeg-conformer"]
     encoder_seed: int
     encoder_kwargs: Mapping[str, Any] = field(default_factory=dict)
     readout_c: float = 1.0
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
-        if self.method_id not in {"frozen-logistic", "sourceweigher-mean"}:
-            raise ValueError(f"unsupported frozen transfer method {self.method_id!r}")
+        if not str(self.method_id).strip():
+            raise ValueError("method_id must be non-empty")
+        if self.strategy not in {"frozen-logistic", "sourceweigher-mean"}:
+            raise ValueError(f"unsupported frozen transfer strategy {self.strategy!r}")
         if self.encoder_id not in {"eegnet", "eeg-conformer"}:
             raise ValueError(f"unsupported encoder {self.encoder_id!r}")
         if self.readout_c <= 0:
@@ -58,12 +66,14 @@ class FrozenTransferMethodSpec:
                 "n_channels, n_classes and random_state are evidence-controlled; "
                 f"remove overrides {sorted(forbidden)}"
             )
+        object.__setattr__(self, "method_id", str(self.method_id).strip())
         object.__setattr__(self, "encoder_kwargs", MappingProxyType(dict(self.encoder_kwargs)))
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "method_id": self.method_id,
+            "strategy": self.strategy,
             "encoder_id": self.encoder_id,
             "encoder_seed": int(self.encoder_seed),
             "encoder_kwargs": dict(self.encoder_kwargs),
@@ -85,7 +95,7 @@ class FrozenTransferCaseResult:
     analysis_manifest_fingerprint: str
     encoder_fit_s: float
     rows: tuple[Mapping[str, Any], ...]
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "encoder_config", MappingProxyType(dict(self.encoder_config)))
@@ -260,13 +270,16 @@ def run_frozen_transfer_case(
             else np.empty((0, source_embedding.shape[1]), dtype=source_embedding.dtype)
         )
 
-        if spec.method_id == "sourceweigher-mean" and budget == 0:
+        if spec.strategy == "sourceweigher-mean" and budget == 0:
             rows.append(
                 {
                     "case_id": authority.case_id,
                     "authority_fingerprint": authority.authority_fingerprint,
                     "processed_data_sha256": authority.processed_data_sha256,
+                    "partition_fingerprint": authority.partition_fingerprint,
+                    "calibration_split_fingerprint": authority.calibration_split_fingerprint,
                     "method_id": spec.method_id,
+                    "transfer_strategy": spec.strategy,
                     "method_spec_fingerprint": spec.fingerprint,
                     "encoder_id": spec.encoder_id,
                     "encoder_seed": int(spec.encoder_seed),
@@ -285,7 +298,7 @@ def run_frozen_transfer_case(
         sample_weight: np.ndarray | None = None
         weighting_payload: dict[str, Any] | None = None
 
-        if spec.method_id == "sourceweigher-mean":
+        if spec.strategy == "sourceweigher-mean":
             weighting = _sourceweigher_result(
                 source_embeddings=source_embeddings_by_session,
                 target_embeddings=calibration_embedding,
@@ -305,7 +318,7 @@ def run_frozen_transfer_case(
             sample_weight = np.concatenate(
                 [source_weights, np.ones(len(calibration_indices), dtype=np.float64)]
             )
-        elif spec.method_id == "sourceweigher-mean":  # guarded above; defensive
+        elif spec.strategy == "sourceweigher-mean":  # guarded above; defensive
             raise RuntimeError("SourceWeigher reached zero budget unexpectedly")
 
         started = time.perf_counter()
@@ -329,6 +342,7 @@ def run_frozen_transfer_case(
                 "partition_fingerprint": authority.partition_fingerprint,
                 "calibration_split_fingerprint": authority.calibration_split_fingerprint,
                 "method_id": spec.method_id,
+                "transfer_strategy": spec.strategy,
                 "method_spec_fingerprint": spec.fingerprint,
                 "encoder_id": spec.encoder_id,
                 "encoder_seed": int(spec.encoder_seed),
