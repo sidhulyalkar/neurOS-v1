@@ -10,7 +10,8 @@ For each subject and held-out session this runner:
 4. freezes the remaining held-out trials as an ordered calibration pool;
 5. refits the same CSP+LDA baseline at nested per-class calibration budgets;
 6. evaluates every budget on the exact same held-out examples;
-7. writes machine-readable manifests, results, summary, hashes, and a report.
+7. keeps the public calibration frontier paired across subject-session cases;
+8. writes machine-readable manifests, results, summary, hashes, and a report.
 
 Large public datasets are downloaded by MOABB when this script is run. CI does
 not download them; contract behavior is tested with synthetic MOABB-shaped data.
@@ -228,18 +229,31 @@ def _std(values: Iterable[float]) -> float | None:
     return None if len(array) == 0 else float(np.std(array, ddof=1)) if len(array) > 1 else 0.0
 
 
+def _case_key(row: dict[str, Any]) -> tuple[str, str]:
+    return str(row["subject"]), str(row["held_out_session"])
+
+
+def _case_set_fingerprint(cases: set[tuple[str, str]]) -> str:
+    raw = json.dumps(sorted([list(case) for case in cases]), separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     by_budget: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_budget[int(row["calibration_per_class"])].append(row)
 
     curve = []
+    case_sets: dict[int, set[tuple[str, str]]] = {}
     for budget in sorted(by_budget):
         group = by_budget[budget]
+        cases = {_case_key(row) for row in group}
+        case_sets[budget] = cases
         curve.append(
             {
                 "calibration_per_class": budget,
-                "n_subject_session_cases": len(group),
+                "n_subject_session_cases": len(cases),
+                "case_set_fingerprint": _case_set_fingerprint(cases),
                 "mean_balanced_accuracy": _mean(row["balanced_accuracy"] for row in group),
                 "std_balanced_accuracy": _std(row["balanced_accuracy"] for row in group),
                 "mean_roc_auc": _mean(row["roc_auc"] for row in group),
@@ -249,6 +263,11 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 ),
             }
         )
+
+    paired = True
+    if case_sets:
+        reference = next(iter(case_sets.values()))
+        paired = all(cases == reference for cases in case_sets.values())
 
     improvement = None
     if len(curve) >= 2 and curve[0]["calibration_per_class"] == 0:
@@ -260,6 +279,7 @@ def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "primary_metric": "balanced_accuracy",
+        "paired_case_sets_identical": paired,
         "curve": curve,
         "largest_budget_minus_zero_balanced_accuracy": improvement,
         "interpretation": (
@@ -292,6 +312,11 @@ def _render_report(
         if args.history_policy == "prior"
         else "all other sessions; symmetric cross-session evaluation"
     )
+    pairing_text = (
+        "paired across identical subject-session cases"
+        if summary["paired_case_sets_identical"]
+        else "UNPAIRED exploratory curve; case set changes by budget"
+    )
     lines = [
         "# neurOS Longitudinal EEG Evidence Report",
         "",
@@ -299,22 +324,23 @@ def _render_report(
         f"- Baseline: **CSP({args.csp_components}) + LDA**",
         f"- Band: **{args.fmin:g}-{args.fmax:g} Hz**",
         f"- History policy: **{history_text}**",
+        f"- Calibration frontier: **{pairing_text}**",
         f"- Fixed held-out evaluation fraction: **{args.evaluation_fraction:.2f}**",
         f"- Subjects requested: **{', '.join(str(v) for v in args.subjects)}**",
         f"- Subject-session cases: **{len(split_records)}**",
         "",
         "## Calibration frontier",
         "",
-        "| calibration / class | cases | balanced accuracy mean | std | ROC-AUC mean | fit s | inference ms/trial |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| calibration / class | cases | case-set fp | balanced accuracy mean | std | ROC-AUC mean | fit s | inference ms/trial |",
+        "| ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for point in summary["curve"]:
         def fmt(value: Any, digits: int = 4) -> str:
             return "n/a" if value is None else f"{float(value):.{digits}f}"
 
         lines.append(
-            "| {calibration_per_class} | {n_subject_session_cases} | {ba} | {std} | "
-            "{auc} | {fit} | {infer} |".format(
+            "| {calibration_per_class} | {n_subject_session_cases} | {case_set_fingerprint} | "
+            "{ba} | {std} | {auc} | {fit} | {infer} |".format(
                 **point,
                 ba=fmt(point["mean_balanced_accuracy"]),
                 std=fmt(point["std_balanced_accuracy"]),
@@ -349,6 +375,15 @@ def _render_report(
                 "The `all-other` policy is symmetric leave-one-session-out evaluation and "
                 "may include sessions recorded after the held-out session. It must not be "
                 "described as next-session or prospective deployment evidence.",
+                "",
+            ]
+        )
+    if not summary["paired_case_sets_identical"]:
+        lines.extend(
+            [
+                "**Exploratory warning:** calibration budgets do not contain identical "
+                "subject-session cases. Do not interpret changes in the aggregate curve as "
+                "a paired calibration effect.",
                 "",
             ]
         )
@@ -403,6 +438,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_int_list,
         default=[0, 1, 2, 5, 10],
         help="Nested labeled calibration trials per class.",
+    )
+    parser.add_argument(
+        "--allow-incomplete-budgets",
+        action="store_true",
+        help=(
+            "Exploratory only: allow cases that cannot support a requested balanced budget "
+            "to drop from that budget. Default promoted behavior fails closed to keep the "
+            "calibration frontier paired."
+        ),
     )
     parser.add_argument("--evaluation-fraction", type=float, default=0.5)
     parser.add_argument("--fmin", type=float, default=8.0)
@@ -550,14 +594,21 @@ def main(argv: list[str] | None = None) -> int:
 
             for budget in args.budgets:
                 if budget > calibration.max_budget_per_class:
-                    skipped_budgets.append(
-                        {
-                            "subject": int(subject),
-                            "held_out_session": str(session),
-                            "requested_per_class": int(budget),
-                            "max_balanced_per_class": int(calibration.max_budget_per_class),
-                        }
-                    )
+                    detail = {
+                        "subject": int(subject),
+                        "held_out_session": str(session),
+                        "requested_per_class": int(budget),
+                        "max_balanced_per_class": int(calibration.max_budget_per_class),
+                    }
+                    if not args.allow_incomplete_budgets:
+                        raise RuntimeError(
+                            "requested calibration frontier is not paired: "
+                            f"subject={subject}, session={session} supports at most "
+                            f"{calibration.max_budget_per_class}/class but {budget}/class "
+                            "was requested. Choose a common smaller budget or pass "
+                            "--allow-incomplete-budgets for explicitly exploratory output."
+                        )
+                    skipped_budgets.append(detail)
                     continue
 
                 train_idx = calibration.train_indices_for_budget(budget)
@@ -571,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
                 rows.append(
                     {
                         "dataset_id": source_id,
+                        "case_id": f"subject-{subject}/session-{session}",
                         "subject": int(subject),
                         "held_out_session": str(session),
                         "history_policy": args.history_policy,
@@ -594,6 +646,9 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("benchmark produced no evaluable rows")
 
     summary = _summarize(rows)
+    if not args.allow_incomplete_budgets and not summary["paired_case_sets_identical"]:
+        raise RuntimeError("internal error: strict calibration frontier is not paired")
+
     manifest = {
         "schema_version": 1,
         "evidence_tier": "real_dataset",
@@ -607,6 +662,7 @@ def main(argv: list[str] | None = None) -> int:
             "events": list(dataset_spec["events"] or ("left_hand", "right_hand")),
         },
         "history_policy": args.history_policy,
+        "allow_incomplete_budgets": bool(args.allow_incomplete_budgets),
         "subjects": [int(value) for value in args.subjects],
         "held_out_sessions_requested": args.held_out_sessions,
         "requested_calibration_per_class": [int(value) for value in args.budgets],
@@ -625,6 +681,7 @@ def main(argv: list[str] | None = None) -> int:
             "CSP+LDA is a transparent baseline, not an ORION superiority claim",
             "prior policy assumes first-observed upstream session metadata order is chronological and must be verified before promotion",
             "all-other policy is symmetric cross-session evaluation and is not prospective next-session evidence",
+            "allow-incomplete-budgets produces an unpaired exploratory frontier and is not promotion-ready",
             "offline real-dataset evidence is not hardware or closed-loop qualification",
         ],
     }
@@ -661,6 +718,7 @@ def main(argv: list[str] | None = None) -> int:
                 "output": str(output),
                 "dataset": source_id,
                 "history_policy": args.history_policy,
+                "paired_case_sets_identical": summary["paired_case_sets_identical"],
                 "rows": len(rows),
                 "subject_session_cases": len(split_records),
                 "artifacts": [path.name for path in controlled],
