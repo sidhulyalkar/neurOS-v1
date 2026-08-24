@@ -24,7 +24,6 @@ import importlib.metadata
 import json
 import platform
 import subprocess
-import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -45,21 +44,29 @@ _DATASETS = {
         "class": "Kumar2024",
         "source_id": "moabb-kumar2024",
         "description": "18 participants x 6 separate-day MI sessions",
+        "paradigm": "left_right",
+        "events": None,
     },
     "ma2020": {
         "class": "Ma2020",
         "source_id": "moabb-ma2020",
-        "description": "25 participants x 15 MI sessions",
+        "description": "25 participants x 15 right-hand/right-elbow MI sessions",
+        "paradigm": "motor_imagery",
+        "events": ("right_hand", "right_elbow"),
     },
     "lee2019-mi": {
         "class": "Lee2019_MI",
         "source_id": "moabb-lee2019-family",
         "description": "OpenBMI motor-imagery member of the 54-person shared cohort",
+        "paradigm": "left_right",
+        "events": None,
     },
     "wang2026": {
         "class": "Wang2026",
         "source_id": "moabb-wang2026",
         "description": "39 participants x 5 sessions with online cursor-control study",
+        "paradigm": "left_right",
+        "events": None,
     },
 }
 
@@ -132,7 +139,7 @@ def _parse_text_list(value: str) -> list[str]:
 def _dataset_and_paradigm(dataset_key: str, *, fmin: float, fmax: float):
     try:
         import moabb.datasets as datasets
-        from moabb.paradigms import LeftRightImagery
+        from moabb.paradigms import LeftRightImagery, MotorImagery
     except ImportError as exc:  # pragma: no cover - exercised by real environment
         raise RuntimeError(
             "This benchmark requires the optional evidence stack. Install "
@@ -147,7 +154,29 @@ def _dataset_and_paradigm(dataset_key: str, *, fmin: float, fmax: float):
             "that contains this dataset or choose another --dataset."
         )
     dataset = dataset_cls()
-    paradigm = LeftRightImagery(fmin=float(fmin), fmax=float(fmax))
+    if spec["paradigm"] == "left_right":
+        paradigm = LeftRightImagery(fmin=float(fmin), fmax=float(fmax))
+    elif spec["paradigm"] == "motor_imagery":
+        events = list(spec["events"] or ())
+        paradigm = MotorImagery(
+            n_classes=len(events),
+            events=events,
+            fmin=float(fmin),
+            fmax=float(fmax),
+        )
+    else:  # pragma: no cover - internal registry invariant
+        raise RuntimeError(f"unsupported paradigm kind {spec['paradigm']!r}")
+
+    try:
+        valid = paradigm.is_valid(dataset)
+    except Exception as exc:
+        raise RuntimeError(
+            f"MOABB rejected {spec['class']} for declared paradigm {spec['paradigm']}"
+        ) from exc
+    if valid is False:
+        raise RuntimeError(
+            f"MOABB rejected {spec['class']} for declared paradigm {spec['paradigm']}"
+        )
     return dataset, paradigm
 
 
@@ -338,7 +367,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evaluation-fraction", type=float, default=0.5)
     parser.add_argument("--fmin", type=float, default=8.0)
     parser.add_argument("--fmax", type=float, default=30.0)
-    parser.add_argument("--csp-components", type=int, default=6)
+    parser.add_argument("--csp-components", type=int, default=8)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--overwrite", action="store_true")
@@ -378,7 +407,8 @@ def main(argv: list[str] | None = None) -> int:
         fmin=args.fmin,
         fmax=args.fmax,
     )
-    source_id = _DATASETS[args.dataset]["source_id"]
+    dataset_spec = _DATASETS[args.dataset]
+    source_id = dataset_spec["source_id"]
     source = get_evidence_source(source_id)
 
     rows: list[dict[str, Any]] = []
@@ -419,12 +449,18 @@ def main(argv: list[str] | None = None) -> int:
                 evaluation_fraction=args.evaluation_fraction,
                 seed=split_seed,
             )
+            events_text = (
+                "left_hand/right_hand"
+                if dataset_spec["events"] is None
+                else "/".join(dataset_spec["events"])
+            )
             protocol = partition.protocol(
                 name=f"{source_id}-subject-{subject}-session-{session}",
                 transfer_regime="few_shot",
                 preprocessing=(
-                    f"MOABB LeftRightImagery bandpass {args.fmin:g}-{args.fmax:g} Hz; "
-                    "CSP+LDA fit only on historical sessions plus declared calibration"
+                    f"MOABB {dataset_spec['paradigm']} events={events_text}; "
+                    f"bandpass {args.fmin:g}-{args.fmax:g} Hz; CSP+LDA fit only on "
+                    "historical sessions plus declared calibration"
                 ),
                 notes=(
                     "fixed evaluation subset inside held-out session",
@@ -494,6 +530,11 @@ def main(argv: list[str] | None = None) -> int:
         "method": "CSP+LDA refit with nested held-out-session calibration",
         "source": source.to_dict(),
         "dataset_key": args.dataset,
+        "dataset_class": dataset_spec["class"],
+        "paradigm": {
+            "kind": dataset_spec["paradigm"],
+            "events": list(dataset_spec["events"] or ("left_hand", "right_hand")),
+        },
         "subjects": [int(value) for value in args.subjects],
         "held_out_sessions_requested": args.held_out_sessions,
         "requested_calibration_per_class": [int(value) for value in args.budgets],
@@ -540,14 +581,20 @@ def main(argv: list[str] | None = None) -> int:
     }
     _json_dump(hashes_path, {"sha256": hashes})
 
-    print(json.dumps({
-        "output": str(output),
-        "dataset": source_id,
-        "rows": len(rows),
-        "subject_session_cases": len(split_records),
-        "artifacts": [path.name for path in controlled],
-        "summary": summary,
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "output": str(output),
+                "dataset": source_id,
+                "rows": len(rows),
+                "subject_session_cases": len(split_records),
+                "artifacts": [path.name for path in controlled],
+                "summary": summary,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
