@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - "packages/neuros-foundation/**"
+      - "scripts/evidence/**"
       - "docs/REAL_WORLD_EVIDENCE.md"
+      - "docs/EVIDENCE_SOURCE_MAP.md"
+      - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
       - ".github/workflows/evidence-ci.yml"
   push:
     branches:
@@ -12,7 +15,10 @@ on:
       - "agent/**"
     paths:
       - "packages/neuros-foundation/**"
+      - "scripts/evidence/**"
       - "docs/REAL_WORLD_EVIDENCE.md"
+      - "docs/EVIDENCE_SOURCE_MAP.md"
+      - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
       - ".github/workflows/evidence-ci.yml"
 
 permissions:
@@ -38,13 +44,18 @@ jobs:
           python -m pip install -e packages/neuros-core
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros-foundation[dev]"
-      - name: Verify grouped real-world evidence contracts
-        run: pytest -q packages/neuros-foundation/tests/test_real_world.py
-      - name: Exercise evidence discovery and manifest example
+      - name: Verify grouped and longitudinal evidence contracts
+        run: |
+          pytest -q \
+            packages/neuros-foundation/tests/test_real_world.py \
+            packages/neuros-foundation/tests/test_longitudinal.py
+      - name: Exercise evidence discovery, manifest example, and runner CLI
         run: |
           neuros-foundation evidence
           neuros-foundation evidence --role longitudinal_bci --json
+          neuros-foundation evidence --role cross_site_transfer --json
           python packages/neuros-foundation/examples/05_real_world_evidence.py
+          python scripts/evidence/run_moabb_longitudinal.py --help
 
   moabb-profile:
     name: MOABB evidence profile
@@ -61,15 +72,33 @@ jobs:
           python -m pip install -e packages/neuros-core
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros-foundation[evidence,dev]"
-      - name: Verify external benchmark ecosystem is importable
+      - name: Verify external benchmark ecosystem and runner dependencies
         run: |
           python - <<'PY'
           import moabb
+          import moabb.datasets as datasets
+          from moabb.paradigms import LeftRightImagery, MotorImagery
           from neuros.foundation_models import find_evidence_sources
 
           major, minor, *_ = (int(part) for part in moabb.__version__.split(".") if part.isdigit())
           assert (major, minor) >= (1, 5), moabb.__version__
+          for name in ("Kumar2024", "Ma2020", "Lee2019_MI"):
+              assert getattr(datasets, name, None) is not None, name
+
+          assert LeftRightImagery().is_valid(datasets.Kumar2024())
+          assert LeftRightImagery().is_valid(datasets.Lee2019_MI())
+          assert MotorImagery(
+              n_classes=2,
+              events=["right_hand", "right_elbow"],
+          ).is_valid(datasets.Ma2020())
+          if getattr(datasets, "Wang2026", None) is not None:
+              assert LeftRightImagery().is_valid(datasets.Wang2026())
+
           assert find_evidence_sources(ecosystem="MOABB")
           print(f"MOABB {moabb.__version__} evidence profile OK")
           PY
-          pytest -q packages/neuros-foundation/tests/test_real_world.py
+          pytest -q \
+            packages/neuros-foundation/tests/test_real_world.py \
+            packages/neuros-foundation/tests/test_longitudinal.py \
+            packages/neuros-foundation/tests/test_longitudinal_runner.py
+          python scripts/evidence/run_moabb_longitudinal.py --help

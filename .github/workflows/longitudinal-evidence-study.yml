@@ -1,0 +1,127 @@
+name: neurOS longitudinal EEG study
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Public MOABB dataset key
+        required: true
+        type: choice
+        default: kumar2024
+        options:
+          - kumar2024
+          - ma2020
+          - lee2019-mi
+          - wang2026
+      subjects:
+        description: Comma-separated MOABB subject IDs
+        required: true
+        type: string
+        default: "1,2,3"
+      budgets:
+        description: Labeled calibration trials per class
+        required: true
+        type: string
+        default: "0,1,2,5,10"
+      history_policy:
+        description: Prior-only is prospective-style; all-other is symmetric cross-session
+        required: true
+        type: choice
+        default: prior
+        options:
+          - prior
+          - all-other
+      evaluation_fraction:
+        description: Fraction of each held-out class frozen for final evaluation
+        required: true
+        type: string
+        default: "0.5"
+      csp_components:
+        description: CSP component count for transparent baseline
+        required: true
+        type: string
+        default: "8"
+      seed:
+        description: Split/calibration seed
+        required: true
+        type: string
+        default: "2026"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: longitudinal-evidence-${{ github.ref }}-${{ inputs.dataset }}-${{ inputs.subjects }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    name: ${{ inputs.dataset }} / ${{ inputs.history_policy }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pinned local evidence stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence]"
+
+      - name: Record execution environment
+        run: |
+          mkdir -p evidence-run
+          python -VV > evidence-run/python.txt
+          python -m pip freeze > evidence-run/pip-freeze.txt
+          git rev-parse HEAD > evidence-run/git-revision.txt
+
+      - name: Run real-dataset evidence study
+        env:
+          MNE_DATA: ${{ runner.temp }}/mne-data
+        run: |
+          python scripts/evidence/run_moabb_longitudinal.py \
+            --dataset "${{ inputs.dataset }}" \
+            --subjects "${{ inputs.subjects }}" \
+            --budgets "${{ inputs.budgets }}" \
+            --history-policy "${{ inputs.history_policy }}" \
+            --evaluation-fraction "${{ inputs.evaluation_fraction }}" \
+            --csp-components "${{ inputs.csp_components }}" \
+            --seed "${{ inputs.seed }}" \
+            --output evidence-run/study
+
+      - name: Verify emitted evidence artifacts
+        run: |
+          test -s evidence-run/study/study_manifest.json
+          test -s evidence-run/study/results.csv
+          test -s evidence-run/study/summary.json
+          test -s evidence-run/study/report.md
+          test -s evidence-run/study/artifact_hashes.json
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("evidence-run/study")
+          declared = json.loads((root / "artifact_hashes.json").read_text())["sha256"]
+          for name, expected in declared.items():
+              actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
+              assert actual == expected, (name, actual, expected)
+          print("evidence artifact hashes verified")
+          PY
+
+      - name: Upload immutable evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: longitudinal-evidence-${{ inputs.dataset }}-${{ inputs.history_policy }}-${{ github.run_id }}
+          path: evidence-run/
+          if-no-files-found: error
+          retention-days: 30
