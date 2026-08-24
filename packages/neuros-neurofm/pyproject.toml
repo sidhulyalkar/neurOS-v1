@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "neurOS Team", email = "neuros@example.com"}
+    {name = "neurOS Development Team"}
 ]
 keywords = ["neuroscience", "BCI", "foundation-model", "SSM", "mamba"]
 classifiers = [
@@ -67,10 +67,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/shulyalk/neuros-v1"
-Documentation = "https://neuros-v1.readthedocs.io"
-Repository = "https://github.com/shulyalk/neuros-v1"
-Issues = "https://github.com/shulyalk/neuros-v1/issues"
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1/tree/main/packages/neuros-neurofm"
+Documentation = "https://github.com/sidhulyalkar/neurOS-v1/tree/main/packages/neuros-neurofm/docs"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

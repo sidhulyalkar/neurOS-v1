@@ -1,28 +1,46 @@
 # neurOS Documentation
 
-neurOS is a modular runtime and SDK for building reproducible brain-computer interface systems. The current architecture centers on explicit neural-data contracts, typed runtime graphs, deterministic recording/replay, real plugin discovery, measurable backpressure/latency, and a separate ORION neural-intelligence layer.
+neurOS is a modular runtime and SDK for building reproducible brain-computer interface systems. The architecture centers on explicit neural-data contracts, typed runtime graphs, deterministic recording/replay, plugin discovery, measurable timing/backpressure, task-specific decoder contracts, and a separate ORION neural-intelligence layer.
 
-> neurOS is an active research and engineering platform. Generic software tests are not hardware qualification, medical validation, or clinical evidence.
+> neurOS is an active research and engineering platform. Generic software tests are not hardware qualification, medical validation, biological evidence, or clinical certification.
 
 ## Start here
 
+- [Project status and maturity](PROJECT_STATUS.md)
 - [Installation](getting-started/installation.md)
 - [Architecture](ARCHITECTURE.md)
 - [API surface](API_REFERENCE.md)
 - [Repository roadmap](../ROADMAP.md)
 - [Contributing](../CONTRIBUTING.md)
 
-## The execution model
+## Platform at a glance
 
 ```text
-Source plugin
-   -> SignalFrame
-   -> RuntimeGraph
-      source -> transform -> fusion -> decoder -> sink
-   -> DecoderOutput
+hardware / datasets / replay
+          |
+          v
+      Source plugins
+          |
+          v
+       SignalFrame
+          |
+          v
+      RuntimeGraph
+ source -> transform -> fusion -> decoder -> sink
+          |                       |
+          |                       +-> DecoderOutput + embedding
+          |
+ timing / quality / recording / replay / provenance
+          |
+          +----------------------------+
+          |                            |
+          v                            v
+ model + transfer ecosystem           ORION
+ models | foundation | mechint     tokenization | representation
+ source reliability                adaptation | personalization
 ```
 
-Every edge has explicit capacity and overflow policy. Runtime snapshots expose queue loss/high-water metrics and node latency/failure statistics. Live sources and replay sources use the same executor.
+Every runtime edge has explicit capacity and overflow policy. Runtime snapshots expose queue loss/high-water metrics and node latency/failure statistics. Live and replay sources use the same executor.
 
 ## Config-first operation
 
@@ -50,20 +68,23 @@ neuros replay /tmp/session \
   --json
 ```
 
-The canonical neurOS archive preserves exact sequence/timing/quality semantics and provenance. NWB and Zarr are optional interoperability exports.
+The canonical neurOS archive preserves exact sequence, timing, quality, and provenance semantics. NWB and Zarr are optional interoperability exports.
 
-## Scientific quality
+## Decoder and representation ecosystem
 
-The repository separates several evidence layers rather than collapsing them into a single test count:
+`neuros-models` owns faithful task-specific decoders, logits/embeddings, stable analysis surfaces, and model-side metadata. Its deep decoders use an explicit PyTorch implementation rather than environment-dependent algorithm substitution.
 
-- kernel contract tests,
-- end-to-end BCI/config execution,
-- persistent replay and storage interoperability,
-- deterministic scientific/latency gates,
-- ORION representation benchmarks,
-- future hardware qualification profiles.
+```bash
+neuros-models list
+neuros-models list --mechint-ready
+neuros-models show eeg-conformer
+```
 
-Current generic quality thresholds are version-controlled under `configs/quality/`. Performance claims should always identify the evidence tier that produced them.
+`neuros-foundation` owns discovery, adapter capability metadata, representation probes, and split/protocol-aware comparisons across neural foundation-model ecosystems. Catalog presence is not treated as proof that a model is locally runnable or independently reproduced.
+
+`neuros-sourceweigher` owns source/domain reliability estimation and transfer-risk-aware fusion. It can consume representations without making model packages depend on its algorithms.
+
+`neuros-mechint` owns causal intervention, faithfulness, held-out evidence, replication, and evidence-artifact contracts. Its v1 release explicitly separates software readiness from empirical evidence completion.
 
 ## ORION
 
@@ -78,6 +99,22 @@ ORION is the neural-intelligence layer. Its initial tokenization work uses expli
 - population assemblies.
 
 The synthetic benchmark uses separately seeded train/test sessions, labeled neural motifs, timing jitter, and unit dropout. Fit-requiring tokenizers never auto-fit during evaluation.
+
+## Quality and evidence
+
+The repository separates evidence rather than collapsing it into one green badge:
+
+- kernel contracts across supported Python versions,
+- end-to-end BCI/config execution,
+- persistent replay and storage interoperability,
+- deterministic scientific/latency gates,
+- model/mechanistic-analysis contracts,
+- foundation-model interoperability regressions,
+- SourceWeigher regressions,
+- ORION tokenization contracts and synthetic benchmark evidence,
+- mech-int scientific software gates and executed tutorials.
+
+Hardware qualification, real-dataset evidence, closed-loop qualification, and clinical evidence remain stronger and separate tiers.
 
 ## Repository organization
 

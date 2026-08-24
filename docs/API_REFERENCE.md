@@ -1,8 +1,8 @@
 # neurOS API Surface
 
-This document is a maintained map of the stable architectural surfaces. It is intentionally smaller than the historical hand-written API catalog, which is preserved under `docs/archive/development/API_REFERENCE_PRE_KERNEL.md`.
+This document is a maintained map of the stable and promoted architectural surfaces. It is intentionally smaller than a generated symbol catalog. For exact signatures, use the package source/docstrings for the installed version.
 
-For exact signatures, use the package source/docstrings for the installed version. The purpose of this page is to make ownership and dependency direction unambiguous.
+The purpose of this page is to make ownership, dependency direction, and evidence boundaries unambiguous.
 
 ## `neuros.contracts`
 
@@ -31,6 +31,8 @@ Describes stream modality, sample rate, channel names/types/units, device/manufa
 
 Structured inference result. Confidence and uncertainty are optional. neurOS does not fabricate certainty when a decoder cannot supply it.
 
+A decoder may also expose probabilities, logits, pooled embeddings, model identity/version, inference timing, and structured metadata.
+
 ### Operator protocols
 
 The kernel defines structural contracts for sources, transforms, decoders, sinks, monitors, and synchronization-related behavior. Implementations live in plugin packages rather than the kernel.
@@ -39,9 +41,9 @@ The kernel defines structural contracts for sources, transforms, decoders, sinks
 
 ### `RuntimeGraph`
 
-Typed directed acyclic graph of `RuntimeNode` and `RuntimeEdge` objects.
+Maintained typed directed acyclic graph of `RuntimeNode` and `RuntimeEdge` objects.
 
-Node kinds:
+Node kinds include:
 
 - source
 - transform
@@ -54,9 +56,9 @@ Edges carry bounded queue capacity and explicit overflow policy.
 
 ### `RuntimeExecutor`
 
-Native execution engine shared by live, replay, single-stream, and multimodal paths.
+Native execution engine shared by live, replay, single-stream, and standard multimodal paths.
 
-Key methods:
+Key usage:
 
 ```python
 await executor.start()
@@ -64,11 +66,8 @@ async for output in executor.outputs():
     ...
 await executor.stop()
 
-# finite graph
-snapshot = await executor.run()
-
-# timed graph
-snapshot = await executor.run_for(2.0)
+snapshot = await executor.run()          # finite graph
+snapshot = await executor.run_for(2.0)   # timed graph
 ```
 
 Snapshots include runtime state, failures, per-node latency/activity, and per-edge accepted/dropped/high-water metrics.
@@ -114,7 +113,7 @@ neuros.sinks
 neuros.monitors
 ```
 
-Use the CLI to inspect the actual installed set:
+Inspect the actual installed set with:
 
 ```bash
 neuros plugins --json
@@ -137,16 +136,16 @@ Custom historical processing-agent classes remain an explicit migration escape h
 
 ### `SessionArchiveWriter`
 
-Dependency-free, lossless persistent session writer for `SignalFrame` streams.
+Dependency-light, lossless persistent session writer for `SignalFrame` streams.
 
-Records:
+Records can include:
 
-- exact frame timing and sequence fields,
-- stream descriptors,
-- quality flags and metadata,
-- per-frame payload SHA-256,
-- config hash,
-- Git SHA and package versions,
+- exact frame timing and sequence fields;
+- stream descriptors;
+- quality flags and metadata;
+- per-frame payload SHA-256;
+- config hash;
+- Git SHA and package versions;
 - runtime metrics and model-artifact references.
 
 ### `SessionArchiveReader`
@@ -183,7 +182,7 @@ Deterministic fault injection for packet loss, channel dropout, timestamp jitter
 
 Capture Git/config/data/artifact/package/host provenance for benchmark evidence.
 
-### scientific probes
+### Scientific probes
 
 Small deterministic known-ground-truth probes validate that processing behavior retains expected scientific semantics.
 
@@ -191,7 +190,7 @@ Small deterministic known-ground-truth probes validate that processing behavior 
 
 Drivers implement the source boundary. Hardware-specific dependencies belong in driver extras or external plugin packages.
 
-All maintained drivers should expose or be adaptable to:
+Maintained drivers should expose or be adaptable to:
 
 ```python
 source.descriptor
@@ -203,17 +202,191 @@ await source.stop()
 
 Legacy tuple iteration may remain for compatibility but is not the long-term neural ABI.
 
+Importability is not hardware qualification. Named device/firmware/transport combinations require separate qualification evidence.
+
 ## `neuros.models`
 
-Conventional decoders live here. Maintained decoders should expose `infer(X) -> DecoderOutput` and capabilities describing probabilities, uncertainty, online fit, embeddings, or state when supported.
+`neuros-models` owns task-specific decoder implementations and the model-side contract for representation and mechanistic analysis.
 
-A training-free `ThresholdDecoder` exists for installation/config/runtime smoke tests. It is not a scientific BCI baseline.
+### `BaseModel`
+
+Maintains the familiar training/prediction surface and structured `infer(...) -> DecoderOutput` behavior.
+
+### Neural decoders
+
+Promoted deep families include:
+
+- `EEGNetModel`
+- `EEGConformerModel`
+- `TemporalTransformerModel` / `TransformerModel`
+- `CNNModel`
+- `LSTMModel`
+- `AttentionFusionModel`
+
+Classical baselines include SVM, random forest, k-NN, gradient-boosting, and simple-classifier surfaces.
+
+A model name is expected to match the algorithm actually executed. Optional backend absence should fail clearly rather than silently substitute another model family.
+
+### `InterpretabilityManifest`
+
+An explicit model-side declaration of stable analysis surfaces.
+
+Related types include:
+
+- `AnalysisCapability`
+- `AnalysisSurface`
+- `InterpretabilityManifest`
+- `MechanisticallyInspectable`
+- `validate_manifest_paths(...)`
+
+A manifest can describe architecture family, backend, input axes, component paths, semantic roles, tensor axes, supported operations, recommended analyses, and limitations.
+
+A manifest identifies valid intervention locations. It does **not** certify the meaning or biological interpretation of those components.
+
+### Representations
+
+Maintained neural decoders may expose `encode(X)` to return pooled representations. Structured inference can include the same embedding alongside logits/probabilities and a model/analysis-manifest fingerprint.
+
+This representation seam can be consumed by foundation probes, SourceWeigher, or mech-int without making those packages dependencies of the model layer.
+
+### Model discovery
+
+```bash
+neuros-models list
+neuros-models list --mechint-ready
+neuros-models show eeg-conformer
+neuros-models doctor
+```
+
+`DecoderCard`, `list_decoder_cards()`, and `get_decoder_card(...)` provide a programmatic catalog surface.
+
+### Mechanistic bridge
+
+Inspectable models can create a `neuros-mechint` adapter when the optional research package is installed. The bridge validates the model's declared manifest paths against the actual backend module graph before an experiment begins.
+
+## `neuros.foundation_models`
+
+`neuros-foundation` is a registry-first interoperability and evaluation layer for external neural foundation-model ecosystems.
+
+### Capability/catalog types
+
+Promoted schema types include:
+
+- `FoundationModelCard`
+- `NeuralModality`
+- `ModelTask`
+- `ModelStatus`
+- `AccessLevel`
+- `AdapterAvailability`
+- `IntegrationLevel`
+
+`DEFAULT_MODEL_CARDS` and `catalog_by_id(...)` expose curated model metadata.
+
+Catalog presence is not equivalent to local execution or reproduced upstream performance.
+
+### Adapter layer
+
+Key adapter interfaces/types include:
+
+- `FoundationAdapter`
+- `CallableAdapter`
+- `ZunaAdapter`
+- `NeuroFMXAdapter`
+- `ModelRegistry`
+- `DEFAULT_REGISTRY`
+- `build_default_registry()`
+
+Availability errors such as `AdapterUnavailableError` and `UnsupportedCapabilityError` provide fail-closed behavior when an integration or capability is unavailable.
+
+Historical wrappers such as POYO/NDT/CEBRA/Neuroformer classes remain for compatibility, but the modern registry/adapters should be preferred for scientific comparisons.
+
+### Representation probes
+
+Maintained probes include:
+
+- `effective_rank(...)`
+- `mean_pairwise_cosine(...)`
+- `linear_cka(...)`
+- `pairwise_cka(...)`
+- `invariance_score(...)`
+- `linear_probe(...)`
+- `domain_leakage_probe(...)`
+- `representation_report(...)`
+
+These characterize representation geometry or predictive utility. They are not by themselves causal mechanism tests.
+
+### Benchmark protocol
+
+`EvaluationProtocol`, `BenchmarkReport`, `benchmark_embeddings(...)`, and `sample_efficiency_curve(...)` provide protocol-stamped comparison surfaces so subject/session/site/device split semantics are explicit rather than buried in notebook code.
+
+### `FoundationEmbeddingDecoder`
+
+Wrap a frozen or callable representation encoder with a neurOS task readout so representation models can participate in standard decoder/runtime comparisons without being misrepresented as native task architectures.
+
+## `neuros_sourceweigher`
+
+`neuros-sourceweigher` owns reliability-aware source/domain selection and fusion.
+
+### Core weighting
+
+- `SourceWeigher`
+- `WeightingResult`
+- `WeightingDiagnostics`
+- `project_to_simplex(...)`
+
+### Strategies
+
+- `DistanceWeigher`
+- `GibbsRiskWeigher`
+- `OnlineSourceWeigher`
+- `MMDSourceWeigher`
+- `RiemannianCovarianceWeigher`
+
+Supporting distribution metrics include `rbf_mmd2(...)` and `spd_affine_invariant_distance(...)`.
+
+### Representation/runtime integration
+
+- `RepresentationSourceWeigher`
+- `ReliabilityWeightedFusion`
+- `RunningFeatureSummary`
+- `summarize_features(...)`
+
+The package can therefore weight subjects/sessions/sites/models in representation space or provide reliability-aware runtime fusion without moving the numerical core behind an HTTP dependency.
+
+### Diagnostics
+
+Diagnostics include effective sample size, leave-one-source-out stability, target perturbation sensitivity, and weight-shift measures. A plausible weighting result should be accompanied by stability evidence rather than only a normalized vector.
+
+The optional service boundary is installed separately with `neuros-sourceweigher[service]`.
+
+## `neuros_mechint`
+
+`neuros-mechint` is the causal mechanism and evidence layer.
+
+It owns research contracts for:
+
+- activation capture/replacement and causal intervention;
+- circuit/path faithfulness;
+- held-out evidence packs;
+- factorial comparisons;
+- feature correspondence and causal substitution;
+- replication and hierarchical uncertainty;
+- dose-response/intervention sweeps;
+- immutable model/data/config/artifact provenance.
+
+### `NeurOSModelAdapter`
+
+Native duck-typed bridge from an inspectable neurOS decoder to the generic PyTorch intervention machinery. It validates the decoder's complete analysis manifest before use and deliberately does not make `neuros-mechint` depend directly on `neuros-models`.
+
+External ecosystems such as TransformerLens, NNsight, and SAELens are integrated through similarly narrow adapters.
+
+**Claim boundary:** tool integration, attribution, sparse features, or a causal effect in one trained model do not establish a stable biological mechanism. Empirical claims require appropriate held-out and cross-deployment-unit evidence.
 
 ## `orion`
 
 ORION is intentionally separate from runtime execution.
 
-Core contracts:
+Core contracts include:
 
 - `NeuroTokenizer`
 - `NeuroTokenBatch`
@@ -222,7 +395,7 @@ Core contracts:
 - `AdaptiveDecoder`
 - `AdaptationProposal`
 
-Initial tokenizers:
+Initial tokenizers include:
 
 - `EventSpikeTokenizer`
 - `BinnedCountTokenizer`
@@ -236,7 +409,7 @@ Fit-requiring implementations must be fit explicitly on training data before enc
 
 ## CLI
 
-Primary commands:
+Primary neurOS commands:
 
 ```text
 neuros doctor
@@ -250,17 +423,28 @@ neuros inspect SESSION
 neuros replay SESSION --config CONFIG
 ```
 
+Additional package CLIs include:
+
+```text
+neuros-models ...
+neuros-foundation ...
+neuros-mechint ...
+```
+
 Legacy model-registry/demo commands remain for compatibility but should not become the architecture for new functionality.
 
-## Stability rule
+## Stability and dependency rule
 
-The stable direction is:
+The intended direction is:
 
 ```text
 contracts
-   <- runtime / config / quality
-   <- drivers / models / SDK
-   <- ORION and other research packages
+   <- runtime / config / recording / quality
+   <- drivers / task models / SDK
+   <- ORION and model/evidence integrations
+   <- experiments / research studies
 ```
 
-Kernel packages must not import research implementations. New capabilities should enter through contracts and plugin interfaces rather than new cross-package coupling.
+Kernel packages must not import research implementations. New capabilities should enter through contracts and plugin/adapter interfaces rather than new cross-package coupling.
+
+For the current maturity of each package, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md). For the next qualification sequence, see [`../ROADMAP.md`](../ROADMAP.md).

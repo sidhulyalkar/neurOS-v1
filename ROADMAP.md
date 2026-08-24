@@ -1,10 +1,10 @@
 # neurOS + ORION Roadmap
 
-This roadmap describes the current architectural sequence and the evidence required to promote new capabilities. Historical plans and session reports live under `docs/archive/` and are not active roadmaps.
+This roadmap describes the active qualification and productization sequence for neurOS and ORION. Historical plans and session reports live under `docs/archive/` and are not active roadmaps. For the package-by-package maturity snapshot, see [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
-## Current refactor stack
+## Completed convergence foundation
 
-The current kernel-to-research refactor is intentionally split into reviewable stacked pull requests. Merge bottom-up only after reviewing and validating each layer:
+The 2026 architecture/refactor sequence is now merged into `main`:
 
 1. **PR #1: neurOS kernel and ORION contracts**
    - canonical `SignalFrame`, stream metadata, decoder outputs, queue policies, timing, config/plugin foundations, replay primitives, workspace packaging.
@@ -20,8 +20,16 @@ The current kernel-to-research refactor is intentionally split into reviewable s
    - seven tokenizer families, synthetic motif ground truth, fit/test separation, robustness benchmarks, tokenizer evidence reports.
 7. **PR #13: Repository v3**
    - product/research/archive separation, historical cleanup, current documentation, and repository-hygiene enforcement.
+8. **PR #14: neuros-mechint v1**
+   - reproducible causal-evidence contracts, artifact schemas, held-out evidence, replication and explicit software-vs-empirical release status.
+9. **PR #16: neural foundation-model interoperability**
+   - capability registry, fail-closed adapters, representation probes, protocol fingerprints, and fair cross-model benchmark surfaces.
+10. **PR #17: SourceWeigher reliability engine**
+    - constrained source mixtures, distribution/reliability methods, online drift adaptation, diagnostics, and runtime fusion.
+11. **PR #18: mechanistically inspectable task models**
+    - faithful PyTorch decoder implementations, analysis manifests, model embeddings, neurOS-to-mech-int adapter, and dedicated model/mech-int CI.
 
-The stack is complete only when the exact head of every PR has green CI and each PR remains reviewable relative to the branch immediately below it.
+The repository therefore no longer needs another broad architectural rewrite. The next phase is **qualification, release discipline, evidence on real data/hardware, and a sharper public developer experience**.
 
 ---
 
@@ -41,22 +49,19 @@ SignalFrame + StreamDescriptor
         |
         v
 RuntimeGraph
-  acquisition
-  synchronization
-  processing
-  fusion
-  inference
-  sinks
+ acquisition | synchronization | transforms | fusion | inference | sinks
         |
-        +---------------> recording / replay / quality evidence
+        +---------------------> recording / replay / quality evidence
+        |
+        +---------------------> task models / embeddings
+        |                           |
+        |                           +-> foundation-model interoperability
+        |                           +-> SourceWeigher transfer reliability
+        |                           +-> mech-int causal evidence
         |
         v
 ORION representation boundary
-  tokenization
-  neural encoders
-  adaptation
-  personalization
-  interpretable state
+ tokenization | neural encoders | adaptation | personalization
         |
         v
 application / closed-loop controller
@@ -66,7 +71,31 @@ neurOS should make neural computation operationally predictable. ORION should ma
 
 ---
 
-# Post-stack Phase A: hardware qualification
+# Priority 0: public developer preview and release discipline
+
+## Goal
+
+Turn the monorepo from a sophisticated internal platform into something an external BCI researcher or engineer can install, understand, test, extend, and trust within one session.
+
+## Work
+
+- keep `docs/PROJECT_STATUS.md` as the canonical package maturity map;
+- add clean-install build/wheel checks for every package promoted as maintained;
+- verify local workspace installs separately from published-package installs;
+- define semantic-versioning and deprecation policy for stable contracts;
+- publish a package compatibility matrix for `neuros-core`, `neuros`, `neuros-models`, `neuros-foundation`, `neuros-sourceweigher`, `neuros-mechint`, and `neuros-orion`;
+- add a generated or tested configuration/schema reference;
+- provide one supported end-to-end developer journey covering install -> validate -> run -> record -> replay -> inspect;
+- provide one plugin-author journey that creates an external source/transform/decoder without kernel edits;
+- add dedicated qualification lanes before `neuros-ui` or `neuros-cloud` are presented as equally mature with the kernel.
+
+## Exit gates
+
+A clean external environment can install the documented profile, run the supported examples, build the maintained distributions, and reproduce the same contract checks without relying on an editable monorepo checkout.
+
+---
+
+# Priority 1: hardware qualification
 
 ## Goal
 
@@ -87,75 +116,82 @@ A device is called **qualified** only when its exact hardware/firmware/software 
 
 ---
 
-# Post-stack Phase B: model artifacts and decoder safety
+# Priority 2: durable model artifacts and decoder deployment safety
 
 ## Goal
 
-Make model deployment reproducible, inspectable, and safe enough for long-lived BCI experiments.
+Make model deployment reproducible, inspectable, rollbackable, and safe enough for long-lived BCI experiments.
 
 ## Work
 
-- replace arbitrary trusted-environment pickle loading in production paths with backend-specific artifacts plus stable manifests;
-- include architecture/input contract, training dataset hashes, subject/session scope, calibration state, metrics, Git SHA, package versions, and artifact SHA-256;
+- replace trusted-environment pickle persistence in promoted paths with backend-specific artifacts plus stable manifests;
+- store architecture/configuration, input contract, `state_dict` or backend-native weights, preprocessing, training dataset hashes, subject/session scope, calibration state, metrics, Git SHA, package versions, and artifact SHA-256;
+- bind the `InterpretabilityManifest` fingerprint to the artifact so layer/path changes cannot silently invalidate mechanistic evidence;
 - add decoder compatibility checks against stream/representation schemas before runtime start;
 - add probability/calibration capability tests and preserve `confidence=None` when uncertainty is unavailable;
-- implement immutable model registry identifiers and explicit promotion stages such as experimental, validated, qualified;
+- implement immutable model registry identifiers and explicit stages such as experimental, validated, and qualified;
 - add rollback and replay-based regression tests for every promoted artifact.
 
 ## Exit gates
 
-A promoted decoder must be reproducibly loadable, schema-compatible, replay-tested, and associated with a complete provenance manifest.
+A promoted decoder is reproducibly loadable, schema-compatible, replay-tested, mechanism-manifest-compatible where applicable, and associated with a complete provenance manifest.
 
 ---
 
-# Post-stack Phase C: real multimodal timing and fusion
+# Priority 3: ORION and model benchmarks on real neural datasets
 
 ## Goal
 
-Turn explicit clock semantics into best-in-class multimodal BCI synchronization.
+Determine which tokenization, representation, transfer, and mechanistic ideas survive contact with real deployment-unit variation.
+
+## Work
+
+- add NWB/data adapters using the canonical replay/data contracts;
+- evaluate across multiple preparations, sessions, animals/subjects, sites, devices/montages, and behavioral tasks where scientifically appropriate;
+- benchmark task decoders and foundation representations under the same subject/session-disjoint protocols;
+- include held-out neural prediction, behavior/state decoding, cross-session transfer, few-shot calibration, and compute-normalized metrics;
+- evaluate robustness to jitter, unit/channel dropout, sorting instability, rate shifts, artifacts, montage changes, and session drift;
+- keep tokenizer fit data, representation-model training data, adaptation data, mechanistic-discovery data, and final held-out evaluation data distinct;
+- compare ORION tokenization against event, count, rate-summary, randomized, and architecture-matched controls;
+- integrate SourceWeigher as an explicitly evaluated transfer strategy rather than an unconditional preprocessing step;
+- test whether candidate mechanisms remain causal and stable across subjects/sessions/devices instead of only within one trained model distribution.
+
+## NeuroFM promotion rule
+
+Existing `neuros-neurofm` implementations are research candidates, not automatically ORION components. A NeuroFM component moves behind a promoted ORION interface only when it:
+
+1. satisfies interface and artifact contracts;
+2. has leakage-controlled evidence;
+3. improves a meaningful metric or offers a clear efficiency/interpretability advantage;
+4. remains stable under perturbation and cross-session tests;
+5. has reproducible compute/data manifests;
+6. is compared against simpler baselines under matched budgets.
+
+---
+
+# Priority 4: multimodal timing and reliability-aware fusion
+
+## Goal
+
+Turn explicit clock and source-reliability semantics into best-in-class multimodal BCI synchronization and fusion.
 
 ## Work
 
 - extend the affine clock estimator to multiple hardware clock domains and intermittent synchronization observations;
 - propagate synchronization uncertainty through fusion decisions;
-- add fusion policies that can reject stale or temporally incompatible frames rather than blindly reuse the latest sample;
+- add fusion policies that reject stale or temporally incompatible frames rather than blindly reuse the latest sample;
+- attach contributing-frame provenance and timing uncertainty to fusion outputs;
+- combine timing/quality evidence with SourceWeigher reliability without conflating domain similarity, task utility, signal quality, and predictive uncertainty;
 - benchmark synthetic known-offset/drift scenarios and recorded multimodal sessions;
-- expose timing uncertainty to ORION so learned representations can distinguish neural uncertainty from biological variation.
+- expose timing/reliability uncertainty to ORION so learned representations can distinguish system uncertainty from biological variation.
 
 ## Exit gates
 
-Fusion outputs must report which source frames contributed, their synchronized timestamps, and the uncertainty under which the fusion decision was made.
+Fusion outputs report contributing source frames, synchronized timestamps, quality/reliability evidence, and the uncertainty under which the fusion decision was made.
 
 ---
 
-# Post-stack Phase D: ORION on real neural datasets
-
-## Goal
-
-Determine which neural tokenization and representation strategies survive contact with real data.
-
-## Work
-
-- add NWB spike-event adapters using the canonical replay/data contracts;
-- evaluate tokenizers on multiple preparations, sessions, animals/subjects, and behavioral tasks;
-- add held-out-unit prediction, next-window neural prediction, behavior/state decoding, cross-session transfer, few-shot adaptation, and compute-normalized metrics;
-- evaluate robustness to jitter, unit dropout, sorting instability, rate shifts, and session drift;
-- separate tokenizer fit data, representation-model training data, adaptation data, and held-out evaluation data;
-- compare ORION tokenization against event, count, rate-summary, and randomized controls under matched model budgets.
-
-## NeuroFM promotion rule
-
-Existing `neuros-neurofm` implementations are research candidates, not automatically ORION components. A NeuroFM component moves behind an ORION interface only when it:
-
-1. satisfies the interface and artifact contracts;
-2. has leakage-controlled evidence;
-3. improves a meaningful metric or offers a clear efficiency/interpretability advantage;
-4. remains stable under perturbation and cross-session tests;
-5. has reproducible compute and data manifests.
-
----
-
-# Post-stack Phase E: adaptive and personalized BCI intelligence
+# Priority 5: adaptive and personalized BCI intelligence
 
 ## Goal
 
@@ -166,17 +202,18 @@ Make adaptation explicit, constrained, reversible, and scientifically measurable
 - implement adaptation proposal/review/apply lifecycle rather than hidden online mutation;
 - distinguish calibration, unsupervised domain adaptation, supervised online learning, and user-specific personalization;
 - maintain baseline and candidate model states with rollback;
-- evaluate adaptation under simulated nonstationarity, electrode/channel degradation, and behavioral drift;
+- evaluate adaptation under simulated and real nonstationarity, electrode/channel degradation, and behavioral drift;
 - log every adaptation trigger, training window, objective, resulting artifact, and before/after metrics;
-- add mechanistic-interpretability hooks for explaining what state changed and which channels/tokens drove a decision.
+- use mechanistic evidence as an additional stability signal only after its predictive value is validated;
+- measure calibration cost and time-to-usable-control as first-class user-facing metrics.
 
 ## Exit gates
 
-No adaptive component may silently alter a promoted decoder. Every update must be attributable, replayable, bounded, and reversible.
+No adaptive component silently alters a promoted decoder. Every update is attributable, replayable, bounded, reversible, and evaluated against a no-adaptation baseline.
 
 ---
 
-# Post-stack Phase F: closed-loop safety plane
+# Priority 6: closed-loop safety plane
 
 ## Goal
 
@@ -185,7 +222,7 @@ Make neurOS suitable as a research substrate for increasingly consequential clos
 ## Work
 
 - introduce a first-class safety/constraint node type or equivalent policy layer;
-- add action-rate limits, deadman states, confidence/quality gating, stale-data rejection, and emergency stop semantics;
+- add action-rate limits, deadman states, confidence/quality gating, stale-data rejection, and emergency-stop semantics;
 - distinguish advisory decoder outputs from commands sent to an actuator;
 - create hardware-in-the-loop simulation before physical closed-loop control;
 - record proposed actions, accepted actions, rejected actions, reasons, neural quality, decoder state, and timing;
@@ -193,29 +230,29 @@ Make neurOS suitable as a research substrate for increasingly consequential clos
 
 ## Exit gates
 
-A closed-loop demo must fail safe under source loss, runtime overload, decoder failure, stale synchronization, and explicit user/operator stop.
+A closed-loop demo fails safe under source loss, runtime overload, decoder failure, stale synchronization, policy rejection, and explicit user/operator stop.
 
 ---
 
-# Post-stack Phase G: developer ecosystem and productization
+# Priority 7: ecosystem and productization
 
 ## Goal
 
-Make the platform useful to researchers and BCI developers beyond this repository.
+Make the platform valuable to researchers, neurotechnology teams, and BCI developers beyond this repository while preserving an open, inspectable core.
 
 ## Work
 
 - stabilize versioned plugin APIs and compatibility policy;
-- publish a small set of independently installable, well-tested device and decoder plugins;
-- provide supported examples for motor imagery, replay analysis, multimodal fusion, and ORION tokenization;
-- generate schema-aware configuration documentation and editor support;
-- add package build/wheel/clean-install release gates;
-- establish semantic versioning and deprecation periods for stable contracts;
-- build UI surfaces from the same config/runtime/event APIs rather than separate orchestration logic.
+- publish independently installable, well-tested device and decoder plugins;
+- provide supported examples for motor imagery, replay analysis, multimodal fusion, model/mechanism auditing, foundation representations, SourceWeigher transfer, and ORION tokenization;
+- build UI surfaces from the same config/runtime/event APIs rather than separate orchestration logic;
+- define a remote experiment/telemetry control plane without moving core real-time execution into the cloud;
+- create machine-readable qualification and benchmark artifacts suitable for CI, papers, and enterprise audit trails;
+- keep optional commercial integrations above open kernel contracts rather than forking the architecture.
 
 ## Exit gates
 
-A new contributor should be able to install a standard profile, validate a config, run a mock experiment, record/replay it, inspect metrics, and add a plugin without modifying kernel code.
+A new contributor can add a plugin without kernel changes, and a team can reproduce the same experiment/qualification artifact on another machine or site with explicit compatibility/provenance information.
 
 ---
 
@@ -237,16 +274,17 @@ No lower tier should be described using language that implies a higher tier.
 
 ---
 
-# Near-term priority after merging the stack
+# Immediate execution sequence
 
 The highest-value next sequence is:
 
-1. hardware qualification manifests and one real EEG device pipeline;
-2. durable model-artifact loading and replay regression;
-3. real NWB spike dataset adapter for ORION tokenization;
-4. cross-session ORION tokenizer benchmark;
-5. multimodal synchronization uncertainty and stale-frame-aware fusion;
-6. adaptation lifecycle with rollback and provenance;
-7. closed-loop safety policy layer.
+1. finish the public developer-preview/release gates;
+2. define the model artifact v1 format and remove pickle from promoted deployment paths;
+3. qualify one real EEG device end to end using a machine-readable hardware manifest;
+4. add one real public neural dataset to the ORION/model benchmark harness;
+5. run subject/session-disjoint decoder + foundation + SourceWeigher + mechanism-stability comparisons;
+6. add uncertainty-aware multimodal fusion;
+7. build adaptation lifecycle with rollback and provenance;
+8. add a closed-loop safety policy layer before more consequential demos.
 
-The guiding question remains: **what are the smallest stable abstractions from which serious BCI systems can be built, measured, replayed, and improved?**
+The guiding question remains: **what are the smallest stable abstractions from which serious BCI systems can be built, measured, replayed, falsified, and improved?**
