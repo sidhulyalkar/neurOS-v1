@@ -26,6 +26,11 @@ from neuros.foundation_models.longitudinal_authority import (
     LongitudinalCaseAuthority,
     processed_data_sha256,
 )
+from neuros.foundation_models.longitudinal_methods import (
+    TaskDecoderCaseResult,
+    TaskDecoderMethodSpec,
+    run_task_decoder_case,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -150,6 +155,9 @@ __all__ = [
     "make_nested_calibration_split",
     "LongitudinalCaseAuthority",
     "processed_data_sha256",
+    "TaskDecoderMethodSpec",
+    "TaskDecoderCaseResult",
+    "run_task_decoder_case",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",
