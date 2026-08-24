@@ -7,6 +7,7 @@ neurOS is a modular runtime and SDK for building reproducible brain-computer int
 ## Start here
 
 - [Project status and maturity](PROJECT_STATUS.md)
+- [Real-world evidence program](REAL_WORLD_EVIDENCE.md)
 - [Installation](getting-started/installation.md)
 - [Architecture](ARCHITECTURE.md)
 - [API surface](API_REFERENCE.md)
@@ -80,7 +81,12 @@ neuros-models list --mechint-ready
 neuros-models show eeg-conformer
 ```
 
-`neuros-foundation` owns discovery, adapter capability metadata, representation probes, and split/protocol-aware comparisons across neural foundation-model ecosystems. Catalog presence is not treated as proof that a model is locally runnable or independently reproduced.
+`neuros-foundation` owns discovery, adapter capability metadata, representation probes, split/protocol-aware comparisons, and pre-model real-world evidence manifests across neural foundation-model ecosystems. Catalog presence is not treated as proof that a model is locally runnable or independently reproduced.
+
+```bash
+neuros-foundation evidence
+neuros-foundation evidence --role longitudinal_bci
+```
 
 `neuros-sourceweigher` owns source/domain reliability estimation and transfer-risk-aware fusion. It can consume representations without making model packages depend on its algorithms.
 
@@ -100,6 +106,8 @@ ORION is the neural-intelligence layer. Its initial tokenization work uses expli
 
 The synthetic benchmark uses separately seeded train/test sessions, labeled neural motifs, timing jitter, and unit dropout. Fit-requiring tokenizers never auto-fit during evaluation.
 
+Real-world promotion is intentionally modality-specific. Current event/spike tokenizers should first be evaluated on population-neural sources whose released representation supports those semantics; EEG requires its own explicit ORION input/token contract rather than an implicit translation from spike tokens.
+
 ## Quality and evidence
 
 The repository separates evidence rather than collapsing it into one green badge:
@@ -110,11 +118,12 @@ The repository separates evidence rather than collapsing it into one green badge
 - deterministic scientific/latency gates,
 - model/mechanistic-analysis contracts,
 - foundation-model interoperability regressions,
+- deployment-unit-disjoint real-world evidence contracts,
 - SourceWeigher regressions,
 - ORION tokenization contracts and synthetic benchmark evidence,
 - mech-int scientific software gates and executed tutorials.
 
-Hardware qualification, real-dataset evidence, closed-loop qualification, and clinical evidence remain stronger and separate tiers.
+Hardware qualification, completed real-dataset benchmark results, closed-loop qualification, and clinical evidence remain stronger and separate tiers.
 
 ## Repository organization
 
