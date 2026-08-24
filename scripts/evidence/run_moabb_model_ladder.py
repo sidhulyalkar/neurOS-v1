@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Run multiple longitudinal EEG methods under one frozen evidence authority.
 
-This runner is the comparison counterpart to ``run_moabb_longitudinal.py``.
-For every subject/target-session case it freezes the source/calibration/final
-sample authority once, serializes the actual indices and processed-data SHA-256,
-and then gives each method exactly that authority.
+For every subject/target-session case the runner freezes source, calibration,
+and final-evaluation identities once, serializes the actual indices plus a
+processed-data SHA-256, and gives every method exactly that authority.
+
+The script deliberately preserves failures and method-unavailable operating
+points. A missing or failed case is evidence, not a row to silently drop.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import subprocess
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -54,6 +56,10 @@ _METHODS = (
     "sourceweigher-eegnet",
     "sourceweigher-eeg-conformer",
 )
+_SOURCEWEIGHER_METHODS = {
+    "sourceweigher-eegnet",
+    "sourceweigher-eeg-conformer",
+}
 
 
 def _parse_int_list(value: str) -> list[int]:
@@ -112,7 +118,7 @@ def _versions() -> dict[str, str | None]:
         "torch",
         "numpy",
     )
-    result = {}
+    result: dict[str, str | None] = {}
     for name in names:
         try:
             result[name] = importlib.metadata.version(name)
@@ -136,7 +142,11 @@ def _json_dump(path: Path, value: Any) -> None:
     )
 
 
-def _method_spec_payload(method: str, seed: int | None, args: argparse.Namespace) -> dict[str, Any]:
+def _method_spec_payload(
+    method: str,
+    seed: int | None,
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     return {
         "method_id": method,
         "model_seed": seed,
@@ -153,7 +163,7 @@ def _failure_row(
     authority: LongitudinalCaseAuthority,
     method: str,
     seed: int | None,
-    budget: int | None,
+    budget: int,
     exc: Exception,
 ) -> dict[str, Any]:
     return {
@@ -164,7 +174,7 @@ def _failure_row(
         "calibration_split_fingerprint": authority.calibration_split_fingerprint,
         "method_id": method,
         "model_seed": seed,
-        "calibration_per_class": budget,
+        "calibration_per_class": int(budget),
         "status": "failed",
         "failure_reason": f"{type(exc).__name__}: {exc}",
     }
@@ -179,6 +189,12 @@ def _enrich_row(
     value = dict(row)
     value.setdefault("status", "ok")
     value.setdefault("failure_reason", None)
+    value.setdefault("authority_fingerprint", authority.authority_fingerprint)
+    value.setdefault("processed_data_sha256", authority.processed_data_sha256)
+    value.setdefault("partition_fingerprint", authority.partition_fingerprint)
+    value.setdefault(
+        "calibration_split_fingerprint", authority.calibration_split_fingerprint
+    )
     value["dataset_id"] = authority.dataset_id
     value["history_policy"] = authority.history_policy
     value["split_seed"] = int(split_seed)
@@ -206,56 +222,53 @@ def _run_one_method(
 
     if model_seed is None:
         raise ValueError(f"method {method} requires a model seed")
+
     common_kwargs = {
         "n_epochs": int(args.epochs),
         "batch_size": int(args.batch_size),
         "device": args.device,
     }
-
     if method in {"eegnet", "eeg-conformer"}:
-        spec = TaskDecoderMethodSpec(
-            method_id=method,
-            model_seed=model_seed,
-            model_kwargs=common_kwargs,
-        )
         return run_task_decoder_case(
             data,
             authority,
-            spec=spec,
+            spec=TaskDecoderMethodSpec(
+                method_id=method,
+                model_seed=model_seed,
+                model_kwargs=common_kwargs,
+            ),
             budgets_per_class=budgets,
         )
 
     if method.startswith("frozen-"):
         encoder = "eegnet" if method == "frozen-eegnet" else "eeg-conformer"
-        spec = FrozenTransferMethodSpec(
-            method_id="frozen-logistic",
-            encoder_id=encoder,
-            encoder_seed=model_seed,
-            encoder_kwargs=common_kwargs,
-            readout_c=args.readout_c,
-        )
         return run_frozen_transfer_case(
             data,
             authority,
-            spec=spec,
+            spec=FrozenTransferMethodSpec(
+                method_id=method,
+                strategy="frozen-logistic",
+                encoder_id=encoder,
+                encoder_seed=model_seed,
+                encoder_kwargs=common_kwargs,
+                readout_c=args.readout_c,
+            ),
             budgets_per_class=budgets,
         )
 
-    if method.startswith("sourceweigher-"):
-        encoder = (
-            "eegnet" if method == "sourceweigher-eegnet" else "eeg-conformer"
-        )
-        spec = FrozenTransferMethodSpec(
-            method_id="sourceweigher-mean",
-            encoder_id=encoder,
-            encoder_seed=model_seed,
-            encoder_kwargs=common_kwargs,
-            readout_c=args.readout_c,
-        )
+    if method in _SOURCEWEIGHER_METHODS:
+        encoder = "eegnet" if method.endswith("eegnet") else "eeg-conformer"
         return run_frozen_transfer_case(
             data,
             authority,
-            spec=spec,
+            spec=FrozenTransferMethodSpec(
+                method_id=method,
+                strategy="sourceweigher-mean",
+                encoder_id=encoder,
+                encoder_seed=model_seed,
+                encoder_kwargs=common_kwargs,
+                readout_c=args.readout_c,
+            ),
             budgets_per_class=budgets,
         )
 
@@ -293,66 +306,110 @@ def _std(values: Iterable[float]) -> float | None:
     return float(array.std(ddof=1)) if len(array) > 1 else 0.0
 
 
-def _seed_averaged_budget_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Average optimization seeds within each case before averaging participants/cases."""
+def _seed_averaged_case_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Average optimization seeds inside one frozen subject/session case."""
     ok = [
         row
         for row in rows
         if row.get("status") == "ok" and row.get("balanced_accuracy") is not None
     ]
-    per_case: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(list)
+    groups: dict[tuple[str, int, str], list[dict[str, Any]]] = defaultdict(list)
     for row in ok:
-        per_case[(str(row["method_id"]), int(row["calibration_per_class"]), str(row["case_id"]))].append(row)
+        key = (
+            str(row["method_id"]),
+            int(row["calibration_per_class"]),
+            str(row["case_id"]),
+        )
+        groups[key].append(row)
 
-    collapsed = []
-    for (method, budget, case_id), values in per_case.items():
+    collapsed: list[dict[str, Any]] = []
+    for (method, budget, case_id), values in groups.items():
+        first = values[0]
         collapsed.append(
             {
                 "method_id": method,
                 "calibration_per_class": budget,
                 "case_id": case_id,
-                "balanced_accuracy": _mean(float(v["balanced_accuracy"]) for v in values),
+                "subject": first.get("subject"),
+                "original_protocol": first.get("original_protocol"),
+                "held_out_session": first.get("held_out_session"),
+                "balanced_accuracy": _mean(
+                    float(value["balanced_accuracy"]) for value in values
+                ),
                 "roc_auc": _mean(
-                    float(v["roc_auc"])
-                    for v in values
-                    if v.get("roc_auc") is not None
+                    float(value["roc_auc"])
+                    for value in values
+                    if value.get("roc_auc") is not None
                 ),
                 "n_model_seeds": len(values),
             }
         )
+    return collapsed
 
-    groups: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+
+def _case_set_fingerprint(case_ids: Sequence[str]) -> str:
+    raw = json.dumps(sorted(case_ids), separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _group_budget_summary(
+    collapsed: list[dict[str, Any]],
+    *,
+    group_field: str | None = None,
+) -> list[dict[str, Any]]:
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in collapsed:
-        groups[(row["method_id"], row["calibration_per_class"])].append(row)
-
-    result = []
-    for (method, budget), values in sorted(groups.items()):
-        case_ids = sorted(row["case_id"] for row in values)
-        case_raw = json.dumps(case_ids, separators=(",", ":")).encode("utf-8")
-        result.append(
-            {
-                "method_id": method,
-                "calibration_per_class": int(budget),
-                "n_cases": len(values),
-                "case_set_fingerprint": hashlib.sha256(case_raw).hexdigest()[:16],
-                "mean_balanced_accuracy": _mean(
-                    float(row["balanced_accuracy"]) for row in values
-                ),
-                "std_balanced_accuracy": _std(
-                    float(row["balanced_accuracy"]) for row in values
-                ),
-                "mean_roc_auc": _mean(
-                    float(row["roc_auc"])
-                    for row in values
-                    if row["roc_auc"] is not None
-                ),
-            }
+        key: tuple[Any, ...] = (
+            row["method_id"],
+            row["calibration_per_class"],
         )
+        if group_field is not None:
+            key = (*key, row.get(group_field))
+        groups[key].append(row)
+
+    result: list[dict[str, Any]] = []
+    for key, values in sorted(groups.items(), key=lambda item: tuple(str(v) for v in item[0])):
+        method, budget, *group_value = key
+        case_ids = [str(row["case_id"]) for row in values]
+        record: dict[str, Any] = {
+            "method_id": method,
+            "calibration_per_class": int(budget),
+            "n_cases": len(values),
+            "case_set_fingerprint": _case_set_fingerprint(case_ids),
+            "mean_balanced_accuracy": _mean(
+                float(row["balanced_accuracy"]) for row in values
+            ),
+            "std_balanced_accuracy": _std(
+                float(row["balanced_accuracy"]) for row in values
+            ),
+            "mean_roc_auc": _mean(
+                float(row["roc_auc"])
+                for row in values
+                if row["roc_auc"] is not None
+            ),
+        }
+        if group_field is not None:
+            record[group_field] = group_value[0]
+        result.append(record)
     return result
 
 
-def _frontier_auc(rows: list[dict[str, Any]], requested_budgets: tuple[int, ...]) -> list[dict[str, Any]]:
-    """Compute seed-averaged per-case normalized calibration-frontier AUC."""
+def _manual_trapezoid(y: np.ndarray, x: np.ndarray) -> float:
+    """NumPy >=1.24 compatible trapezoidal integration without deprecated aliases."""
+    if y.ndim != 1 or x.ndim != 1 or len(y) != len(x):
+        raise ValueError("trapezoid inputs must be aligned 1-D vectors")
+    if len(x) < 2:
+        return 0.0
+    return float(np.sum((y[:-1] + y[1:]) * 0.5 * np.diff(x)))
+
+
+def _frontier_auc(
+    rows: list[dict[str, Any]],
+    requested_budgets: tuple[int, ...],
+) -> list[dict[str, Any]]:
+    """Compute seed-averaged per-case normalized AUC for one declared budget set."""
+    if len(requested_budgets) < 2:
+        return []
     ok = [
         row
         for row in rows
@@ -367,48 +424,115 @@ def _frontier_auc(rows: list[dict[str, Any]], requested_budgets: tuple[int, ...]
         )
 
     budget_x = np.asarray(requested_budgets, dtype=np.float64)
-    span = float(budget_x[-1] - budget_x[0]) if len(budget_x) > 1 else 0.0
+    span = float(budget_x[-1] - budget_x[0])
+    if span <= 0:
+        return []
+
     per_method_case: dict[tuple[str, str], list[float]] = defaultdict(list)
     for (method, case_id, _seed), curve in by_method_case_seed.items():
-        if tuple(sorted(curve)) != requested_budgets or span <= 0:
+        if any(budget not in curve for budget in requested_budgets):
             continue
         y = np.asarray([curve[budget] for budget in requested_budgets], dtype=np.float64)
-        auc = float(np.trapezoid(y, budget_x) / span)
-        per_method_case[(method, case_id)].append(auc)
+        auc = _manual_trapezoid(y, budget_x) / span
+        per_method_case[(method, case_id)].append(float(auc))
 
     by_method: dict[str, list[float]] = defaultdict(list)
     for (method, _case), seed_values in per_method_case.items():
         by_method[method].append(float(np.mean(seed_values)))
 
-    result = []
-    for method, values in sorted(by_method.items()):
+    return [
+        {
+            "method_id": method,
+            "complete_frontier_cases": len(values),
+            "mean_seed_averaged_frontier_auc": _mean(values),
+            "std_seed_averaged_frontier_auc": _std(values),
+            "requested_budgets": list(requested_budgets),
+        }
+        for method, values in sorted(by_method.items())
+    ]
+
+
+def _paired_case_set_audit(
+    collapsed: list[dict[str, Any]],
+    methods: Sequence[str],
+    budgets: tuple[int, ...],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for method in methods:
+        supported = tuple(
+            budget
+            for budget in budgets
+            if not (method in _SOURCEWEIGHER_METHODS and budget == 0)
+        )
+        fingerprints: list[str] = []
+        counts: list[int] = []
+        for budget in supported:
+            case_ids = [
+                str(row["case_id"])
+                for row in collapsed
+                if row["method_id"] == method
+                and row["calibration_per_class"] == budget
+            ]
+            fingerprints.append(_case_set_fingerprint(case_ids))
+            counts.append(len(case_ids))
+        identical = bool(fingerprints) and len(set(fingerprints)) == 1
         result.append(
             {
                 "method_id": method,
-                "complete_frontier_cases": len(values),
-                "mean_seed_averaged_frontier_auc": _mean(values),
-                "std_seed_averaged_frontier_auc": _std(values),
-                "requested_budgets": list(requested_budgets),
+                "supported_budgets": list(supported),
+                "case_counts": counts,
+                "case_set_fingerprints": fingerprints,
+                "paired_across_supported_budgets": identical,
             }
         )
     return result
 
 
-def _summarize(rows: list[dict[str, Any]], budgets: tuple[int, ...]) -> dict[str, Any]:
+def _summarize(
+    rows: list[dict[str, Any]],
+    budgets: tuple[int, ...],
+    methods: Sequence[str],
+) -> dict[str, Any]:
     failures = [row for row in rows if row.get("status") == "failed"]
     unavailable = [
         row for row in rows if str(row.get("status", "")).startswith("unavailable")
     ]
+    unexpected_unavailable = [
+        row
+        for row in unavailable
+        if not (
+            row.get("method_id") in _SOURCEWEIGHER_METHODS
+            and int(row.get("calibration_per_class", -1)) == 0
+        )
+    ]
+    collapsed = _seed_averaged_case_rows(rows)
+    paired_audit = _paired_case_set_audit(collapsed, methods, budgets)
+    positive_budgets = tuple(budget for budget in budgets if budget > 0)
+    promotion_ready = (
+        len(failures) == 0
+        and len(unexpected_unavailable) == 0
+        and all(item["paired_across_supported_budgets"] for item in paired_audit)
+    )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "primary_metric": "balanced_accuracy",
-        "budget_summary_seed_averaged_within_case": _seed_averaged_budget_summary(rows),
+        "budget_summary_seed_averaged_within_case": _group_budget_summary(collapsed),
+        "cohort_budget_summary": _group_budget_summary(
+            collapsed, group_field="original_protocol"
+        ),
+        "target_session_budget_summary": _group_budget_summary(
+            collapsed, group_field="held_out_session"
+        ),
         "complete_frontier_auc": _frontier_auc(rows, budgets),
+        "positive_budget_adaptation_auc": _frontier_auc(rows, positive_budgets),
+        "paired_case_set_audit": paired_audit,
         "failed_rows": len(failures),
         "unavailable_rows": len(unavailable),
+        "unexpected_unavailable_rows": len(unexpected_unavailable),
         "failure_reasons": sorted(
             {str(row.get("failure_reason")) for row in failures if row.get("failure_reason")}
         ),
+        "promotion_ready_descriptive": promotion_ready,
         "statistical_boundary": (
             "Descriptive only. Promoted Kumar2024 inference follows preregistration issue #27: "
             "subject-clustered/hierarchical inference with GR/PAR cohort reporting."
@@ -426,6 +550,7 @@ def _render_report(manifest: dict[str, Any], summary: dict[str, Any]) -> str:
         f"- Budgets / class: **{', '.join(str(v) for v in manifest['budgets_per_class'])}**",
         f"- Model seeds: **{', '.join(str(v) for v in manifest['model_seeds'])}**",
         f"- Frozen authority cases: **{len(manifest['authority_fingerprints'])}**",
+        f"- Descriptive promotion gate: **{'PASS' if summary['promotion_ready_descriptive'] else 'FAIL'}**",
         "",
         "## Seed-averaged calibration frontier",
         "",
@@ -450,10 +575,11 @@ def _render_report(manifest: dict[str, Any], summary: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Complete calibration-frontier AUC",
+            "## Full calibration-frontier AUC",
             "",
-            "AUC is normalized by the labeled-calibration budget span. Model seeds are "
-            "averaged within each frozen case before cases are summarized.",
+            "This is the preregistered 0-to-max calibration frontier. Methods that are not "
+            "defined at zero target calibration, including target-dependent SourceWeigher, "
+            "do not receive a fabricated full-frontier AUC.",
             "",
             "| method | complete cases | mean AUC | std |",
             "| --- | ---: | ---: | ---: |",
@@ -471,15 +597,41 @@ def _render_report(manifest: dict[str, Any], summary: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "## Positive-budget adaptation AUC",
+            "",
+            "Secondary comparison across strictly positive labeled-calibration budgets. This "
+            "allows target-dependent adaptation methods to be compared without pretending they "
+            "are zero-shot methods.",
+            "",
+            "| method | complete cases | mean AUC | std |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+    )
+    for row in summary["positive_budget_adaptation_auc"]:
+        lines.append(
+            "| {method_id} | {complete_frontier_cases} | {mean} | {std} |".format(
+                **row,
+                mean=fmt(row["mean_seed_averaged_frontier_auc"]),
+                std=fmt(row["std_seed_averaged_frontier_auc"]),
+            )
+        )
+
+    lines.extend(
+        [
+            "",
             "## Evidence boundary",
             "",
             "Every method row references a serialized `LongitudinalCaseAuthority` containing "
             "the actual source/calibration/evaluation indices and processed-data SHA-256.",
             "",
-            "SourceWeigher rows at zero target calibration are explicitly unavailable. The "
-            "final evaluation examples are never repurposed as unlabeled target observations.",
+            "SourceWeigher rows at zero target calibration are explicitly unavailable. Final "
+            "evaluation examples are never repurposed as unlabeled target observations.",
             "",
-            f"Failed rows: **{summary['failed_rows']}**. Unavailable rows: **{summary['unavailable_rows']}**.",
+            f"Failed rows: **{summary['failed_rows']}**. Unavailable rows: **{summary['unavailable_rows']}**. "
+            f"Unexpected unavailable rows: **{summary['unexpected_unavailable_rows']}**.",
+            "",
+            "Kumar2024 cohort and target-session summaries are emitted from the same result "
+            "bundle so GR/PAR and session-index effects remain visible.",
             "",
             "This report is descriptive offline real-dataset evidence, not hardware, closed-loop, "
             "clinical, or ORION superiority evidence.",
@@ -535,13 +687,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.csp_components <= 0 or args.readout_c <= 0:
         raise SystemExit("--csp-components and --readout-c must be positive")
 
-    budgets = tuple(sorted(set(int(v) for v in args.budgets)))
+    budgets = tuple(sorted(set(int(value) for value in args.budgets)))
     if not budgets or budgets[0] < 0:
         raise SystemExit("--budgets must contain non-negative values")
     if 0 not in budgets:
         budgets = (0, *budgets)
     methods = tuple(dict.fromkeys(args.methods))
-    model_seeds = tuple(dict.fromkeys(int(v) for v in args.model_seeds))
+    model_seeds = tuple(dict.fromkeys(int(value) for value in args.model_seeds))
     if any(method != "csp-lda" for method in methods) and not model_seeds:
         raise SystemExit("neural/transfer methods require at least one --model-seeds value")
 
@@ -651,7 +803,6 @@ def main(argv: list[str] | None = None) -> int:
                 observed_group_order=observed,
                 case_metadata=metadata,
             )
-            # Restore immediately so serialized authority is verified before any method runs.
             authority.restore(data)
             authorities.append(authority)
 
@@ -680,18 +831,20 @@ def main(argv: list[str] | None = None) -> int:
                             }
                         )
                         for row in payload["rows"]:
-                            # Frozen transfer internal method IDs are deliberately more
-                            # specific; preserve requested ladder identity separately.
                             enriched = _enrich_row(
                                 row,
                                 authority,
                                 split_seed=case_split_seed,
                             )
-                            enriched["method_id"] = method
+                            if enriched.get("method_id") != method:
+                                raise RuntimeError(
+                                    "method result identity mismatch: "
+                                    f"requested={method}, returned={enriched.get('method_id')}"
+                                )
                             if model_seed is not None:
                                 enriched["model_seed"] = int(model_seed)
                             result_rows.append(enriched)
-                    except Exception as exc:  # preserve method failure; authority already validated
+                    except Exception as exc:
                         method_runs.append(
                             {
                                 "case_id": authority.case_id,
@@ -699,7 +852,9 @@ def main(argv: list[str] | None = None) -> int:
                                 "requested_model_seed": model_seed,
                                 "status": "failed",
                                 "failure_reason": f"{type(exc).__name__}: {exc}",
-                                "method_request": _method_spec_payload(method, model_seed, args),
+                                "method_request": _method_spec_payload(
+                                    method, model_seed, args
+                                ),
                             }
                         )
                         for budget in budgets:
@@ -717,9 +872,9 @@ def main(argv: list[str] | None = None) -> int:
                                 )
                             )
 
-    summary = _summarize(result_rows, budgets)
+    summary = _summarize(result_rows, budgets, methods)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "evidence_tier": "real_dataset",
         "study": "longitudinal_eeg_model_ladder",
         "dataset_key": dataset_spec.key,
@@ -746,11 +901,14 @@ def main(argv: list[str] | None = None) -> int:
         "platform": platform.platform(),
         "package_versions": _versions(),
         "wall_time_s": float(time.perf_counter() - started_study),
+        "promotion_ready_descriptive": summary["promotion_ready_descriptive"],
         "claim_boundary": [
             "all methods consume serialized frozen sample authority",
             "prior policy excludes future sessions",
             "final evaluation examples never enter fitting or SourceWeigher target estimation",
             "SourceWeigher zero-target-calibration is explicitly unavailable",
+            "full frontier AUC is not fabricated for methods undefined at zero calibration",
+            "GR/PAR cohort and target-session effects remain visible for Kumar2024",
             "descriptive offline real-dataset evidence is not hardware/closed-loop/clinical evidence",
         ],
     }
@@ -759,11 +917,11 @@ def main(argv: list[str] | None = None) -> int:
     _json_dump(
         paths["authority"],
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "cases": [authority.to_dict() for authority in authorities],
         },
     )
-    _json_dump(paths["methods"], {"schema_version": 1, "runs": method_runs})
+    _json_dump(paths["methods"], {"schema_version": 2, "runs": method_runs})
     _write_csv(paths["results"], result_rows)
     _json_dump(paths["summary"], summary)
     paths["report"].write_text(_render_report(manifest, summary), encoding="utf-8")
@@ -782,6 +940,8 @@ def main(argv: list[str] | None = None) -> int:
                 "authority_cases": len(authorities),
                 "result_rows": len(result_rows),
                 "failed_rows": summary["failed_rows"],
+                "unavailable_rows": summary["unavailable_rows"],
+                "promotion_ready_descriptive": summary["promotion_ready_descriptive"],
                 "artifacts": [path.name for path in paths.values()],
             },
             indent=2,
