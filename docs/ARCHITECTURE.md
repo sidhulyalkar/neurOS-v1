@@ -1,43 +1,56 @@
-# neurOS Kernel Architecture
+# neurOS + ORION Architecture
 
-This document is the architectural source of truth for the neurOS runtime.
+This document is the architectural source of truth for the maintained neurOS runtime and its boundaries with ORION and the research/model ecosystem.
 
 ## 1. Design objective
 
-neurOS should provide the smallest stable set of abstractions needed to construct reliable BCI systems across changing hardware, signal modalities, models, and research ideas.
+neurOS should provide the smallest stable set of abstractions needed to construct reliable, replayable, measurable brain-computer interface systems across changing hardware, signal modalities, models, and research ideas.
 
-The kernel is intentionally narrower than the repository. Research packages are allowed to move quickly. Kernel contracts should move slowly.
+The kernel is intentionally narrower than the repository. Research packages may move quickly. Runtime contracts should move slowly and accumulate evidence before they are broadened.
+
+The governing separation is:
+
+- **neurOS runtime plane:** reliable acquisition, timing, execution, recording, replay, configuration, quality, and observability;
+- **model and evidence plane:** task decoders, representation interoperability, source reliability, and causal/mechanistic analysis;
+- **ORION intelligence plane:** neural tokenization, learned representations, adaptation, and personalization;
+- **application/safety plane:** task behavior and, eventually, constrained closed-loop actions.
 
 ## 2. System boundary
 
 ```text
-┌──────────────────────────────────────────────────────────────────────┐
-│                         Applications                                 │
-│ communication | prosthetics | research | adaptive UX | experiments  │
-└───────────────────────────────┬──────────────────────────────────────┘
-                                │
-                         user-facing SDK
-                                │
-             ┌──────────────────┴──────────────────┐
-             │                                     │
-             ▼                                     ▼
-┌─────────────────────────┐           ┌──────────────────────────────┐
-│         neurOS          │           │            ORION             │
-│                         │           │                              │
-│ acquisition             │           │ tokenization                 │
-│ data contracts          │◀─────────▶│ learned representations      │
-│ synchronization         │           │ adaptive decoding            │
-│ processing/runtime      │           │ personalization              │
-│ recording/replay        │           │ foundation-model research    │
-│ observability           │           │                              │
-└────────────┬────────────┘           └──────────────┬───────────────┘
-             │                                       │
-             └─────────────────┬─────────────────────┘
-                               ▼
-                    Stable neural contracts
+┌────────────────────────────────────────────────────────────────────────────┐
+│                              Applications                                  │
+│ communication | prosthetics | research | adaptive UX | experiments        │
+└──────────────────────────────────┬─────────────────────────────────────────┘
+                                   │
+                            user-facing SDK
+                                   │
+                  ┌────────────────┴─────────────────┐
+                  │                                  │
+                  ▼                                  ▼
+┌────────────────────────────┐        ┌────────────────────────────────────┐
+│       neurOS runtime       │        │               ORION                │
+│                            │        │                                    │
+│ acquisition                │◀──────▶│ tokenization                       │
+│ data contracts             │        │ learned representations            │
+│ synchronization            │        │ adaptive decoding                  │
+│ graph execution            │        │ personalization                    │
+│ recording / replay         │        │ neural-intelligence research       │
+│ quality / observability    │        │                                    │
+└──────────────┬─────────────┘        └────────────────┬───────────────────┘
+               │                                       │
+               │              ┌────────────────────────┘
+               ▼              ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│                      Model + evidence ecosystem                            │
+│ task decoders | foundation adapters | source trust | mechanistic evidence │
+└──────────────────────────────────┬─────────────────────────────────────────┘
+                                   │
+                                   ▼
+                        stable neural contracts
 ```
 
-neurOS owns reliable execution. ORION owns neural intelligence.
+neurOS owns reliable execution. ORION owns neural intelligence. Model/evidence packages may consume the same contracts without becoming hidden dependencies of the runtime kernel.
 
 ## 3. Package responsibilities
 
@@ -45,42 +58,84 @@ neurOS owns reliable execution. ORION owns neural intelligence.
 
 The kernel. It contains:
 
-- canonical data contracts,
-- runtime queue and lifecycle semantics,
-- processing primitives,
-- clock synchronization,
-- recording/replay primitives,
-- versioned configuration schemas,
-- plugin discovery,
-- orchestration compatibility APIs.
+- canonical neural data contracts;
+- runtime graph and executor semantics;
+- queue/backpressure and lifecycle behavior;
+- processing primitives;
+- clock synchronization;
+- recording/replay primitives and persistent archives;
+- versioned configuration schemas;
+- plugin discovery;
+- generic scientific/runtime quality infrastructure;
+- compatibility orchestration APIs.
 
-**Dependency rule:** `neuros-core` must not import concrete driver or decoder packages.
+**Dependency rule:** `neuros-core` must not import concrete driver, task-model, UI/cloud, ORION implementation, NeuroFM, or mechanistic-interpretability packages.
 
 ### `neuros-drivers`
 
-Concrete hardware and dataset sources. Drivers may depend on `neuros-core`; the reverse dependency is forbidden.
+Concrete hardware, simulated, and dataset sources. Drivers may depend on `neuros-core`; the reverse dependency is forbidden.
 
-Heavy or hardware-specific dependencies belong in extras such as EEG, video, audio, or NWB support.
+Heavy or hardware-specific dependencies belong in extras or external plugin distributions. A driver being importable does not mean a named hardware/firmware combination is qualified.
 
 ### `neuros-models`
 
-Conventional task-specific decoders and model adapters. Models implement the kernel decoder contracts while retaining legacy `train`/`predict` compatibility.
+Task-specific decoders and model-side analysis contracts.
+
+Maintained deep decoders use an explicit PyTorch backend and expose:
+
+- `DecoderOutput` compatible inference;
+- probabilities/logits when genuinely supported;
+- pooled embeddings through `encode(...)`;
+- stable model identity and metadata;
+- an `InterpretabilityManifest` describing named analysis surfaces;
+- an optional manifest-validated bridge into `neuros-mechint`.
+
+A model name must describe the algorithm actually executed. Missing optional dependencies must fail clearly rather than silently substitute another model family.
 
 ### `neuros-foundation`
 
-Adapters and integrations for external neural representation/foundation-model ecosystems. It is not the home of proprietary ORION intelligence.
+The interoperability/evaluation boundary for external neural foundation-model ecosystems.
+
+It owns:
+
+- model/capability catalog metadata;
+- locally runnable adapters where integrations are verified;
+- fail-closed availability semantics;
+- representation probes;
+- split/protocol-aware benchmark metadata and fingerprints;
+- bridges from frozen encoders into neurOS decoder contracts.
+
+Catalog presence is not equivalent to local execution, reproduced performance, or endorsement of an upstream claim.
+
+### `neuros-sourceweigher`
+
+The source/domain reliability layer. It owns algorithms for estimating which subjects, sessions, sites, devices, models, or streams a target should trust and by how much.
+
+It remains dependency-light and can integrate with neurOS runtime fusion or consume embeddings from model/foundation layers without forcing a reverse dependency into those packages.
+
+### `neuros-mechint`
+
+The causal mechanism/evidence framework. It owns intervention, faithfulness, held-out evidence, comparison, correspondence, replication, dose-response, provenance, and evidence-artifact contracts.
+
+Its software release status deliberately separates **software contract readiness** from **empirical evidence completion**. Adapter availability or passing software gates never establishes biological homology or a real neural mechanism.
+
+### `neuros-neurofm`
+
+Experimental native neural foundation-model research. NeuroFM work is a candidate source of ORION implementations, not an automatic dependency or promoted representation layer.
 
 ### `neuros`
 
-The user-facing meta-package and CLI. This composition layer is allowed to depend on core, drivers, and models.
+The user-facing meta-package and CLI. This composition layer may depend on core, drivers, and models and may expose optional profiles for research, recording, deployment, and ORION.
+
+### `neuros-ui` and `neuros-cloud`
+
+Optional presentation, API, distributed, export, and observability integrations. They must consume stable runtime/config/event contracts instead of becoming alternate orchestration systems.
+
+Until dedicated release/qualification lanes exist for these packages, their package versions should not be interpreted as equal evidence maturity with the kernel.
 
 ### `orion` / distribution `neuros-orion`
 
-The stable ORION contract surface. The package currently defines token, representation, encoder, adaptive-decoder, and adaptation-proposal interfaces. Research implementations should migrate behind these contracts once validated.
-
-### Research packages
-
-`neuros-neurofm`, `neuros-mechint`, and experimental notebooks are research surfaces. They may depend on stable runtime contracts but must not become implicit dependencies of the kernel.
+The stable ORION contract and current tokenization surface. ORION defines token, representation, encoder, adaptive-decoder, and adaptation-proposal interfaces. Research implementations move behind these contracts only after comparative evidence justifies promotion.
 
 ## 4. Canonical neural data
 
@@ -104,15 +159,15 @@ A separate `StreamDescriptor` describes relatively static stream metadata such a
 
 ### Timing rule
 
-A plain floating-point timestamp is insufficient as a long-term BCI interchange contract. The frame explicitly represents different clocks so latency, synchronization, and provenance are not conflated.
+A single floating-point timestamp is insufficient as a long-term BCI interchange contract. The frame explicitly represents different clocks so latency, synchronization, and provenance are not conflated.
 
 `SignalFrame.timestamp_ns` resolves in this order:
 
-1. synchronized time,
-2. device time,
+1. synchronized time;
+2. device time;
 3. host receive time.
 
-Legacy drivers can continue yielding `(timestamp_seconds, ndarray)` while they migrate. `BaseDriver.frames()` adapts that representation into `SignalFrame`.
+Legacy tuple-producing drivers can be adapted into frames at the source boundary while they migrate.
 
 ## 5. Clock synchronization
 
@@ -124,19 +179,19 @@ host_time = scale * device_time + offset
 
 from a bounded window of timestamp pairs. It reports:
 
-- offset,
-- scale,
-- drift in parts per million,
-- residual uncertainty,
-- number of observations.
+- offset;
+- scale;
+- drift in parts per million;
+- residual uncertainty;
+- observation count.
 
 The synchronizer can annotate a `SignalFrame` with synchronized time and `CLOCK_UNCERTAIN` quality state when residual timing error exceeds the configured threshold.
 
-This software estimator is a fallback/alignment primitive. Hardware synchronization remains preferable when available.
+This software estimator is an alignment primitive, not a substitute for hardware synchronization when tighter guarantees are required.
 
 ## 6. Decoder semantics
 
-The canonical model response is `DecoderOutput`:
+The canonical task-model response is `DecoderOutput`:
 
 ```text
 prediction
@@ -150,13 +205,13 @@ inference_time_ns
 metadata
 ```
 
-**Critical rule:** absence of calibrated probability is represented as `confidence=None`. It must never be converted to artificial confidence such as `1.0`.
+**Critical rule:** absence of calibrated probability is represented as `confidence=None`. It must never be converted to artificial certainty such as `1.0`.
 
-`BaseModel` remains compatible with traditional `train(X, y)` / `predict(X)` APIs but now exposes `infer()` that returns `DecoderOutput`.
+Task-model embeddings create a shared but explicit seam for representation probes, source/domain weighting, and mechanistic analyses. Embedding availability does not imply that the representation is invariant, causal, or transferable until those properties are measured.
 
-## 7. Runtime graph
+## 7. Native runtime graph
 
-The target runtime is a typed directed graph:
+`RuntimeGraph` is the maintained execution representation:
 
 ```text
 SOURCE -> TRANSFORM -> ... -> FUSION -> DECODER -> SINK
@@ -164,95 +219,69 @@ SOURCE -> TRANSFORM -> ... -> FUSION -> DECODER -> SINK
                    ------ MONITOR -----
 ```
 
-`RuntimeNode` records:
+`RuntimeNode` records node identity, kind, operator, execution policy, optional latency budget, and metadata. `RuntimeEdge` records source/destination, bounded capacity, and overflow policy.
 
-- node ID,
-- node kind,
-- operator,
-- execution policy,
-- optional latency budget,
-- metadata.
+`RuntimeExecutor` natively executes this graph for finite replay and live streaming sources. It provides supervised failure propagation, draining/cancellation semantics, execution classes, queue telemetry, and bounded per-node latency statistics.
 
-`RuntimeEdge` records:
-
-- source and destination,
-- bounded capacity,
-- overflow policy.
-
-The current `Pipeline`/`Orchestrator` APIs remain as compatibility surfaces while execution progressively converges on this graph representation.
+`Pipeline` and `MultiModalPipeline` are compatibility/convenience facades. Standard paths compile to `RuntimeGraph` and execute through `RuntimeExecutor`. Historical custom processing-agent classes remain an explicit migration exception rather than a second preferred runtime architecture.
 
 ## 8. Backpressure
 
-Every bounded runtime edge must have explicit overload behavior:
+Every bounded runtime edge has explicit overload behavior:
 
 - `BLOCK`
 - `DROP_OLDEST`
 - `DROP_NEWEST`
 - `FAIL`
 
-`DROP_OLDEST` is the default for real-time compatibility because stale neural data is often less useful than fresh data, but applications should choose policy deliberately.
+`DROP_OLDEST` is useful for many real-time paths because stale neural data can be less useful than fresh data, but applications should choose policy deliberately.
 
-Queue telemetry includes:
+Queue telemetry includes accepted items, dropped items, and high-water mark. Dropped samples are therefore measurable system behavior, not a hidden implementation detail.
 
-- accepted items,
-- dropped items,
-- high-water mark.
+## 9. Lifecycle and failures
 
-Dropped samples are therefore measurable system behavior, not a hidden implementation detail.
+Runtime lifecycle states are explicit and failures are supervised rather than allowed to disappear inside worker tasks.
 
-## 9. Lifecycle
-
-Runtime lifecycle states are explicit:
-
-```text
-CREATED -> STARTING -> RUNNING -> DRAINING -> STOPPED
-                      |
-                      +-> DEGRADED / FAILED
-```
-
-The single-stream orchestrator exposes public:
+The maintained execution pattern is:
 
 ```python
-await runtime.start()
-async for result in runtime.stream_results():
+await executor.start()
+async for output in executor.outputs():
     ...
-await runtime.stop()
+await executor.stop()
 ```
 
-`run()` is a convenience wrapper over the same lifecycle rather than a separate execution implementation.
+Finite and timed convenience execution use the same engine. Runtime snapshots retain failures, per-node activity/latency, and per-edge queue evidence.
 
-## 10. Recording and replay
+## 10. Persistent recording and replay
 
-Canonical frames can be recorded and replayed without changing their timestamps.
+neurOS has a canonical dependency-light session archive for exact `SignalFrame` persistence.
 
-`FrameRecorder` provides a minimal sink for deterministic tests and experiments. `ReplaySource` implements the source contract and can replay either immediately or according to recorded timing at a configurable speed.
+The archive preserves:
 
-Long-term storage implementations such as NWB/Zarr should preserve these same contracts and provenance semantics.
+- sequence identity;
+- device, host, and synchronized timestamps;
+- clock domain and quality state;
+- stream descriptors;
+- frame metadata/provenance;
+- per-frame payload integrity hashes;
+- config hash;
+- Git/package/environment provenance;
+- model-artifact references and runtime metrics where supplied.
 
-Replay is a first-class requirement because it enables:
+`ArchiveReplaySource` exposes archived streams through the same source contract used by live hardware. `RecordingSource` can wrap a source so received frames are persisted before forwarding.
 
-- deterministic regression tests,
-- hardware-independent debugging,
-- latency experiments,
-- ORION training/evaluation,
-- fault injection,
-- reproducibility.
+NWB and Zarr are maintained optional interoperability exports. They do not replace neurOS' canonical lossless replay semantics.
+
+Replay is a first-class requirement because it supports deterministic regression, hardware-independent debugging, latency experiments, ORION/model evaluation, fault injection, and reproducibility.
 
 ## 11. Configuration
 
-The versioned `PipelineConfig` schema describes:
+The versioned `PipelineConfig` schema describes streams, source plugins, transforms, decoder, sinks, monitors, queue capacity, overflow policy, and metadata.
 
-- named streams,
-- source plugins,
-- per-stream transforms,
-- decoder plugin,
-- sinks,
-- monitors,
-- queue capacity,
-- overflow policy,
-- metadata.
+`resolve_config(...)` compiles the validated configuration into a `RuntimeGraph`. Source overrides allow archived sessions to replace live hardware plugins without instantiating the original device SDK.
 
-Config schema version 1 is deliberately small. Future migrations must be explicit rather than interpreting old experiment files differently without notice.
+Configuration schema changes require explicit migration. Old experiment files must not silently acquire new semantics.
 
 ## 12. Plugin architecture
 
@@ -268,13 +297,11 @@ neuros.sinks
 neuros.monitors
 ```
 
-`PluginRegistry` supports both programmatic registration and installed entry-point discovery.
-
-This allows hardware/model integrations to evolve independently from the kernel.
+This allows hardware/model integrations to evolve independently from the kernel. External plugins should be able to satisfy these contracts without modifying `neuros-core`.
 
 ## 13. ORION boundary
 
-ORION starts where raw/processed neural data becomes a machine-native neural representation:
+ORION starts where provenance-rich neural data becomes a machine-native neural representation:
 
 ```text
 SignalFrame(s)
@@ -300,89 +327,119 @@ DecoderOutput
 
 Online change is represented by `AdaptationProposal` containing a reason, requested changes, supporting evidence, and whether approval is required. Adaptation should be observable and auditable rather than an invisible side effect.
 
-## 14. Neurotokenization research
+## 14. ORION tokenization evidence
 
-The existing neurotokenization research plan should target `orion.NeuroTokenizer` rather than create a parallel runtime interface. Event, binned-count, ISI, burst, synchrony, VQ motif, and assembly tokenizers can then be compared behind one contract.
+The maintained initial ORION tokenizer layer includes:
 
-Scientific promotion criteria remain based on fair comparisons across downstream decoding, transfer, robustness, motif recovery, interpretability, compression, and sample efficiency rather than reconstruction alone.
+- exact event tokens;
+- binned counts;
+- relative-ISI WAIT/SPIKE tokens;
+- burst/pause/rebound tokens;
+- synchrony packets;
+- vector-quantized motifs;
+- population assemblies.
 
-## 15. Dependency direction
+The controlled synthetic benchmark uses known motifs, separately seeded train/test sessions, timing jitter, unit dropout, compression, entropy, motif decoding, robustness, and runtime metrics. Fit-requiring tokenizers are fit on the training side rather than auto-fitting during evaluation.
+
+This is **scientific synthetic evidence**, not proof that one tokenizer is superior on real human BCI data. Real-data promotion requires deployment-unit-disjoint evaluation.
+
+## 15. Model and evidence interoperability
+
+The maintained package direction allows one model representation to be studied through several orthogonal lenses:
+
+```text
+neuros-models / external verified encoder
+                |
+                +-> DecoderOutput / embedding
+                |
+                +-> neuros-foundation representation probes
+                |
+                +-> neuros-sourceweigher transfer reliability
+                |
+                +-> neuros-mechint causal interventions
+```
+
+These tools answer different questions and must not be collapsed into a single score:
+
+- representation similarity is not task utility;
+- domain similarity is not signal quality;
+- attention or attribution is not mechanism;
+- a causal effect in one model/session is not cross-subject stability;
+- synthetic robustness is not hardware qualification.
+
+## 16. Dependency direction
 
 Allowed:
 
 ```text
-neuros-drivers ----> neuros-core
-neuros-models -----> neuros-core
-neuros-ui ---------> neuros-core
-neuros-cloud ------> neuros-core
-orion ------------> neuros-core
-neuros ------------> core + drivers + models
-research ----------> stable packages
+neuros-drivers --------> neuros-core
+neuros-models ---------> neuros-core
+neuros-ui -------------> neuros-core
+neuros-cloud ----------> neuros-core
+orion -----------------> neuros-core
+neuros ----------------> core + drivers + models
+foundation ------------> core + model contracts
+sourceweigher ---------> dependency-light / optional runtime integration
+mechint ---------------> core + optional model/ORION/research adapters
+research --------------> stable packages
 ```
 
-Forbidden:
+Forbidden without an explicit architectural proposal:
 
 ```text
 neuros-core -> concrete drivers
-neuros-core -> concrete models
+neuros-core -> concrete task models
 neuros-core -> UI/cloud
 neuros-core -> NeuroFM/mechint/ORION implementations
 ```
 
-A PR that adds one of the forbidden dependencies must justify an architectural change, not merely an import convenience.
+Convenient imports are not sufficient justification for reversing dependency direction.
 
-## 16. Quality gates
+## 17. Quality and evidence gates
 
-The repository CI is organized into three initial layers:
+Current repository CI separates multiple software evidence surfaces:
 
-1. kernel contract tests across supported Python versions,
-2. BCI end-to-end mock pipeline smoke tests,
-3. ORION contract tests.
+1. repository hygiene;
+2. kernel contracts across Python 3.10, 3.11, and 3.12;
+3. installed BCI/config/CLI/runtime smoke execution;
+4. scientific and latency quality gates;
+5. recording/replay plus NWB/Zarr interoperability;
+6. task-model/mechanistic-analysis contracts;
+7. foundation-model interoperability regressions;
+8. SourceWeigher regressions across supported Python versions;
+9. ORION contracts and controlled tokenizer benchmark;
+10. dedicated mech-int software/evidence gates, CPU tutorial execution, and ecosystem import compatibility.
 
-The intended expansion is:
+These remain below hardware qualification, real-dataset evidence, closed-loop qualification, and clinical evidence in the project evidence hierarchy.
 
-```text
-unit
-contract
-integration
-replay
-scientific validity
-performance regression
-hardware qualification
-```
+## 18. Completed convergence and remaining architecture work
 
-Hardware qualification should remain separate from generic CI and record exact device/firmware/runtime metadata.
+The following migrations are complete on `main`:
 
-## 17. Migration strategy
+- canonical `SignalFrame` / `DecoderOutput` contracts;
+- config compilation to `RuntimeGraph`;
+- native graph execution for standard single/multimodal paths;
+- config-first CLI operation;
+- persistent lossless recording/replay with integrity verification;
+- NWB/Zarr exports;
+- plugin entry-point discovery;
+- product/research/archive repository separation;
+- deterministic scientific/runtime quality gates;
+- ORION tokenizer contracts and benchmark;
+- foundation-model interoperability layer;
+- SourceWeigher reliability layer;
+- mechanistic-evidence v1 contracts;
+- faithful inspectable task-model layer.
 
-This architecture is being adopted incrementally to protect working research code.
+The highest-value remaining architectural work is now narrower and more consequential:
 
-### Compatibility kept now
+1. clean-install/package compatibility and release gates;
+2. explicit hardware qualification manifests and one real-device reference pipeline;
+3. durable, non-pickle promoted model artifacts bound to input and analysis-manifest fingerprints;
+4. real-dataset ORION/model/transfer/mechanism benchmarks with subject/session/device-disjoint protocols;
+5. uncertainty-aware multimodal fusion;
+6. auditable adaptation with rollback;
+7. a first-class closed-loop safety/constraint plane;
+8. externally maintained plugins and reference deployments built without kernel forks.
 
-- existing `BaseDriver` subclasses,
-- tuple-based driver iteration,
-- `BaseModel.train/predict`,
-- `Pipeline` and `MultiModalPipeline`,
-- existing CLI composition.
-
-### Preferred new APIs
-
-- `SignalFrame` / `StreamDescriptor`,
-- `DecoderOutput`,
-- versioned config,
-- plugin registry,
-- runtime overflow/lifecycle primitives,
-- ORION representation contracts.
-
-### Next migrations
-
-1. compile `PipelineConfig` directly to `RuntimeGraph`,
-2. make the native graph executor consume `SignalFrame` end to end,
-3. add production NWB/Zarr recorder/replay adapters,
-4. migrate built-in integrations to plugin entry points,
-5. separate supported examples from research experiments,
-6. archive historical migration/session documents,
-7. add scientific and latency regression suites,
-8. migrate validated NeuroFM/tokenization work behind ORION contracts.
-
-The desired endpoint is not maximum module count. It is a small, trustworthy kernel on which sophisticated BCI research can safely compound.
+The desired endpoint is not maximum module count. It is a small, trustworthy execution kernel connected to a rigorous neural-intelligence and evidence ecosystem on which serious BCI systems can safely compound.
