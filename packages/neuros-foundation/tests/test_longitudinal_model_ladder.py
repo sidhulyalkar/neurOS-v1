@@ -143,6 +143,19 @@ def test_complete_model_ladder_writes_one_authoritative_bundle(tmp_path, monkeyp
     assert len(method_runs["runs"]) == 7
     assert {item["requested_method_id"] for item in method_runs["runs"]} == expected_methods
     assert all(item["status"] == "ok" for item in method_runs["runs"])
+    run_by_method = {
+        item["requested_method_id"]: item["result"]
+        for item in method_runs["runs"]
+    }
+    for frozen_id, weighted_id in (
+        ("frozen-eegnet", "sourceweigher-eegnet"),
+        ("frozen-eeg-conformer", "sourceweigher-eeg-conformer"),
+    ):
+        frozen_state = run_by_method[frozen_id]["encoder_state"]
+        weighted_state = run_by_method[weighted_id]["encoder_state"]
+        assert frozen_state["encoder_state_fingerprint"] == weighted_state["encoder_state_fingerprint"]
+        assert frozen_state["representation_sha256"] == weighted_state["representation_sha256"]
+        assert len(frozen_state["representation_sha256"]) == 64
 
     assert {row["method_id"] for row in rows} == expected_methods
     assert {row["original_protocol"] for row in rows} == {"GR"}
