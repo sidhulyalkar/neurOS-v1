@@ -7,6 +7,7 @@ on:
       - "scripts/evidence/**"
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
+      - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
       - ".github/workflows/evidence-ci.yml"
   push:
     branches:
@@ -17,6 +18,7 @@ on:
       - "scripts/evidence/**"
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
+      - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
       - ".github/workflows/evidence-ci.yml"
 
 permissions:
@@ -97,5 +99,6 @@ jobs:
           PY
           pytest -q \
             packages/neuros-foundation/tests/test_real_world.py \
-            packages/neuros-foundation/tests/test_longitudinal.py
+            packages/neuros-foundation/tests/test_longitudinal.py \
+            packages/neuros-foundation/tests/test_longitudinal_runner.py
           python scripts/evidence/run_moabb_longitudinal.py --help
