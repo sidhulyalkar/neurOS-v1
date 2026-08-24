@@ -1,9 +1,14 @@
 """Longitudinal calibration-budget contracts for real-world neural evaluation.
 
-The core invariant is simple but important: every point on a calibration curve
-must be evaluated on the *same held-out examples*. Calibration examples come
-from a separately frozen pool inside the held-out deployment unit and budgets
-are nested, so a larger budget is a strict superset of a smaller one.
+The core invariants are simple but important:
+
+1. every point on a calibration curve is evaluated on the *same* held-out examples;
+2. deployment-realistic longitudinal evidence must not train on future sessions.
+
+Calibration examples come from a separately frozen pool inside the held-out
+deployment unit and budgets are nested, so a larger budget is a strict superset
+of a smaller one. Chronological partitions preserve the upstream row order as
+the default session chronology unless an explicit complete order is supplied.
 """
 
 from __future__ import annotations
@@ -11,11 +16,100 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
-from .real_world import EvaluationPartition
+from .benchmark import SplitUnit
+from .real_world import EvaluationPartition, GroupedEvaluationData
+
+
+def ordered_group_values(
+    data: GroupedEvaluationData,
+    *,
+    split_unit: SplitUnit,
+) -> tuple[str, ...]:
+    """Return unique group values in first-observed order.
+
+    For MOABB-shaped data this preserves the upstream metadata order instead of
+    lexicographically sorting labels such as ``session_10`` before ``session_2``.
+    The function does not claim that arbitrary source ordering is chronology;
+    promoted studies must document why their upstream order is chronological.
+    """
+    if split_unit == "sample":
+        raise ValueError("sample is not a deployment-unit group")
+    if split_unit not in data.groups:
+        raise ValueError(
+            f"dataset has no {split_unit!r} group; available={sorted(data.groups)}"
+        )
+    return tuple(dict.fromkeys(np.asarray(data.groups[split_unit]).astype(str).tolist()))
+
+
+def chronological_partition(
+    data: GroupedEvaluationData,
+    *,
+    split_unit: SplitUnit,
+    held_out_value: Any,
+    order: Sequence[Any] | None = None,
+) -> EvaluationPartition:
+    """Train only on deployment units preceding one held-out unit.
+
+    Samples from deployment units *after* the held-out value are intentionally
+    excluded from both training and evaluation. This differs from symmetric
+    leave-one-group-out cross-validation and is the appropriate default for a
+    claim such as "performance on the next session/day".
+
+    When ``order`` is omitted, first-observed metadata order is used. Supplying
+    an explicit order requires each observed group exactly once, preventing a
+    partial or duplicated chronology from silently changing the evidence set.
+    """
+    if split_unit == "sample":
+        raise ValueError("chronological_partition requires a deployment-unit group")
+    if split_unit not in data.groups:
+        raise ValueError(
+            f"dataset has no {split_unit!r} group; available={sorted(data.groups)}"
+        )
+
+    observed = ordered_group_values(data, split_unit=split_unit)
+    if order is None:
+        chronology = observed
+    else:
+        chronology = tuple(str(value) for value in order)
+        if len(set(chronology)) != len(chronology):
+            raise ValueError("chronology order contains duplicate values")
+        if set(chronology) != set(observed):
+            missing = sorted(set(observed) - set(chronology))
+            extra = sorted(set(chronology) - set(observed))
+            raise ValueError(
+                "chronology order must contain every observed group exactly once; "
+                f"missing={missing}, extra={extra}"
+            )
+
+    held = str(held_out_value)
+    if held not in chronology:
+        raise ValueError(
+            f"unknown held-out {split_unit} value {held!r}; available={list(chronology)}"
+        )
+    position = chronology.index(held)
+    if position == 0:
+        raise ValueError(
+            f"held-out {split_unit} {held!r} has no prior {split_unit} data"
+        )
+
+    prior_values = chronology[:position]
+    group = np.asarray(data.groups[split_unit]).astype(str)
+    train = np.flatnonzero(np.isin(group, np.asarray(prior_values, dtype=str)))
+    test = np.flatnonzero(group == held)
+    if len(train) == 0 or len(test) == 0:  # defensive; position/known checks should prevent this
+        raise ValueError("chronological partition produced an empty train or test set")
+
+    return EvaluationPartition(
+        data=data,
+        split_unit=split_unit,
+        train_indices=train,
+        test_indices=test,
+        held_out_values=(held,),
+    )
 
 
 @dataclass(frozen=True, slots=True)
