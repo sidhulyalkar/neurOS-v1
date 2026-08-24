@@ -45,7 +45,10 @@ allen = ["allensdk>=2.15.0"]
 legacy = ["torch>=2.1.0"]
 eeg = ["mne>=1.6.0"]
 evidence = ["moabb>=1.5.0,<2"]
-ladder = ["torch>=2.1.0"]
+ladder = [
+    "torch>=2.1.0",
+    "neuros-sourceweigher>=0.2.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -53,6 +56,7 @@ dev = [
 ]
 all = [
     "torch>=2.1.0",
+    "neuros-sourceweigher>=0.2.0",
     "cebra>=0.3.0",
     "zuna",
     "mne>=1.6.0",
