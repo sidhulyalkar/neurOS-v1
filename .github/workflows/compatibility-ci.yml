@@ -1,0 +1,50 @@
+name: neurOS compatibility claims
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/src/neuros/compatibility.py"
+      - "packages/neuros/src/neuros/cli/**"
+      - "tests/test_compatibility_registry.py"
+      - "docs/COMPATIBILITY.md"
+      - "mkdocs.yml"
+      - ".github/workflows/compatibility-ci.yml"
+  push:
+    branches:
+      - main
+      - "agent/**"
+    paths:
+      - "packages/neuros/src/neuros/compatibility.py"
+      - "packages/neuros/src/neuros/cli/**"
+      - "tests/test_compatibility_registry.py"
+      - "docs/COMPATIBILITY.md"
+      - "mkdocs.yml"
+      - ".github/workflows/compatibility-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility-contracts:
+    name: Compatibility claim contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install user-facing SDK test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros[dev]"
+      - name: Enforce evidence-tier invariants
+        run: pytest -q tests/test_compatibility_registry.py
+      - name: Exercise installed compatibility CLI
+        run: |
+          neuros compatibility --json
+          neuros compatibility lsl --json
+          neuros compatibility moabb --json
