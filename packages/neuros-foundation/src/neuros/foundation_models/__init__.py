@@ -31,6 +31,11 @@ from neuros.foundation_models.longitudinal_methods import (
     TaskDecoderMethodSpec,
     run_task_decoder_case,
 )
+from neuros.foundation_models.longitudinal_transfer import (
+    FrozenTransferCaseResult,
+    FrozenTransferMethodSpec,
+    run_frozen_transfer_case,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -93,8 +98,8 @@ try:
     from neuros.foundation_models.cebra_model import CEBRAModel
     CEBRA_AVAILABLE = True
 except ImportError:
-    CEBRA_AVAILABLE = False
     CEBRAModel = None
+    CEBRA_AVAILABLE = False
 
 try:
     from neuros.foundation_models.neuroformer_model import NeuroformerModel
@@ -158,6 +163,9 @@ __all__ = [
     "TaskDecoderMethodSpec",
     "TaskDecoderCaseResult",
     "run_task_decoder_case",
+    "FrozenTransferMethodSpec",
+    "FrozenTransferCaseResult",
+    "run_frozen_transfer_case",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",
