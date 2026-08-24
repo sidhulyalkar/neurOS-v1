@@ -1,0 +1,75 @@
+name: neurOS real-world evidence
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-foundation/**"
+      - "docs/REAL_WORLD_EVIDENCE.md"
+      - ".github/workflows/evidence-ci.yml"
+  push:
+    branches:
+      - main
+      - "agent/**"
+    paths:
+      - "packages/neuros-foundation/**"
+      - "docs/REAL_WORLD_EVIDENCE.md"
+      - ".github/workflows/evidence-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-contracts:
+    name: Evidence contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install local evidence contract stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[dev]"
+      - name: Verify grouped real-world evidence contracts
+        run: pytest -q packages/neuros-foundation/tests/test_real_world.py
+      - name: Exercise evidence discovery and manifest example
+        run: |
+          neuros-foundation evidence
+          neuros-foundation evidence --role longitudinal_bci --json
+          python packages/neuros-foundation/examples/05_real_world_evidence.py
+
+  moabb-profile:
+    name: MOABB evidence profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MOABB-backed evidence profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence,dev]"
+      - name: Verify external benchmark ecosystem is importable
+        run: |
+          python - <<'PY'
+          import moabb
+          from neuros.foundation_models import find_evidence_sources
+
+          major, minor, *_ = (int(part) for part in moabb.__version__.split(".") if part.isdigit())
+          assert (major, minor) >= (1, 5), moabb.__version__
+          assert find_evidence_sources(ecosystem="MOABB")
+          print(f"MOABB {moabb.__version__} evidence profile OK")
+          PY
+          pytest -q packages/neuros-foundation/tests/test_real_world.py
