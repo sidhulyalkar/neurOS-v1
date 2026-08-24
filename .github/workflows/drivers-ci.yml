@@ -1,0 +1,39 @@
+name: neurOS driver contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "tests/test_brainflow_driver.py"
+      - ".github/workflows/drivers-ci.yml"
+  push:
+    branches:
+      - main
+      - "agent/**"
+    paths:
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "tests/test_brainflow_driver.py"
+      - ".github/workflows/drivers-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  brainflow-contracts:
+    name: BrainFlow fail-closed contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install driver test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-drivers[test]"
+      - name: Verify hardware-boundary semantics without physical hardware
+        run: pytest -q tests/test_brainflow_driver.py
