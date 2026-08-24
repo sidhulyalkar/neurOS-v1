@@ -5,12 +5,14 @@ import pytest
 
 from neuros.foundation_models import (
     GroupedEvaluationData,
+    chronological_partition,
     hold_out_groups,
     make_nested_calibration_split,
+    ordered_group_values,
 )
 
 
-def _fixture_partition():
+def _fixture_data():
     rng = np.random.default_rng(41)
     X = []
     y = []
@@ -27,11 +29,87 @@ def _fixture_partition():
                         "run": f"run-{trial // 6}",
                     }
                 )
-    data = GroupedEvaluationData.from_moabb_result(
+    return GroupedEvaluationData.from_moabb_result(
         (np.asarray(X), np.asarray(y), metadata),
         dataset_id="fixture",
     )
-    return hold_out_groups(data, split_unit="session", held_out_values=["2"])
+
+
+def _fixture_partition():
+    return hold_out_groups(_fixture_data(), split_unit="session", held_out_values=["2"])
+
+
+def test_chronological_partition_uses_prior_only_and_excludes_future():
+    data = _fixture_data()
+    partition = chronological_partition(
+        data,
+        split_unit="session",
+        held_out_value="1",
+    )
+
+    sessions = np.asarray(data.groups["session"])
+    assert set(sessions[partition.train_indices]) == {"0"}
+    assert set(sessions[partition.test_indices]) == {"1"}
+    assert len(partition.train_indices) == 24
+    assert len(partition.test_indices) == 24
+
+    future = set(np.flatnonzero(sessions == "2").tolist())
+    assert future.isdisjoint(partition.train_indices.tolist())
+    assert future.isdisjoint(partition.test_indices.tolist())
+
+
+def test_chronological_partition_fails_when_no_history_exists():
+    data = _fixture_data()
+    with pytest.raises(ValueError, match="no prior"):
+        chronological_partition(data, split_unit="session", held_out_value="0")
+
+
+def test_first_observed_order_is_not_lexicographically_resorted():
+    rng = np.random.default_rng(2)
+    sessions = ("session_1", "session_2", "session_10")
+    X = []
+    y = []
+    metadata = []
+    for session in sessions:
+        for label in ("left", "right"):
+            for trial in range(2):
+                X.append(rng.normal(size=(2, 4)))
+                y.append(label)
+                metadata.append(
+                    {"subject": "1", "session": session, "run": f"r-{trial}"}
+                )
+    data = GroupedEvaluationData.from_moabb_result(
+        (np.asarray(X), np.asarray(y), metadata), dataset_id="ordered"
+    )
+
+    assert ordered_group_values(data, split_unit="session") == sessions
+    partition = chronological_partition(
+        data,
+        split_unit="session",
+        held_out_value="session_10",
+    )
+    assert set(data.groups["session"][partition.train_indices]) == {
+        "session_1",
+        "session_2",
+    }
+
+
+def test_explicit_chronology_must_cover_each_observed_group_once():
+    data = _fixture_data()
+    with pytest.raises(ValueError, match="every observed group"):
+        chronological_partition(
+            data,
+            split_unit="session",
+            held_out_value="2",
+            order=("0", "2"),
+        )
+    with pytest.raises(ValueError, match="duplicate"):
+        chronological_partition(
+            data,
+            split_unit="session",
+            held_out_value="2",
+            order=("0", "1", "1", "2"),
+        )
 
 
 def test_nested_calibration_uses_fixed_evaluation_examples():
