@@ -25,9 +25,12 @@ EvidenceRole = Literal[
     "cross_subject_transfer",
     "cross_session_transfer",
     "cross_paradigm_transfer",
+    "cross_site_transfer",
     "cross_day_adaptation",
     "few_shot_adaptation",
     "foundation_pretraining",
+    "population_modeling",
+    "mechanism_replication",
     "representation_stress_test",
 ]
 
@@ -210,6 +213,80 @@ REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         external_id="DANDI:000950",
         notes=(
             "Communication iBCI target with a long chronological held-in period followed by later held-out days.",
+        ),
+    ),
+    EvidenceSource(
+        id="nlb-mc-maze",
+        title="Neural Latents Benchmark MC_Maze",
+        ecosystem="NLB / DANDI",
+        modality="macaque motor-cortex spikes",
+        task="delayed center-out reaching with straight and curved trajectories",
+        access_url="https://neurallatents.github.io/datasets.html",
+        citation="Neural Latents Benchmark (NLB'21)",
+        license=None,
+        subjects=None,
+        sessions=None,
+        roles=(
+            "canonical_benchmark",
+            "population_modeling",
+            "representation_stress_test",
+        ),
+        external_id="NLB:MC_Maze",
+        notes=(
+            "Canonical population-modeling benchmark with motor and premotor cortex spiking plus kinematics.",
+            "The former EvalAI test data became public for local evaluation in January 2026; report multiple seeds and avoid tuning directly on the released test split.",
+        ),
+    ),
+    EvidenceSource(
+        id="ibl-repeated-site",
+        title="IBL Reproducible Ephys repeated-site release",
+        ecosystem="IBL / ONE",
+        modality="mouse Neuropixels spikes/LFP",
+        task="standardized decision-making task at the same repeated brain site across laboratories",
+        access_url=(
+            "https://docs.internationalbrainlab.org/notebooks_external/"
+            "2024_data_release_repro_ephys.html"
+        ),
+        citation="International Brain Laboratory Reproducible Ephys data release",
+        license=None,
+        subjects=None,
+        sessions=91,
+        roles=(
+            "cross_site_transfer",
+            "population_modeling",
+            "mechanism_replication",
+            "representation_stress_test",
+        ),
+        external_id="IBL:RepeatedSite",
+        notes=(
+            "Ninety-one released Neuropixels sessions across 12 laboratories target the same repeated site.",
+            "High-value SourceWeigher and mechanistic-stability benchmark because lab/site effects can be tested without deliberately changing the task and target location.",
+        ),
+    ),
+    EvidenceSource(
+        id="ibl-brain-wide-map",
+        title="IBL Brain Wide Map 2025",
+        ecosystem="IBL / ONE",
+        modality="mouse Neuropixels spikes/LFP + behavior/video",
+        task="standardized decision-making task sampled across the brain and laboratories",
+        access_url=(
+            "https://docs.internationalbrainlab.org/notebooks_external/"
+            "2025_data_release_brainwidemap.html"
+        ),
+        citation="International Brain Laboratory Brain Wide Map; doi:10.1038/s41586-025-09235-0",
+        license=None,
+        subjects=139,
+        sessions=459,
+        roles=(
+            "cross_site_transfer",
+            "foundation_pretraining",
+            "population_modeling",
+            "mechanism_replication",
+        ),
+        external_id="IBL:Brainwidemap",
+        notes=(
+            "The current release spans 459 sessions, 699 probe insertions, 139 subjects, and 12 laboratories.",
+            "Use for cross-lab/brain-region representation and mechanism replication, not as a direct human BCI efficacy claim.",
         ),
     ),
     EvidenceSource(
