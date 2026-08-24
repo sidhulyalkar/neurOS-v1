@@ -7,9 +7,12 @@ on:
       - "packages/neuros-core/**"
       - "packages/neuros-drivers/**"
       - "packages/neuros-models/**"
+      - "packages/neuros-foundation/**"
       - "tests/test_compatibility_registry.py"
       - "tests/test_compatibility_cli.py"
       - "tests/test_mne_interop.py"
+      - "tests/test_autoconfig.py"
+      - "tests/test_benchmarks.py"
       - "scripts/check_dependency_boundaries.py"
       - "docs/PLATFORM.md"
       - "docs/COMPATIBILITY.md"
@@ -24,9 +27,12 @@ on:
       - "packages/neuros-core/**"
       - "packages/neuros-drivers/**"
       - "packages/neuros-models/**"
+      - "packages/neuros-foundation/**"
       - "tests/test_compatibility_registry.py"
       - "tests/test_compatibility_cli.py"
       - "tests/test_mne_interop.py"
+      - "tests/test_autoconfig.py"
+      - "tests/test_benchmarks.py"
       - "scripts/check_dependency_boundaries.py"
       - "docs/PLATFORM.md"
       - "docs/COMPATIBILITY.md"
@@ -53,7 +59,7 @@ jobs:
         run: python scripts/check_dependency_boundaries.py
 
   registry-contract:
-    name: Compatibility registry and CLI
+    name: Compatibility registry and composition regressions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,8 +74,13 @@ jobs:
           python -m pip install -e packages/neuros-drivers
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros[dev]"
-      - name: Run compatibility contract tests
-        run: pytest -q tests/test_compatibility_registry.py tests/test_compatibility_cli.py
+      - name: Run compatibility and moved-composition regressions
+        run: |
+          pytest -q \
+            tests/test_compatibility_registry.py \
+            tests/test_compatibility_cli.py \
+            tests/test_autoconfig.py \
+            tests/test_benchmarks.py
       - name: Exercise installed CLI inventory
         run: |
           neuros compatibility --json
@@ -96,7 +107,7 @@ jobs:
           python -m pip install -e packages/neuros-drivers
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros[interop-mne]"
-          python -m pip install pytest
+          python -m pip install pytest pytest-asyncio
       - name: Verify MNE Raw and SignalFrame round trips
         run: pytest -q tests/test_mne_interop.py
       - name: Clean import smoke
