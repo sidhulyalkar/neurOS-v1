@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable, Iterator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -194,6 +194,44 @@ def _frame_matrix(frame: SignalFrame) -> np.ndarray:
     raise ValueError("MNE conversion supports one- or two-dimensional SignalFrames only")
 
 
+def _mne_chunk_bounds(frame: SignalFrame, sample_count: int) -> tuple[int, int] | None:
+    start = frame.metadata.get("mne_start_sample")
+    stop = frame.metadata.get("mne_stop_sample")
+    if start is None and stop is None:
+        return None
+    if start is None or stop is None:
+        raise ValueError("MNE-derived SignalFrames must provide both start and stop sample metadata")
+    start_i, stop_i = int(start), int(stop)
+    if start_i < 0 or stop_i <= start_i:
+        raise ValueError("Invalid MNE sample bounds in SignalFrame metadata")
+    if stop_i - start_i != sample_count:
+        raise ValueError("MNE sample bounds do not match SignalFrame sample count")
+    return start_i, stop_i
+
+
+def _restore_measurement_date(
+    raw: Any,
+    first: SignalFrame,
+    descriptor: StreamDescriptor | None,
+) -> None:
+    date: datetime | None = None
+    if descriptor is not None:
+        encoded = descriptor.metadata.get("mne_meas_date")
+        if isinstance(encoded, str) and encoded:
+            date = datetime.fromisoformat(encoded)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+
+    if date is None and first.synchronized_time_ns is not None:
+        relative = first.metadata.get("recording_relative_start_seconds")
+        if relative is not None:
+            origin_seconds = first.synchronized_time_ns / 1_000_000_000.0 - float(relative)
+            date = datetime.fromtimestamp(origin_seconds, tz=timezone.utc)
+
+    if date is not None:
+        raw.set_meas_date(date)
+
+
 def raw_from_signal_frames(
     frames: Iterable[SignalFrame],
     *,
@@ -201,9 +239,11 @@ def raw_from_signal_frames(
 ) -> Any:
     """Construct an MNE ``RawArray`` from compatible SignalFrames.
 
-    Frames must share stream identity, sampling rate, and channel geometry.
-    Two-dimensional frames are accepted only when their axis order is explicit.
-    The adapter never resamples, pads, reorders, or silently repairs data.
+    Frames must share stream identity, sampling rate, channel geometry, and a
+    contiguous sequence. MNE-derived chunks must also have contiguous sample
+    bounds. Two-dimensional frames are accepted only when their axis order is
+    explicit. The adapter never resamples, pads, reorders, or silently repairs
+    missing data.
     """
 
     mne = _require_mne()
@@ -215,14 +255,15 @@ def raw_from_signal_frames(
     matrices: list[np.ndarray] = []
     channel_count: int | None = None
     previous_sequence: int | None = None
+    previous_mne_stop: int | None = None
 
     for frame in materialized:
         if frame.stream_id != first.stream_id:
             raise ValueError("All SignalFrames must share the same stream_id")
         if not np.isclose(frame.sample_rate_hz, first.sample_rate_hz, rtol=0.0, atol=1e-12):
             raise ValueError("All SignalFrames must share the same sample_rate_hz")
-        if previous_sequence is not None and frame.sequence_id <= previous_sequence:
-            raise ValueError("SignalFrames must be ordered by strictly increasing sequence_id")
+        if previous_sequence is not None and frame.sequence_id != previous_sequence + 1:
+            raise ValueError("SignalFrames must have contiguous, strictly increasing sequence_id")
         previous_sequence = frame.sequence_id
 
         matrix = np.asarray(_frame_matrix(frame), dtype=np.float64)
@@ -232,6 +273,16 @@ def raw_from_signal_frames(
             channel_count = int(matrix.shape[1])
         elif matrix.shape[1] != channel_count:
             raise ValueError("SignalFrames have inconsistent channel geometry")
+
+        bounds = _mne_chunk_bounds(frame, matrix.shape[0])
+        if bounds is not None:
+            start_i, stop_i = bounds
+            if previous_mne_stop is not None and start_i != previous_mne_stop:
+                raise ValueError("MNE-derived SignalFrames contain a sample gap or overlap")
+            previous_mne_stop = stop_i
+        elif previous_mne_stop is not None:
+            raise ValueError("Cannot mix MNE-derived and unbounded SignalFrames in one conversion")
+
         matrices.append(matrix)
 
     assert channel_count is not None
@@ -262,6 +313,13 @@ def raw_from_signal_frames(
     if len(channel_names) != channel_count or len(channel_types) != channel_count:
         raise ValueError("Channel names/types do not match SignalFrame geometry")
 
+    first_samp = 0
+    if descriptor is not None:
+        first_samp = int(descriptor.metadata.get("mne_first_samp", 0))
+    first_chunk_start = first.metadata.get("mne_start_sample")
+    if first_chunk_start is not None:
+        first_samp += int(first_chunk_start)
+
     sample_by_channel = np.concatenate(matrices, axis=0)
     info = mne.create_info(
         ch_names=list(channel_names),
@@ -269,7 +327,13 @@ def raw_from_signal_frames(
         ch_types=list(channel_types),
         verbose=False,
     )
-    raw = mne.io.RawArray(sample_by_channel.T, info, verbose=False)
+    raw = mne.io.RawArray(
+        sample_by_channel.T,
+        info,
+        first_samp=first_samp,
+        verbose=False,
+    )
+    _restore_measurement_date(raw, first, descriptor)
     raw.info["description"] = (
         f"Converted from neurOS stream {first.stream_id}; "
         f"frames={len(materialized)}; sequence={materialized[0].sequence_id}-"
