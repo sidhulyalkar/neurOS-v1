@@ -53,6 +53,18 @@ def test_curated_catalog_answers_distinct_real_world_questions():
     assert lee.subjects == 54
     assert lee.sessions == 2
 
+    canonical = find_evidence_sources(role="canonical_benchmark")
+    assert {source.id for source in canonical} == {"nlb-mc-maze"}
+
+    cross_site = find_evidence_sources(role="cross_site_transfer")
+    assert {source.id for source in cross_site} == {
+        "ibl-repeated-site",
+        "ibl-brain-wide-map",
+    }
+    repeated = get_evidence_source("ibl-repeated-site")
+    assert repeated.sessions == 91
+    assert "mechanism_replication" in repeated.roles
+
 
 def test_from_moabb_result_preserves_subject_session_run_and_recording_identity():
     data = GroupedEvaluationData.from_moabb_result(
