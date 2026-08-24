@@ -16,6 +16,10 @@ from neuros.foundation_models.benchmark import (
 )
 from neuros.foundation_models.catalog import DEFAULT_MODEL_CARDS, catalog_by_id
 from neuros.foundation_models.integration import FoundationEmbeddingDecoder
+from neuros.foundation_models.longitudinal import (
+    NestedCalibrationSplit,
+    make_nested_calibration_split,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -134,6 +138,8 @@ __all__ = [
     "EvaluationPartition",
     "collect_moabb",
     "hold_out_groups",
+    "NestedCalibrationSplit",
+    "make_nested_calibration_split",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",
