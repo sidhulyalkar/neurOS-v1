@@ -75,12 +75,23 @@ jobs:
           python - <<'PY'
           import moabb
           import moabb.datasets as datasets
+          from moabb.paradigms import LeftRightImagery, MotorImagery
           from neuros.foundation_models import find_evidence_sources
 
           major, minor, *_ = (int(part) for part in moabb.__version__.split(".") if part.isdigit())
           assert (major, minor) >= (1, 5), moabb.__version__
           for name in ("Kumar2024", "Ma2020", "Lee2019_MI"):
               assert getattr(datasets, name, None) is not None, name
+
+          assert LeftRightImagery().is_valid(datasets.Kumar2024())
+          assert LeftRightImagery().is_valid(datasets.Lee2019_MI())
+          assert MotorImagery(
+              n_classes=2,
+              events=["right_hand", "right_elbow"],
+          ).is_valid(datasets.Ma2020())
+          if getattr(datasets, "Wang2026", None) is not None:
+              assert LeftRightImagery().is_valid(datasets.Wang2026())
+
           assert find_evidence_sources(ecosystem="MOABB")
           print(f"MOABB {moabb.__version__} evidence profile OK")
           PY
