@@ -51,6 +51,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Project Status: PROJECT_STATUS.md
   - Installation: getting-started/installation.md
   - Architecture: ARCHITECTURE.md
   - API Surface: API_REFERENCE.md
