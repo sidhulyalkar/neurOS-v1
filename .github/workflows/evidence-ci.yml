@@ -134,6 +134,7 @@ jobs:
             packages/neuros-foundation/tests/test_longitudinal_methods.py \
             packages/neuros-foundation/tests/test_longitudinal_transfer.py \
             packages/neuros-foundation/tests/test_longitudinal_zero_calibration.py \
+            packages/neuros-foundation/tests/test_longitudinal_model_identity.py \
             packages/neuros-foundation/tests/test_longitudinal_model_ladder.py
       - name: Exercise ladder CLI
         run: |
