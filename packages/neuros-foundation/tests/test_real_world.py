@@ -47,16 +47,37 @@ def test_curated_catalog_answers_distinct_real_world_questions():
         "moabb-ma2020",
     }
 
+    cross_paradigm = find_evidence_sources(role="cross_paradigm_transfer")
+    assert {source.id for source in cross_paradigm} == {"moabb-lee2019-family"}
+    lee = cross_paradigm[0]
+    assert lee.subjects == 54
+    assert lee.sessions == 2
 
-def test_from_moabb_result_preserves_subject_session_and_recording_identity():
+
+def test_from_moabb_result_preserves_subject_session_run_and_recording_identity():
     data = GroupedEvaluationData.from_moabb_result(
         _moabb_like_result(),
         dataset_id="fixture",
     )
     assert data.X.shape == (12, 3, 8)
     assert set(data.groups) == {"subject", "session", "run", "recording"}
-    assert data.groups["recording"][0] == "1/0"
-    assert data.groups["recording"][-1] == "2/2"
+    assert data.groups["recording"][0] == "1/0/run-0"
+    assert data.groups["recording"][-1] == "2/2/run-1"
+
+
+def test_recording_holdout_targets_one_contiguous_moabb_run():
+    data = GroupedEvaluationData.from_moabb_result(
+        _moabb_like_result(),
+        dataset_id="fixture",
+    )
+    partition = hold_out_groups(
+        data,
+        split_unit="recording",
+        held_out_values=["2/2/run-1"],
+    )
+    assert len(partition.test_indices) == 1
+    assert data.groups["recording"][partition.test_indices].tolist() == ["2/2/run-1"]
+    assert "2/2/run-0" in data.groups["recording"][partition.train_indices]
 
 
 def test_session_holdout_is_disjoint_and_manifest_is_deterministic():
@@ -115,6 +136,10 @@ class _FakeDataset:
     code = "FakeMOABB"
 
 
+class _KnownDataset:
+    code = "Kumar2024"
+
+
 class _FakeParadigm:
     def __init__(self):
         self.calls = []
@@ -135,6 +160,19 @@ def test_collect_moabb_is_a_thin_explicit_adapter():
     )
     assert data.dataset_id == "FakeMOABB"
     assert paradigm.calls == [(dataset, [1, 2], {"return_epochs": False})]
+
+
+def test_collect_moabb_resolves_known_upstream_code_to_curated_source():
+    dataset = _KnownDataset()
+    paradigm = _FakeParadigm()
+    data = collect_moabb(dataset, paradigm, subjects=[1])
+    assert data.dataset_id == "moabb-kumar2024"
+
+    partition = hold_out_groups(data, split_unit="session", held_out_values=["2"])
+    protocol = partition.protocol(name="known-source")
+    manifest = partition.manifest(protocol=protocol)
+    assert manifest["source"]["external_id"] == "Kumar2024"
+    assert manifest["source"]["license"] == "CC BY 4.0"
 
 
 def test_moabb_result_shape_and_metadata_contracts_fail_closed():
