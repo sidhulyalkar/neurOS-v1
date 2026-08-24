@@ -24,6 +24,7 @@ EvidenceRole = Literal[
     "online_bci",
     "cross_subject_transfer",
     "cross_session_transfer",
+    "cross_paradigm_transfer",
     "cross_day_adaptation",
     "few_shot_adaptation",
     "foundation_pretraining",
@@ -33,11 +34,11 @@ EvidenceRole = Literal[
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSource:
-    """A public data source selected for a specific neurOS evidence question.
+    """A public source selected for one or more neurOS evidence questions.
 
     Counts are descriptive metadata, not benchmark results. ``sessions`` may be
-    ``None`` for sources whose natural unit is a day/set rather than a uniform
-    per-subject session count.
+    ``None`` when the natural unit is a day/set rather than a uniform per-subject
+    session count.
     """
 
     id: str
@@ -70,9 +71,9 @@ class EvidenceSource:
         return asdict(self)
 
 
-# Stable public datasets selected because they expose deployment-relevant shift,
-# not because neurOS claims state-of-the-art performance on them. The catalog is
-# intentionally small: each source must answer a distinct falsifiable question.
+# Stable public sources selected because they expose deployment-relevant shift,
+# not because neurOS claims state-of-the-art performance on them. Each source
+# should answer a distinct falsifiable question.
 REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
     EvidenceSource(
         id="moabb-wang2026",
@@ -80,7 +81,10 @@ REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         ecosystem="MOABB",
         modality="EEG",
         task="4-class motor imagery with online 1D/2D cursor control",
-        access_url="https://moabb.neurotechx.com/docs/generated/moabb.datasets.Wang2026.html",
+        access_url=(
+            "https://moabb.neurotechx.com/docs/generated/"
+            "moabb.datasets.Wang2026.html"
+        ),
         citation="doi:10.1038/s41467-026-75435-5; data doi:10.1184/R1/32293995.v1",
         license="CC BY-NC 4.0",
         subjects=39,
@@ -103,7 +107,10 @@ REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         ecosystem="MOABB",
         modality="EEG",
         task="2-class motor imagery with repeated online visual feedback",
-        access_url="https://moabb.neurotechx.com/docs/generated/moabb.datasets.Kumar2024.html",
+        access_url=(
+            "https://moabb.neurotechx.com/docs/generated/"
+            "moabb.datasets.Kumar2024.html"
+        ),
         citation="doi:10.1093/pnasnexus/pgae076; data doi:10.5281/zenodo.10694880",
         license="CC BY 4.0",
         subjects=18,
@@ -126,7 +133,10 @@ REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         ecosystem="MOABB",
         modality="EEG",
         task="2-class right-hand versus right-elbow motor imagery",
-        access_url="https://moabb.neurotechx.com/docs/generated/moabb.datasets.Ma2020.html",
+        access_url=(
+            "https://moabb.neurotechx.com/docs/generated/"
+            "moabb.datasets.Ma2020.html"
+        ),
         citation="doi:10.1038/s41597-020-0535-2; data doi:10.7910/DVN/RBN3XG",
         license="CC BY 4.0",
         subjects=25,
@@ -139,6 +149,32 @@ REAL_WORLD_EVIDENCE_SOURCES: tuple[EvidenceSource, ...] = (
         external_id="Ma2020",
         notes=(
             "Fifteen motor-imagery sessions per subject make this a strong drift/stability stress test.",
+        ),
+    ),
+    EvidenceSource(
+        id="moabb-lee2019-family",
+        title="Lee2019 OpenBMI MI / ERP / SSVEP family",
+        ecosystem="MOABB",
+        modality="EEG",
+        task="three BCI paradigms in a shared 54-participant cohort",
+        access_url=(
+            "https://moabb.neurotechx.com/docs/generated/"
+            "moabb.datasets.Lee2019_MI.html"
+        ),
+        citation="doi:10.1093/gigascience/giz002; data doi:10.5524/100542",
+        license="GPL 3.0 dataset/toolbox distribution",
+        subjects=54,
+        sessions=2,
+        roles=(
+            "online_bci",
+            "cross_subject_transfer",
+            "cross_session_transfer",
+            "cross_paradigm_transfer",
+        ),
+        external_id="Lee2019",
+        notes=(
+            "The same OpenBMI study includes MI, ERP/P300, and SSVEP variants.",
+            "Use this family to test cross-paradigm representation reuse without mixing paradigm-specific labels or metrics.",
         ),
     ),
     EvidenceSource(
@@ -200,6 +236,12 @@ _SOURCE_BY_ID = {source.id: source for source in REAL_WORLD_EVIDENCE_SOURCES}
 if len(_SOURCE_BY_ID) != len(REAL_WORLD_EVIDENCE_SOURCES):  # pragma: no cover
     raise RuntimeError("duplicate real-world evidence source id")
 
+_EXTERNAL_TO_SOURCE_ID = {
+    source.external_id: source.id
+    for source in REAL_WORLD_EVIDENCE_SOURCES
+    if source.external_id is not None
+}
+
 
 def get_evidence_source(source_id: str) -> EvidenceSource:
     """Return one curated evidence source by stable neurOS id."""
@@ -248,10 +290,37 @@ def _metadata_records(metadata: Any) -> tuple[dict[str, Any], ...]:
     return normalized
 
 
-def _string_group(records: Sequence[Mapping[str, Any]], key: str) -> np.ndarray | None:
+def _string_group(
+    records: Sequence[Mapping[str, Any]],
+    key: str,
+) -> np.ndarray | None:
     if not records or any(key not in row for row in records):
         return None
     return np.asarray([str(row[key]) for row in records], dtype=str)
+
+
+def _recording_group(groups: Mapping[str, np.ndarray]) -> np.ndarray | None:
+    """Derive MOABB's contiguous-recording identity as subject/session/run."""
+    if "subject" not in groups or "session" not in groups:
+        return None
+    subject = groups["subject"]
+    session = groups["session"]
+    run = groups.get("run")
+    if run is None:
+        return np.asarray(
+            [
+                f"{sub}/{ses}"
+                for sub, ses in zip(subject, session, strict=True)
+            ],
+            dtype=str,
+        )
+    return np.asarray(
+        [
+            f"{sub}/{ses}/{run_id}"
+            for sub, ses, run_id in zip(subject, session, run, strict=True)
+        ],
+        dtype=str,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,11 +392,9 @@ class GroupedEvaluationData:
             values = _string_group(records, key)
             if values is not None:
                 groups[key] = values
-        if "subject" in groups and "session" in groups:
-            groups["recording"] = np.asarray(
-                [f"{subject}/{session}" for subject, session in zip(groups["subject"], groups["session"], strict=True)],
-                dtype=str,
-            )
+        recording = _recording_group(groups)
+        if recording is not None:
+            groups["recording"] = recording
         if not groups:
             raise ValueError(
                 "MOABB metadata must contain at least one of subject/session/run"
@@ -361,8 +428,14 @@ def collect_moabb(
     if not callable(getter):
         raise TypeError("paradigm must provide a callable get_data method")
     result = getter(dataset=dataset, subjects=subjects, **get_data_kwargs)
-    resolved_id = dataset_id or getattr(dataset, "code", None) or dataset.__class__.__name__
-    return GroupedEvaluationData.from_moabb_result(result, dataset_id=str(resolved_id))
+    upstream_id = str(
+        getattr(dataset, "code", None) or dataset.__class__.__name__
+    )
+    resolved_id = dataset_id or _EXTERNAL_TO_SOURCE_ID.get(upstream_id, upstream_id)
+    return GroupedEvaluationData.from_moabb_result(
+        result,
+        dataset_id=str(resolved_id),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,7 +501,7 @@ class EvaluationPartition:
 
     @property
     def fingerprint(self) -> str:
-        """Fingerprint the split assignment, labels, and group identities.
+        """Fingerprint split assignment, labels, and deployment identities.
 
         This is not a raw-data checksum. A promoted benchmark artifact must also
         preserve the upstream dataset/version checksum supplied by its data
@@ -453,7 +526,8 @@ class EvaluationPartition:
         """Emit a machine-readable pre-model evidence manifest."""
         if protocol.split_unit != self.split_unit:
             raise ValueError(
-                f"protocol split_unit={protocol.split_unit!r} does not match partition {self.split_unit!r}"
+                "protocol split unit does not match partition: "
+                f"{protocol.split_unit!r} != {self.split_unit!r}"
             )
         group = self.data.groups[self.split_unit]
         train_values = sorted(set(group[self.train_indices].tolist()))
@@ -494,7 +568,8 @@ def hold_out_groups(
     """Create a strict held-out subject/session/site/device/recording split."""
     if split_unit == "sample":
         raise ValueError(
-            "hold_out_groups is for deployment-unit evaluation; use an explicit sample split elsewhere"
+            "hold_out_groups is for deployment-unit evaluation; "
+            "use an explicit sample split elsewhere"
         )
     if split_unit not in data.groups:
         raise ValueError(
