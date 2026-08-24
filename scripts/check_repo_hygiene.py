@@ -32,15 +32,28 @@ ACTIVE_DOCS = (
     "ROADMAP.md",
     "mkdocs.yml",
     "docs/index.md",
+    "docs/PROJECT_STATUS.md",
     "docs/ARCHITECTURE.md",
     "docs/API_REFERENCE.md",
     "docs/getting-started/installation.md",
+    "packages/neuros-core/README.md",
+    "packages/neuros-drivers/README.md",
+    "packages/neuros-models/README.md",
+    "packages/neuros-foundation/README.md",
+    "packages/neuros-ui/README.md",
+    "packages/neuros-cloud/README.md",
+    "packages/neuros/README.md",
+    "packages/orion/README.md",
+    "packages/neuros-neurofm/README.md",
+    "packages/neuros-mechint/README.md",
+    "packages/neuros-sourceweigher/README.md",
 )
 
 STALE_MARKERS = (
     "github.com/yourusername/neuros-v1",
     "github.com/shulyalk/neuros-v1",
     "github.com/<your-user>/neuros2",
+    "neuros.readthedocs.io",
     "pip install -e .",
 )
 

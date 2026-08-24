@@ -1,152 +1,110 @@
 # neurOS
 
-A modular operating system for brain-computer interfaces.
+`neuros` is the user-facing SDK and CLI composition package for the neurOS brain-computer interface runtime.
 
-## Overview
-
-neurOS is a comprehensive platform for building BCI applications, from hardware integration to deep learning models. This meta-package provides convenient installation options for common use cases.
+> **Project status:** active research and engineering platform. Software contract tests do not imply hardware qualification, clinical validation, or safety certification. See the repository's `docs/PROJECT_STATUS.md` for the current package-by-package maturity map.
 
 ## Installation
-
-### Standard Installation (Recommended)
-
-Includes core functionality, drivers, and models:
 
 ```bash
 pip install neuros
 ```
 
-### Minimal Installation
-
-Only core functionality (lightweight, ~50MB):
+Optional profiles declared by this distribution include:
 
 ```bash
-pip install neuros-core
+pip install "neuros[bci]"        # EEG driver dependencies, PyTorch models, dashboard
+pip install "neuros[recording]"  # NWB/Zarr recording interoperability
+pip install "neuros[research]"   # model/foundation/SourceWeigher research stack
+pip install "neuros[orion]"      # ORION contracts/tokenization package
+pip install "neuros[deployment]" # optional UI/cloud integrations
+pip install "neuros[all]"
 ```
 
-### Full Installation
+For monorepo development, prefer the version-controlled workspace profiles in `scripts/bootstrap.py` rather than treating the repository root as one Python package.
 
-Everything including foundation models, UI, and cloud:
+## Start with the CLI
 
 ```bash
-pip install neuros[all]
+neuros doctor --json
+neuros plugins --json
+neuros devices --json
+neuros validate configs/examples/mock_bci.yaml --json
+neuros run configs/examples/mock_bci.yaml --duration 2 --json
 ```
 
-### Custom Installations
+The checked-in mock configuration is deterministic and training-free, making it suitable for installation/runtime smoke testing.
+
+## Record and replay
 
 ```bash
-# BCI applications
-pip install neuros[bci]        # Core + EEG drivers + PyTorch models + Dashboard
+neuros record configs/examples/mock_bci.yaml \
+  --output /tmp/neuros-session \
+  --session-id demo \
+  --duration 2
 
-# Research with foundation models
-pip install neuros[research]   # Models + POYO/NDT/CEBRA
-
-# Production deployment
-pip install neuros[deployment] # UI + Cloud infrastructure
+neuros inspect /tmp/neuros-session --verify --json
+neuros replay /tmp/neuros-session \
+  --config configs/examples/mock_bci.yaml \
+  --json
 ```
 
-### Individual Packages
+The canonical neurOS archive preserves sequence, timing, quality, stream metadata, provenance, and integrity semantics. NWB and Zarr are interoperability exports rather than replacements for the lossless replay boundary.
 
-```bash
-pip install neuros-core        # Core pipeline and agents
-pip install neuros-drivers     # Hardware drivers (EEG, video, audio)
-pip install neuros-models      # Deep learning models
-pip install neuros-foundation  # Foundation models (POYO, NDT, CEBRA)
-pip install neuros-ui          # Dashboard and API
-pip install neuros-cloud       # Cloud infrastructure
-```
+## Python API
 
-## Quick Start
+The compatibility/convenience pipeline compiles standard paths to the native runtime graph:
 
 ```python
-from neuros.drivers import MockDriver
-from neuros.models import EEGNet
-from neuros.core.pipeline import Pipeline
+import asyncio
+import numpy as np
 
-# Create a simple BCI pipeline
-driver = MockDriver(n_channels=64, sampling_rate=250)
-model = EEGNet(n_classes=4, n_channels=64, sampling_rate=250)
-pipeline = Pipeline(driver=driver, model=model)
+from neuros.drivers.mock_driver import MockDriver
+from neuros.models.simple_classifier import SimpleClassifier
+from neuros.pipeline import Pipeline
 
-# Train
-pipeline.train(X_train, y_train)
+model = SimpleClassifier()
+model.train(np.random.randn(100, 40), np.random.randint(0, 2, 100))
 
-# Predict
-predictions = pipeline.predict(X_test)
+pipeline = Pipeline(
+    driver=MockDriver(sampling_rate=250, channels=8),
+    model=model,
+)
+
+metrics = asyncio.run(pipeline.run(duration=2.0))
+print(metrics)
 ```
 
-## Package Structure
+For new architecture work, prefer explicit neurOS contracts, `RuntimeGraph`, plugins, and persistent replay over adding another orchestration abstraction.
 
-neurOS is organized into focused packages:
+## Package ecosystem
 
-- **neuros-core**: Pipeline, orchestrator, agents, signal processing
-- **neuros-drivers**: BrainFlow, LSL, video, audio, NWB I/O
-- **neuros-models**: EEGNet, Transformers, LSTM, classical ML
-- **neuros-foundation**: POYO, NDT, CEBRA, Neuroformer
-- **neuros-ui**: Streamlit dashboard, FastAPI server, visualizations
-- **neuros-cloud**: Kafka, SageMaker, WebDataset, Zarr
+The meta-package composes several independently versioned distributions:
 
-## Features
+- `neuros-core`: runtime, contracts, config, processing, recording/replay, quality;
+- `neuros-drivers`: hardware/simulated/dataset sources;
+- `neuros-models`: task-specific decoders and model-side interpretability manifests;
+- `neuros-foundation`: foundation-model catalog/adapters/representation probes;
+- `neuros-sourceweigher`: source/domain reliability and transfer-aware fusion;
+- `neuros-mechint`: causal mechanism/evidence tooling;
+- `neuros-orion`: ORION tokenization and neural-intelligence contracts;
+- `neuros-ui` and `neuros-cloud`: optional integration surfaces with separate maturity boundaries.
 
-✅ **Multi-Modal**: Synchronize EEG, video, audio, and more
-✅ **Real-Time**: Low-latency processing for live BCI
-✅ **Foundation Models**: Pre-trained models for transfer learning
-✅ **Cloud-Ready**: Kafka, SageMaker, distributed processing
-✅ **Extensible**: Plugin system for custom components
+The architectural rule is simple: research and product integrations may depend on stable runtime contracts, but the runtime kernel must not depend on research implementations.
 
 ## Documentation
 
-- **Tutorials**: https://neuros.readthedocs.io/tutorials
-- **API Reference**: https://neuros.readthedocs.io/api
-- **User Guides**: https://neuros.readthedocs.io/guides
+Current documentation lives in the repository:
 
-## Command Line Interface
+- `README.md`
+- `docs/PROJECT_STATUS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `ROADMAP.md`
+- `CONTRIBUTING.md`
 
-```bash
-# List available devices
-neuros devices
-
-# Start a pipeline
-neuros run --config pipeline_config.yaml
-
-# Export data to NWB
-neuros export --input raw_data/ --output session.nwb
-```
-
-## Examples
-
-See the [notebooks/](https://github.com/<your-user>/neuros2/tree/main/notebooks) directory for tutorials:
-
-- Tutorial 1: Basic Pipelines
-- Tutorial 2: Real-Time Processing
-- Tutorial 3: Multi-Modal Processing
-- Tutorial 4: Custom Models
-- Tutorial 5: Benchmarking
-- Tutorial 6: NWB Integration
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](https://github.com/<your-user>/neuros2/blob/main/CONTRIBUTING.md) for guidelines.
+Repository: https://github.com/sidhulyalkar/neurOS-v1
 
 ## License
 
-MIT License
-
-## Citation
-
-If you use neurOS in your research, please cite:
-
-```bibtex
-@software{neuros2025,
-  title={neurOS: A Modular Operating System for Brain-Computer Interfaces},
-  author={neurOS Development Team},
-  year={2025},
-  url={https://github.com/<your-user>/neuros2}
-}
-```
-
-## Support
-
-- **Issues**: https://github.com/<your-user>/neuros2/issues
-- **Discussions**: https://github.com/<your-user>/neuros2/discussions
-- **Documentation**: https://neuros.readthedocs.io
+MIT License.
