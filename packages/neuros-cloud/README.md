@@ -1,87 +1,62 @@
 # neurOS Cloud
 
-Cloud infrastructure for neurOS - Kafka, AWS SageMaker, WebDataset, Zarr export.
+`neuros-cloud` contains optional distributed-data, storage, observability, and cloud-provider integrations for neurOS.
 
-## Features
-
-- **Kafka Integration**: Real-time data streaming at scale
-- **AWS SageMaker**: Cloud-based model training
-- **WebDataset Export**: Efficient dataset format for PyTorch
-- **Zarr Export**: Cloud-native chunked array storage
-- **Distributed Processing**: Multi-node data pipelines
-- **Monitoring**: Prometheus, MLflow, W&B integration
+> **Maturity boundary:** this package currently builds as part of the workspace, but it is not the neurOS real-time execution kernel and does not yet have provider-specific release qualification. Treat cloud integrations as optional infrastructure until their individual deployment paths have dedicated contract and reference-environment tests.
 
 ## Installation
 
 ```bash
-# Minimal installation
 pip install neuros-cloud
-
-# With Kafka support
-pip install neuros-cloud[kafka]
-
-# With AWS integration
-pip install neuros-cloud[aws]
-
-# With export formats
-pip install neuros-cloud[export]
-
-# Everything
-pip install neuros-cloud[all]
+pip install "neuros-cloud[kafka]"      # Kafka / ZeroMQ / Redis integrations
+pip install "neuros-cloud[aws]"        # AWS + SageMaker dependencies
+pip install "neuros-cloud[export]"     # WebDataset / OME-Zarr / Arrow
+pip install "neuros-cloud[monitoring]" # Prometheus / MLflow / W&B
+pip install "neuros-cloud[all]"
 ```
 
-## Quick Start
+## Architectural role
 
-### Kafka Streaming
+Cloud infrastructure should sit above stable neurOS runtime and artifact contracts:
 
-```python
-from neuros.cloud import KafkaWriter
-
-# Stream data to Kafka
-writer = KafkaWriter(
-    bootstrap_servers='localhost:9092',
-    topic='neuros-eeg'
-)
-
-writer.write(data, metadata={'session_id': '001'})
+```text
+local acquisition / RuntimeGraph / recording / replay
+                         |
+                         v
+              evidence + artifact boundary
+                         |
+                         v
+       registry / telemetry / orchestration / collaboration
 ```
 
-### WebDataset Export
+Real-time neural acquisition, queue semantics, timing, and safety behavior should remain local by default. A cloud outage must not silently alter the meaning of a running neural pipeline.
 
-```python
-from neuros.export import WebDatasetExporter
+High-value cloud/product work includes:
 
-# Export to WebDataset format
-exporter = WebDatasetExporter(output_dir='./data')
-exporter.export(samples, labels)
-```
+- immutable experiment/model/data/evidence artifact registry;
+- remote experiment configuration and launch requests over stable APIs;
+- qualification history for named hardware/model/config combinations;
+- fleet/device compatibility metadata;
+- aggregate observability and audit trails;
+- multi-site collaboration and permissions;
+- reproducible benchmark orchestration;
+- optional large-scale training jobs that return versioned artifacts to the local runtime.
 
-### SageMaker Training
+## Evidence rule
 
-```python
-from neuros.training import SageMakerLauncher
-
-# Launch training job on SageMaker
-launcher = SageMakerLauncher(
-    role='arn:aws:iam::...',
-    instance_type='ml.p3.2xlarge'
-)
-
-launcher.train(training_script='train.py', data_path='s3://...')
-```
-
-## Use Cases
-
-- Large-scale data collection
-- Distributed model training
-- Multi-site experiments
-- Cloud-based inference
-- Dataset publishing
+Provider availability is not BCI qualification. Any cloud path that participates in a scientific or operational claim should record provider/runtime versions, configuration, artifact hashes, failure behavior, and the strongest evidence tier actually tested.
 
 ## Documentation
 
-Full documentation: https://neuros.readthedocs.io
+Current platform documentation and package maturity live in:
+
+- `docs/PROJECT_STATUS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `ROADMAP.md`
+
+Repository: https://github.com/sidhulyalkar/neurOS-v1
 
 ## License
 
-MIT License
+MIT License.
