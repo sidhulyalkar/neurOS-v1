@@ -8,7 +8,10 @@ on:
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
       - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
       - ".github/workflows/evidence-ci.yml"
+      - ".github/workflows/longitudinal-evidence-study.yml"
+      - ".github/workflows/longitudinal-model-ladder-study.yml"
   push:
     branches:
       - main
@@ -19,7 +22,10 @@ on:
       - "docs/REAL_WORLD_EVIDENCE.md"
       - "docs/EVIDENCE_SOURCE_MAP.md"
       - "docs/LONGITUDINAL_EEG_SHOWCASE.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
       - ".github/workflows/evidence-ci.yml"
+      - ".github/workflows/longitudinal-evidence-study.yml"
+      - ".github/workflows/longitudinal-model-ladder-study.yml"
 
 permissions:
   contents: read
