@@ -22,6 +22,10 @@ from neuros.foundation_models.longitudinal import (
     make_nested_calibration_split,
     ordered_group_values,
 )
+from neuros.foundation_models.longitudinal_authority import (
+    LongitudinalCaseAuthority,
+    processed_data_sha256,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -144,6 +148,8 @@ __all__ = [
     "chronological_partition",
     "NestedCalibrationSplit",
     "make_nested_calibration_split",
+    "LongitudinalCaseAuthority",
+    "processed_data_sha256",
     "FoundationEmbeddingDecoder",
     "BaseFoundationModel",
     "POYOModel",
