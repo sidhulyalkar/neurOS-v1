@@ -2,8 +2,8 @@
 
 A frozen encoder is trained once on source history and materialized as a
 ``PreparedFrozenEncoderCase``. Multiple transfer strategies can then consume the
-exact same representation tensors, making SourceWeigher-vs-unweighted readout a
-clean comparison rather than two nominally identical encoder trainings.
+exact same learned state and representation tensors, making SourceWeigher-vs-
+unweighted readout a clean comparison.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from .longitudinal_authority import LongitudinalCaseAuthority
 from .longitudinal_methods import (
     TaskDecoderMethodSpec,
     _model_for,
+    _model_state_sha256,
     _parameter_count,
     _resolved_config,
     _score,
@@ -105,6 +106,7 @@ class PreparedFrozenEncoderCase:
     encoder_config: Mapping[str, Any]
     encoder_parameter_count: int
     analysis_manifest_fingerprint: str
+    model_state_sha256: str
     encoder_fit_s: float
     class_labels: tuple[str, ...]
     y_encoded: np.ndarray
@@ -116,9 +118,11 @@ class PreparedFrozenEncoderCase:
     target_pool_embedding: np.ndarray
     source_session: np.ndarray
     source_embeddings_by_session: Mapping[str, np.ndarray]
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
+        if len(self.model_state_sha256) != 64:
+            raise ValueError("model_state_sha256 must be a SHA-256 hex digest")
         object.__setattr__(self, "encoder_config", MappingProxyType(dict(self.encoder_config)))
         object.__setattr__(self, "y_encoded", _readonly_array(self.y_encoded, dtype=np.int64))
         object.__setattr__(self, "source_indices", _readonly_array(self.source_indices, dtype=np.int64))
@@ -154,6 +158,7 @@ class PreparedFrozenEncoderCase:
             "encoder_seed": int(self.encoder_seed),
             "encoder_spec_fingerprint": self.encoder_spec_fingerprint,
             "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
+            "model_state_sha256": self.model_state_sha256,
             "representation_sha256": self.representation_sha256,
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -169,6 +174,7 @@ class PreparedFrozenEncoderCase:
             "encoder_config": dict(self.encoder_config),
             "encoder_parameter_count": int(self.encoder_parameter_count),
             "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
+            "model_state_sha256": self.model_state_sha256,
             "encoder_fit_s": float(self.encoder_fit_s),
             "class_labels": list(self.class_labels),
             "source_samples": int(len(self.source_indices)),
@@ -185,7 +191,7 @@ class FrozenTransferCaseResult:
     method_spec: FrozenTransferMethodSpec
     encoder_state_manifest: Mapping[str, Any]
     rows: tuple[Mapping[str, Any], ...]
-    schema_version: int = 3
+    schema_version: int = 4
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -250,6 +256,7 @@ def prepare_frozen_encoder_case(
     started = time.perf_counter()
     encoder.train(X[split.source_train_indices], y_encoded[split.source_train_indices])
     encoder_fit_s = time.perf_counter() - started
+    model_state_sha256 = _model_state_sha256(encoder)
 
     source_embedding = encoder.encode(X[split.source_train_indices])
     evaluation_embedding = encoder.encode(X[split.evaluation_indices])
@@ -279,6 +286,7 @@ def prepare_frozen_encoder_case(
         encoder_config=encoder_config,
         encoder_parameter_count=parameter_count,
         analysis_manifest_fingerprint=manifest_fingerprint,
+        model_state_sha256=model_state_sha256,
         encoder_fit_s=float(encoder_fit_s),
         class_labels=class_labels,
         y_encoded=y_encoded,
@@ -418,6 +426,7 @@ def run_frozen_transfer_case(
             "method_spec_fingerprint": spec.fingerprint,
             "encoder_id": spec.encoder_id,
             "encoder_seed": int(spec.encoder_seed),
+            "model_state_sha256": state.model_state_sha256,
             "encoder_state_fingerprint": state.fingerprint,
             "representation_sha256": state.representation_sha256,
         }
