@@ -2,6 +2,7 @@
 
 from .base import ModelAdapter
 from .circuit_tracer import AttributionGraphSummary, CircuitTracerAdapter, feature_identity
+from .neuros import NeurOSModelAdapter
 from .nnsight import NNsightAdapter, NNsightTarget
 from .pytorch import ModelCall, PyTorchAdapter
 from .registry import IntegrationStatus, integration_status, integration_status_dict
@@ -16,6 +17,7 @@ __all__ = [
     "ModelCall",
     "NNsightAdapter",
     "NNsightTarget",
+    "NeurOSModelAdapter",
     "PyTorchAdapter",
     "SAELensFeatureAdapter",
     "SAEReconstructionAudit",

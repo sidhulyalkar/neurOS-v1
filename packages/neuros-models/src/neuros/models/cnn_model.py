@@ -1,79 +1,153 @@
-"""
-Pseudo‑CNN model for neurOS.
-
-This model uses a multilayer perceptron to approximate the behaviour of
-a convolutional neural network for EEG classification tasks.  It is
-intended as a placeholder until true convolutional models are integrated.
-"""
+"""Inspectable temporal convolutional decoder for neural windows."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
-from sklearn.neural_network import MLPClassifier
 
-from neuros.models.base_model import BaseModel
-
-try:
-    import tensorflow as _tf  # pragma: no cover
-    _TF_AVAILABLE = True
-except Exception:
-    _tf = None  # type: ignore
-    _TF_AVAILABLE = False
+from neuros.models.analysis import AnalysisCapability, AnalysisSurface, InterpretabilityManifest
+from neuros.models.torch_base import TorchDecoderModel
 
 
-class CNNModel(BaseModel):
-    """Approximate convolutional neural network using a deep MLP."""
+class CNNModel(TorchDecoderModel):
+    """Residual dilated temporal CNN operating on ``(batch, channels, time)`` windows."""
 
-    def __init__(self, hidden_layer_sizes: tuple[int, ...] = (128, 64, 32), max_iter: int = 300) -> None:
-        super().__init__()
-        self.hidden_layer_sizes = hidden_layer_sizes
-        self.max_iter = max_iter
-        self.clf: MLPClassifier | None = None
-        self._model: object | None = None
-        self._use_deep: bool = False
+    def __init__(
+        self,
+        n_channels: int,
+        n_classes: int = 2,
+        *,
+        hidden_channels: int = 64,
+        n_blocks: int = 3,
+        kernel_size: int = 7,
+        dropout: float = 0.2,
+        learning_rate: float = 1e-3,
+        n_epochs: int = 20,
+        batch_size: int = 32,
+        device: str = "auto",
+        random_state: int = 0,
+    ) -> None:
+        if n_channels <= 0 or n_blocks <= 0:
+            raise ValueError("n_channels and n_blocks must be positive")
+        if kernel_size % 2 == 0:
+            raise ValueError("kernel_size must be odd")
+        super().__init__(
+            n_classes=n_classes,
+            learning_rate=learning_rate,
+            n_epochs=n_epochs,
+            batch_size=batch_size,
+            device=device,
+            random_state=random_state,
+        )
+        self.n_channels = int(n_channels)
+        self.hidden_channels = int(hidden_channels)
+        self.n_blocks = int(n_blocks)
+        self.kernel_size = int(kernel_size)
+        self.dropout = float(dropout)
 
-    def train(self, X: np.ndarray, y: np.ndarray) -> None:
-        # attempt to use a simple deep CNN if TensorFlow is available
-        if _TF_AVAILABLE:
-            import numpy as np
-            n_samples, n_features = X.shape
-            # reshape features to (samples, features, 1)
-            X_r = X.reshape((n_samples, n_features, 1)).astype('float32')
-            y_cat = _tf.keras.utils.to_categorical(y)
-            model = _tf.keras.models.Sequential([
-                _tf.keras.layers.Conv1D(32, 5, activation='relu', input_shape=(n_features, 1)),
-                _tf.keras.layers.BatchNormalization(),
-                _tf.keras.layers.MaxPooling1D(2),
-                _tf.keras.layers.Conv1D(64, 5, activation='relu'),
-                _tf.keras.layers.BatchNormalization(),
-                _tf.keras.layers.GlobalAveragePooling1D(),
-                _tf.keras.layers.Dense(y_cat.shape[1], activation='softmax'),
-            ])
-            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-            model.fit(X_r, y_cat, epochs=5, batch_size=32, verbose=0)
-            self._model = model
-            self._use_deep = True
-            self.is_trained = True
-            return
-        # fallback to MLP
-        X_norm = (X - X.mean(axis=0)) / (X.std(axis=0) + 1e-6)
-        clf = MLPClassifier(hidden_layer_sizes=self.hidden_layer_sizes, max_iter=self.max_iter, random_state=42)
-        clf.fit(X_norm, y)
-        self.clf = clf
-        self._model = clf
-        self.is_trained = True
+    def _validate_X(self, X: np.ndarray) -> np.ndarray:
+        arr = super()._validate_X(X)
+        if arr.ndim != 3 or arr.shape[1] != self.n_channels:
+            raise ValueError(
+                f"CNNModel expects (batch, {self.n_channels}, time), received {tuple(arr.shape)}"
+            )
+        return arr
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
-        if not self.is_trained:
-            raise RuntimeError("Model has not been trained")
-        # if using deep model with TensorFlow
-        if self._use_deep and _TF_AVAILABLE and isinstance(self._model, _tf.keras.Model):
-            import numpy as np
-            X_r = X.reshape((X.shape[0], X.shape[1], 1)).astype('float32')
-            probs = self._model.predict(X_r, verbose=0)
-            return np.argmax(probs, axis=1)
-        # fallback: MLP
-        if self.clf is None:
-            raise RuntimeError("Model has not been trained")
-        X_norm = (X - X.mean(axis=0)) / (X.std(axis=0) + 1e-6)
-        return self.clf.predict(X_norm)
+    def _build_model(self) -> Any:
+        _, nn = self._torch()
+        in_channels = self.n_channels
+        hidden = self.hidden_channels
+        n_blocks = self.n_blocks
+        kernel = self.kernel_size
+        dropout = self.dropout
+        n_classes = self.n_classes
+
+        class ResidualBlock(nn.Module):
+            def __init__(self, dilation: int) -> None:
+                super().__init__()
+                padding = dilation * (kernel // 2)
+                self.conv1 = nn.Conv1d(hidden, hidden, kernel, padding=padding, dilation=dilation)
+                self.norm1 = nn.BatchNorm1d(hidden)
+                self.act1 = nn.GELU()
+                self.drop1 = nn.Dropout(dropout)
+                self.conv2 = nn.Conv1d(hidden, hidden, kernel, padding=padding, dilation=dilation)
+                self.norm2 = nn.BatchNorm1d(hidden)
+                self.act2 = nn.GELU()
+
+            def forward(self, x: Any) -> Any:
+                residual = x
+                x = self.drop1(self.act1(self.norm1(self.conv1(x))))
+                x = self.norm2(self.conv2(x))
+                return self.act2(x + residual)
+
+        class TemporalCNN(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.stem = nn.Sequential(
+                    nn.Conv1d(in_channels, hidden, kernel_size=kernel, padding=kernel // 2),
+                    nn.BatchNorm1d(hidden),
+                    nn.GELU(),
+                )
+                self.blocks = nn.ModuleList(
+                    [ResidualBlock(2**index) for index in range(n_blocks)]
+                )
+                self.embedding_pool = nn.AdaptiveAvgPool1d(1)
+                self.classifier = nn.Linear(hidden, n_classes)
+
+            def forward_features(self, x: Any) -> Any:
+                x = self.stem(x)
+                for block in self.blocks:
+                    x = block(x)
+                return self.embedding_pool(x).squeeze(-1)
+
+            def forward(self, x: Any) -> Any:
+                return self.classifier(self.forward_features(x))
+
+        return TemporalCNN()
+
+    def analysis_manifest(self) -> InterpretabilityManifest:
+        caps = (
+            AnalysisCapability.ACTIVATION_CAPTURE,
+            AnalysisCapability.ACTIVATION_REPLACEMENT,
+            AnalysisCapability.GRADIENT_ATTRIBUTION,
+            AnalysisCapability.REPRESENTATIONS,
+        )
+        surfaces = [
+            AnalysisSurface(
+                "stem", "local_temporal_features", ("batch", "feature", "time"),
+                "Initial channel-to-feature temporal projection.",
+                caps[:3], ("temporal attribution", "activation patching"),
+            )
+        ]
+        for index in range(self.n_blocks):
+            surfaces.append(
+                AnalysisSurface(
+                    f"blocks.{index}", f"dilated_residual_block_{index}",
+                    ("batch", "feature", "time"),
+                    f"Residual temporal block with dilation {2**index}.",
+                    caps[:3], ("activation patching", "block ablation", "causal scrubbing"),
+                )
+            )
+        surfaces.extend(
+            [
+                AnalysisSurface(
+                    "embedding_pool", "pooled_representation", ("batch", "feature", "one"),
+                    "Global pooled temporal representation.", caps[:3],
+                    ("linear probes", "RSA/CKA", "sparse feature decomposition"),
+                ),
+                AnalysisSurface(
+                    "classifier", "decision_readout", ("batch", "class"),
+                    "Linear class readout.", caps[:3], ("logit attribution", "readout ablation"),
+                ),
+            ]
+        )
+        return InterpretabilityManifest(
+            model_type=type(self).__name__,
+            architecture="residual dilated temporal CNN",
+            backend="pytorch",
+            input_axes=("batch", "channel", "time"),
+            output_semantics="class logits",
+            capabilities=caps,
+            surfaces=tuple(surfaces),
+        )
