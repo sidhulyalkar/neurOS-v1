@@ -1,234 +1,224 @@
 # Longitudinal EEG Model Ladder
 
-The longitudinal model ladder is the first neurOS benchmark where multiple neural decoding strategies are forced to answer the **same deployment question on the same samples**.
+This document defines the authoritative multi-method longitudinal EEG comparison layer built on the prospective split and calibration authority in neurOS.
 
-The benchmark is not a model zoo. It is a controlled comparison of how much useful decoding performance survives a session shift and how much target-session calibration is required to recover it.
+The governing rule is simple:
 
-## The authority comes before the model
+> One frozen data authority, many methods.
 
-For each subject and target session, neurOS first creates a `LongitudinalCaseAuthority`.
+Every method must consume the same serialized source-history, target-calibration and final-evaluation identity. Method-specific convenience is never allowed to silently redefine the scientific question.
 
-That object freezes:
+## Why this exists
 
-```text
-prior source indices
-        |
-        +----------------------+
-                               |
-target session                 |
-  +--> ordered calibration pool|
-  +--> immutable final eval    |
-                               v
-                    LongitudinalCaseAuthority
-                               |
-                 processed-data SHA-256
-                 partition fingerprint
-                 calibration fingerprint
-                 exact integer indices
-                               |
-          +--------------------+--------------------+
-          |                    |                    |
-        CSP+LDA              EEGNet          EEG-Conformer
-          |                    |                    |
-          +--------- frozen representation lanes --+
-                               |
-                         SourceWeigher
-```
+A longitudinal BCI benchmark becomes misleading quickly if each model is allowed to choose a different target test set, use future sessions under a prospective claim, estimate adaptation state from final evaluation samples, or recreate nominally identical frozen encoders independently.
 
-Every method restores and validates that authority before fitting.
+The ladder therefore separates three identities:
 
-A method cannot silently regenerate a convenient split. If processed EEG bytes, labels, group order, or sample identity change, authority restoration fails before model training.
+1. **data identity**: processed-data SHA-256 plus exact source/calibration/evaluation indices;
+2. **learned-state identity**: SHA-256 of the complete trained model state, including registered buffers;
+3. **representation identity**: SHA-256 over the exact frozen source/calibration/evaluation embedding tensors used by a downstream method.
 
-## Supported comparison lanes
+Configuration and seed are provenance. They are not substitutes for learned-state identity.
 
-The executable runner currently exposes seven lanes:
+## Comparison lanes
 
-| Method ID | Representation behavior | Target-session behavior |
-| --- | --- | --- |
-| `csp-lda` | CSP fit at each budget | source + declared labeled calibration |
-| `eegnet` | end-to-end EEGNet fit at each budget | source + declared labeled calibration |
-| `eeg-conformer` | end-to-end EEG-Conformer fit at each budget | source + declared labeled calibration |
-| `frozen-eegnet` | EEGNet trained once on prior history, then frozen | logistic readout refit with declared calibration |
-| `frozen-eeg-conformer` | EEG-Conformer trained once on prior history, then frozen | logistic readout refit with declared calibration |
-| `sourceweigher-eegnet` | one frozen source-trained EEGNet representation | source-session weights estimated from target calibration embeddings only |
-| `sourceweigher-eeg-conformer` | one frozen source-trained EEG-Conformer representation | source-session weights estimated from target calibration embeddings only |
+The initial executable ladder supports:
 
-The frozen lanes answer a different scientific question from end-to-end retraining:
+- `csp-lda`
+- `eegnet`
+- `eeg-conformer`
+- `frozen-eegnet`
+- `frozen-eeg-conformer`
+- `sourceweigher-eegnet`
+- `sourceweigher-eeg-conformer`
 
-> **Did the representation itself remain useful after the neural distribution moved?**
+The family intentionally spans a transparent classical baseline, task-specific deep decoders, fixed-representation transfer, and reliability-weighted transfer.
 
-## SourceWeigher target authority
+### CSP + LDA
 
-SourceWeigher operates in one common frozen embedding space.
+The classical floor. This remains important because a sophisticated neural system should not be promoted merely for beating a weak or incorrectly configured baseline.
 
-For target session `S4`:
+### EEGNet and EEG-Conformer
 
-```text
-S1 embeddings ----+
-S2 embeddings ----+----> RepresentationSourceWeigher ----> source weights
-S3 embeddings ----+                         ^
-                                            |
-                           declared S4 calibration embeddings
-```
+Task decoders are refit end to end at each declared target calibration budget. Their parameter count, fit time, training history, learned-state hash, analysis-manifest identity, calibration behavior and inference latency remain visible beside predictive performance.
 
-The final S4 evaluation examples are never passed to SourceWeigher.
+The benchmark does not claim the two architectures are capacity matched.
 
-At labeled calibration budget `0`, target-dependent SourceWeigher is explicitly unavailable:
+### Frozen encoder + matched readout
 
-```text
-status = unavailable_no_target_observations
-```
+A frozen encoder is trained once from declared prior history. Its source, target-calibration and target-evaluation embeddings are then materialized and fingerprinted.
 
-neurOS does **not** reuse final-evaluation EEG as unlabeled target data and call the result zero-shot.
+Only the matched logistic readout is refit across target calibration budgets. This isolates representation transfer from encoder adaptation.
 
-If a future experiment allows unlabeled target observations, that is a separate protocol with its own observation budget.
+### SourceWeigher + frozen encoder
 
-## Method identity is not transfer strategy
+SourceWeigher consumes the **same frozen encoder and exact same embedding tensors** as the corresponding unweighted frozen lane.
 
-The evidence schema keeps these concepts separate.
+This is a critical comparison invariant. The weighted and unweighted lanes must share:
 
-For example:
+- `model_state_sha256`;
+- `representation_sha256`;
+- encoder-state fingerprint;
+- encoder configuration;
+- analysis-manifest identity.
 
-```text
-method_id = sourceweigher-eegnet
-strategy  = sourceweigher-mean
-encoder   = eegnet
-```
+Only the transfer strategy changes.
 
-and:
+Target-dependent source weights may be estimated from declared target calibration embeddings. Final evaluation embeddings are forbidden from target-moment estimation.
 
-```text
-method_id = sourceweigher-eeg-conformer
-strategy  = sourceweigher-mean
-encoder   = eeg-conformer
-```
+## LongitudinalCaseAuthority
 
-This prevents aggregation from collapsing two distinct encoders merely because they use the same transfer algorithm.
+Each subject / target-session case is serialized as a `LongitudinalCaseAuthority` before model fitting.
 
-## Calibration metrics
+The authority binds:
 
-### Primary full frontier
+- subject identity;
+- target session;
+- observed chronology;
+- source-history indices;
+- ordered target calibration indices;
+- immutable final evaluation indices;
+- processed-data SHA-256;
+- partition fingerprint;
+- calibration fingerprint;
+- case fingerprint;
+- dataset-specific metadata such as original protocol/cohort.
 
-For methods genuinely defined at zero target calibration, the preregistered Kumar comparison uses:
+A method restores and validates that authority before fitting. Changed processed EEG bytes, sample order, labels, grouping metadata or case identity fail before a model is trained.
+
+## Prospective history semantics
+
+The default evidence question is prospective next-session transfer.
+
+For held-out target session `S_k`, only sessions observed before `S_k` may enter the source history. Later sessions are future-excluded.
+
+A conventional all-other-session analysis may still be useful as a secondary symmetric benchmark, but it must not be narrated as prospective evidence.
+
+## Fixed target evaluation identity
+
+For each target session, neurOS creates one deterministic balanced calibration pool and one immutable final evaluation set.
+
+Increasing the calibration budget changes only how much of the calibration pool a method may use. The final evaluation indices never move.
+
+This avoids an especially common source of false calibration gains: testing larger-budget models on a smaller or easier remainder of the same held-out session.
+
+## Nested calibration budgets
+
+Calibration examples are deterministic and nested per class.
+
+If the budgets are:
 
 ```text
-0, 1, 2, 5, 10 labeled examples / class
+0, 1, 2, 5, 10
 ```
 
-and computes normalized area under the balanced-accuracy calibration frontier.
+the budget-2 set must contain the budget-1 examples, the budget-5 set must contain budget 2, and so on.
 
-```text
-balanced accuracy
-^
-|                      *
-|                 *----
-|            *----
-|       *----
-|  *----
-+------------------------------> labels / class
-   0   1   2      5        10
-```
+The resulting frontier measures the marginal value of additional labeled target calibration under a fixed final evaluation identity.
 
-This rewards useful zero/few-shot behavior rather than only the largest-budget endpoint.
+## Zero-calibration semantics
 
-### Positive-budget adaptation frontier
+Target-independent methods can report budget 0.
 
-Target-dependent SourceWeigher is not defined at zero calibration. neurOS therefore reports a **separate secondary AUC over strictly positive budgets**.
+A target-dependent SourceWeigher lane is explicitly unavailable at budget 0 because no legal target calibration observations exist. neurOS does not substitute final evaluation examples as unlabeled target observations.
 
-This allows adaptation strategies to be compared without manufacturing a zero-calibration operating point.
+This produces two frontier summaries:
 
-The two metrics are never silently mixed.
+- **full calibration-frontier AUC**, only for methods genuinely defined from zero calibration onward;
+- **positive-budget adaptation AUC**, for methods whose adaptation begins only after target calibration becomes available.
 
-## Model capacity is part of the evidence
+An unavailable zero-calibration point is not a failure.
 
-EEGNet and EEG-Conformer are not capacity-matched architectures.
+## PreparedFrozenEncoderCase
 
-The evidence rows therefore record:
+Frozen representation work is prepared once per case, encoder architecture and seed.
 
-- resolved model configuration;
-- model seed;
-- parameter count;
-- fit wall-clock;
-- inference latency per trial;
-- analysis-manifest fingerprint;
+The prepared state contains:
+
+- the trained encoder;
+- complete model-state SHA-256;
+- exact source embeddings;
+- exact ordered target-calibration embeddings;
+- exact final-evaluation embeddings;
+- representation SHA-256;
+- encoder configuration and parameter count;
 - training history;
-- representation geometry.
+- mechanistic-analysis manifest identity;
+- representation-geometry summaries.
 
-A larger contextual model beating a compact reference model is not automatically evidence that attention is the causal reason for the gain.
+Downstream frozen and SourceWeigher methods reuse that object rather than independently retraining nominally identical encoders.
 
-## Representation measurements
-
-Task decoders expose stable `encode(...)` representations. The ladder records representation-health measurements such as:
-
-- effective rank;
-- feature variance;
-- mean representation norm;
-- mean pairwise cosine / anisotropy proxy.
-
-These measurements are supplementary to task performance. They help identify whether cross-session failure comes with representation collapse, excessive domain-specific structure, or a change in representation geometry.
-
-Later phases can add frozen-authority:
-
-- session leakage probes;
-- cross-session CKA;
-- channel/montage perturbation tests;
-- mechanistic intervention replication.
-
-Those analyses should reuse the same serialized case authority rather than inventing new test examples.
+This is what makes weighted-vs-unweighted transfer a clean intervention on the transfer policy rather than an uncontrolled comparison between two separately trained networks.
 
 ## Failure preservation
 
-A method crash is not deleted from the study.
+Method failures are part of the evidence record.
 
-For a failed method/case/seed, neurOS emits explicit failed rows for every requested calibration budget:
+For every requested method, case and calibration budget, the result surface must contain a row. Rows may be:
 
-```text
-status = failed
-failure_reason = <exception type and message>
-```
+- successful;
+- expected unavailable under declared method semantics;
+- failed with an explicit error.
 
-Structural authority failures abort the study because they invalidate the comparison itself.
+A failed method cannot disappear from an aggregate plot.
 
-Method-level failures remain in the artifact so aggregate plots cannot improve by silently discarding difficult subject/session cases.
+Structural authority failures are more severe: if data identity, chronology, partition identity or processed-data fingerprint no longer match the frozen authority, the study aborts rather than emitting a degraded comparison.
 
 ## Paired-case promotion gate
 
-For every method, neurOS audits whether each supported calibration budget contains the same frozen subject/session cases.
+A descriptive bundle is promotion-ready only if:
 
-SourceWeigher's supported set excludes budget `0` by design. Other methods must retain the same cases across the full requested frontier.
+1. no requested method rows failed;
+2. no unexpected unavailable rows exist;
+3. every method retains the same subject/session case membership across every budget it claims to support.
 
-A descriptive bundle is promotion-ready only when:
+SourceWeigher budget 0 is the only expected unavailable point in the initial ladder.
 
-1. there are no method failure rows;
-2. there are no unexpected unavailable rows;
-3. each method has identical case membership across all budgets it claims to support.
+This prevents an apparently stronger high-budget curve from being produced by silently losing difficult cases.
 
-This is a software/evidence gate, not statistical significance.
+## Metrics
 
-## Kumar2024 cohort awareness
+Per-method evidence should include, where applicable:
 
-Kumar2024 contains two original training/adaptation protocols:
+- balanced accuracy;
+- accuracy;
+- ROC-AUC;
+- expected calibration error;
+- Brier score;
+- negative log-likelihood;
+- fit wall-clock time;
+- trial inference latency;
+- parameter count;
+- resolved model configuration;
+- training history;
+- model seed;
+- learned-state SHA-256;
+- representation SHA-256;
+- analysis-manifest fingerprint;
+- representation geometry;
+- exact authority/partition/calibration fingerprints.
 
-- MOABB subjects 1–9: `GR`;
-- MOABB subjects 10–18: `PAR`.
+No single metric is the product claim.
 
-The model-ladder result bundle therefore carries `original_protocol` in every case and emits three descriptive views:
+For BCI productization, one of the most economically legible summaries is **calibration saved**: how many labeled target trials are required to reach a declared performance/reliability operating point.
 
-```text
-pooled frontier
-GR frontier
-PAR frontier
-```
+## Kumar2024 preregistration
 
-It also emits target-session-index summaries.
+For Kumar2024, the ladder preserves the dataset's original `GR` / `PAR` protocol grouping in every case authority and result row.
 
-This prevents decoder adaptation from being confused with the different original participant training histories.
+Reports should include:
 
-Promoted statistical inference follows Issue #27 and must account for repeated sessions within participant rather than treating every subject-session case as independent.
+- pooled descriptive summaries;
+- cohort-specific summaries;
+- target-session summaries;
+- full-frontier AUC where defined;
+- positive-budget adaptation AUC.
+
+Repeated sessions from one participant are not independent biological replicates. Promoted inferential claims must account for that hierarchy rather than treating every session row as a separate subject.
 
 ## Artifact bundle
 
-A model-ladder study emits:
+A complete ladder execution emits:
 
 ```text
 study_manifest.json
@@ -240,123 +230,56 @@ report.md
 artifact_hashes.json
 ```
 
-### `split_authority.json`
+`artifact_hashes.json` binds the machine-readable result surfaces. The human report is rendered from those same rows rather than maintained as an independent narrative source of truth.
 
-This is the central scientific authority.
+## Public API boundary
 
-It contains each case's:
+Scientific ladder logic is package-owned.
 
-- dataset identity;
-- history policy;
-- observed chronology;
-- source group values;
-- held-out group;
-- source indices;
-- ordered calibration indices by class;
-- immutable evaluation indices;
-- processed-data SHA-256;
-- partition fingerprint;
-- calibration-split fingerprint;
-- authority fingerprint;
-- case metadata such as Kumar GR/PAR identity.
+The CLI should remain primarily responsible for:
 
-### `method_runs.json`
+- collecting a supported dataset through its upstream adapter;
+- creating/restoring frozen authority;
+- selecting declared method configurations;
+- writing evidence artifacts.
 
-Preserves resolved method requests and method-level result manifests, including encoder configuration, parameter counts, training time, and failures.
+Core public contracts include:
 
-### `results.csv`
+- `LongitudinalCaseAuthority`;
+- `PreparedFrozenEncoderCase`;
+- method specifications;
+- `LadderRuntimeConfig`;
+- `run_ladder_method(...)`;
+- paired case-set helpers;
+- calibration-frontier summaries;
+- report/artifact generation.
 
-This is the flat Evidence Console table. Every row is traceable back to one frozen authority.
+This keeps the scientific comparison reusable outside one script.
 
-### `summary.json`
+## Execution
 
-Contains:
-
-- seed-averaged budget summaries;
-- cohort summaries;
-- target-session summaries;
-- full-frontier AUC;
-- positive-budget adaptation AUC;
-- paired case-set audits;
-- failure/unavailable counts;
-- descriptive promotion-gate state.
-
-### `report.md`
-
-A human-readable view rendered from the machine-readable result bundle.
-
-### `artifact_hashes.json`
-
-SHA-256 identities for every preceding artifact.
-
-## Run locally
-
-Install the complete ladder profile:
-
-```bash
-python -m pip install -e packages/neuros-core
-python -m pip install -e "packages/neuros-models[pytorch]"
-python -m pip install -e packages/neuros-sourceweigher
-python -m pip install -e "packages/neuros-foundation[evidence,ladder]"
-```
-
-Then run a small provenance pilot:
+The public study runner is:
 
 ```bash
 python scripts/evidence/run_moabb_model_ladder.py \
   --dataset kumar2024 \
-  --subjects 1,10 \
-  --methods csp-lda,eegnet,eeg-conformer,frozen-eegnet,frozen-eeg-conformer,sourceweigher-eegnet,sourceweigher-eeg-conformer \
-  --model-seeds 101 \
+  --subjects 1,2,3 \
   --budgets 0,1,2,5,10 \
-  --history-policy prior \
-  --split-seed 2026 \
-  --output evidence/kumar2024-pilot
+  --methods csp-lda,eegnet,eeg-conformer,frozen-eegnet,frozen-eeg-conformer,sourceweigher-eegnet,sourceweigher-eeg-conformer \
+  --output evidence/kumar2024-model-ladder
 ```
 
-The first real run should remain a provenance pilot. Do not increase model seeds or scale all participants until the complete artifact has been manually inspected.
+The corresponding GitHub Actions study workflow is manual only. Large public datasets are never downloaded as a normal push/PR side effect.
 
-## Run from GitHub Actions
+## External research extensions
 
-Use the manual workflow:
+External research packages, including the documented QuantumBCI extension, must reuse the same frozen `LongitudinalCaseAuthority` and evidence identities if they join this comparison. An extension may add a method lane, mechanism analysis, or resource accounting, but it may not create a second hidden split/calibration authority and still claim a matched comparison.
 
-```text
-neurOS longitudinal EEG model ladder
-```
+This keeps external experiments interoperable with neurOS Evidence without making those projects dependencies of the core runtime.
 
-It is `workflow_dispatch` only. Normal pushes and pull requests never download large public datasets.
+## Evidence presentation
 
-The workflow records Python, pip, Git and requested-method identity, executes the real MOABB study, verifies the emitted SHA-256 hashes and authority list, and uploads the evidence bundle as a GitHub artifact.
-
-## Evidence Console layout
-
-The recommended public console is five linked views.
-
-### 1. Chronology
-
-```text
-history -------- history -------- TARGET -------- future excluded
-                                  |     |
-                            calibration eval
-```
-
-### 2. Calibration frontier
-
-Show all methods and every operating point, not only the best endpoint.
-
-Methods without a legal zero-calibration point should begin where their declared target-observation requirement begins.
-
-### 3. Historical source trust
-
-For SourceWeigher, render source-session weights, ESS, entropy, residual and sensitivity diagnostics beside the target session.
-
-### 4. Cohort and session drift
-
-Provide pooled, GR, PAR and target-session-index views without changing the underlying result authority.
-
-### 5. Evidence identity
-
-Always keep visible:
+A public result should keep the following identities visually adjacent to the performance curve:
 
 ```text
 dataset/version
