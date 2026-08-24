@@ -10,6 +10,7 @@ on:
       - "tests/test_compatibility_registry.py"
       - "tests/test_compatibility_cli.py"
       - "tests/test_mne_interop.py"
+      - "scripts/check_dependency_boundaries.py"
       - "docs/PLATFORM.md"
       - "docs/COMPATIBILITY.md"
       - "mkdocs.yml"
@@ -26,6 +27,7 @@ on:
       - "tests/test_compatibility_registry.py"
       - "tests/test_compatibility_cli.py"
       - "tests/test_mne_interop.py"
+      - "scripts/check_dependency_boundaries.py"
       - "docs/PLATFORM.md"
       - "docs/COMPATIBILITY.md"
       - "mkdocs.yml"
@@ -39,6 +41,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dependency-boundaries:
+    name: Kernel dependency firewall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Prove neuros-core remains ecosystem-independent
+        run: python scripts/check_dependency_boundaries.py
+
   registry-contract:
     name: Compatibility registry and CLI
     runs-on: ubuntu-latest
