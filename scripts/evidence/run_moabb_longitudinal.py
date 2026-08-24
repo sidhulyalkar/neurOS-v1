@@ -5,11 +5,12 @@ The first goal is a transparent evidence floor, not a state-of-the-art claim.
 For each subject and held-out session this runner:
 
 1. creates a neurOS deployment-unit-disjoint pre-model partition;
-2. freezes one class-stratified evaluation set inside the held-out session;
-3. freezes the remaining held-out trials as an ordered calibration pool;
-4. refits the same CSP+LDA baseline at nested per-class calibration budgets;
-5. evaluates every budget on the exact same held-out examples;
-6. writes machine-readable manifests, results, summary, hashes, and a report.
+2. by default trains only on sessions observed *before* the held-out session;
+3. freezes one class-stratified evaluation set inside the held-out session;
+4. freezes the remaining held-out trials as an ordered calibration pool;
+5. refits the same CSP+LDA baseline at nested per-class calibration budgets;
+6. evaluates every budget on the exact same held-out examples;
+7. writes machine-readable manifests, results, summary, hashes, and a report.
 
 Large public datasets are downloaded by MOABB when this script is run. CI does
 not download them; contract behavior is tested with synthetic MOABB-shaped data.
@@ -32,10 +33,12 @@ from typing import Any, Iterable
 import numpy as np
 
 from neuros.foundation_models import (
+    chronological_partition,
     collect_moabb,
     get_evidence_source,
     hold_out_groups,
     make_nested_calibration_split,
+    ordered_group_values,
 )
 
 
@@ -284,12 +287,18 @@ def _render_report(
     summary: dict[str, Any],
     split_records: list[dict[str, Any]],
 ) -> str:
+    history_text = (
+        "prior sessions only; future sessions excluded"
+        if args.history_policy == "prior"
+        else "all other sessions; symmetric cross-session evaluation"
+    )
     lines = [
         "# neurOS Longitudinal EEG Evidence Report",
         "",
         f"- Dataset: **{source.title}** (`{source.id}`)",
         f"- Baseline: **CSP({args.csp_components}) + LDA**",
         f"- Band: **{args.fmin:g}-{args.fmax:g} Hz**",
+        f"- History policy: **{history_text}**",
         f"- Fixed held-out evaluation fraction: **{args.evaluation_fraction:.2f}**",
         f"- Subjects requested: **{', '.join(str(v) for v in args.subjects)}**",
         f"- Subject-session cases: **{len(split_records)}**",
@@ -323,15 +332,37 @@ def _render_report(
             "Within that session, the evaluation examples are frozen once and never change "
             "as calibration budget grows. Calibration subsets are nested per class.",
             "",
-            "The zero-calibration row is therefore a genuine historical-session baseline; "
-            "larger budgets add held-out-session calibration examples but are scored on the "
-            "same evaluation trials.",
+        ]
+    )
+    if args.history_policy == "prior":
+        lines.extend(
+            [
+                "The default chronological policy trains only on sessions preceding the "
+                "held-out session in upstream metadata order. Later sessions are excluded "
+                "from both fitting and evaluation, preventing future-data leakage.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "The `all-other` policy is symmetric leave-one-session-out evaluation and "
+                "may include sessions recorded after the held-out session. It must not be "
+                "described as next-session or prospective deployment evidence.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "The zero-calibration row uses source-history data only; larger budgets add "
+            "held-out-session calibration examples but are scored on the same evaluation trials.",
             "",
             "## Limits",
             "",
             "- This report is a transparent baseline, not an ORION or neurOS superiority claim.",
             "- Dataset files/checksums remain governed by MOABB/upstream repositories; pin those identities for promoted evidence.",
             "- CSP+LDA is refit when calibration examples are added; it is not an online-update algorithm.",
+            "- Upstream metadata order is treated as chronology under `prior`; promoted studies must verify that assumption against dataset documentation.",
             "- Hardware/closed-loop/clinical evidence is outside this offline real-dataset tier.",
             "",
             f"Raw result rows: {len(rows)}. See `results.csv`, `study_manifest.json`, and `artifact_hashes.json`.",
@@ -356,7 +387,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--held-out-sessions",
         type=_parse_text_list,
         default=None,
-        help="Optional comma-separated session IDs. Default: evaluate every session.",
+        help="Optional comma-separated session IDs. Default: evaluate every eligible session.",
+    )
+    parser.add_argument(
+        "--history-policy",
+        choices=("prior", "all-other"),
+        default="prior",
+        help=(
+            "Source-session policy. 'prior' (default) trains only on earlier sessions; "
+            "'all-other' is symmetric leave-one-session-out and may use future sessions."
+        ),
     )
     parser.add_argument(
         "--budgets",
@@ -422,27 +462,46 @@ def main(argv: list[str] | None = None) -> int:
             subjects=[int(subject)],
             dataset_id=source_id,
         )
-        sessions = sorted(set(bundle.groups.get("session", np.asarray([], dtype=str)).tolist()))
+        sessions = ordered_group_values(bundle, split_unit="session")
         if len(sessions) < 2:
             raise RuntimeError(
                 f"subject {subject} has fewer than two sessions after MOABB preprocessing"
             )
-        selected_sessions = sessions
+
         if args.held_out_sessions is not None:
-            missing = sorted(set(args.held_out_sessions) - set(sessions))
+            missing = [value for value in args.held_out_sessions if value not in sessions]
             if missing:
                 raise RuntimeError(
                     f"subject {subject} does not expose requested session(s) {missing}; "
-                    f"available={sessions}"
+                    f"available={list(sessions)}"
                 )
             selected_sessions = list(args.held_out_sessions)
+        elif args.history_policy == "prior":
+            selected_sessions = list(sessions[1:])
+        else:
+            selected_sessions = list(sessions)
 
         for session in selected_sessions:
-            partition = hold_out_groups(
-                bundle,
-                split_unit="session",
-                held_out_values=[session],
-            )
+            if args.history_policy == "prior":
+                try:
+                    partition = chronological_partition(
+                        bundle,
+                        split_unit="session",
+                        held_out_value=session,
+                        order=sessions,
+                    )
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"cannot construct prior-only evidence for subject {subject}, "
+                        f"session {session}: {exc}"
+                    ) from exc
+            else:
+                partition = hold_out_groups(
+                    bundle,
+                    split_unit="session",
+                    held_out_values=[session],
+                )
+
             split_seed = _stable_int_seed(args.seed, source_id, subject, session)
             calibration = make_nested_calibration_split(
                 partition,
@@ -460,17 +519,28 @@ def main(argv: list[str] | None = None) -> int:
                 preprocessing=(
                     f"MOABB {dataset_spec['paradigm']} events={events_text}; "
                     f"bandpass {args.fmin:g}-{args.fmax:g} Hz; CSP+LDA fit only on "
-                    "historical sessions plus declared calibration"
+                    "declared source sessions plus held-out calibration examples"
                 ),
                 notes=(
+                    f"history_policy={args.history_policy}",
                     "fixed evaluation subset inside held-out session",
                     "nested balanced calibration budgets per class",
                 ),
                 seed=split_seed,
             )
             record = partition.manifest(protocol=protocol)
+            source_sessions = tuple(
+                dict.fromkeys(
+                    np.asarray(bundle.groups["session"])[partition.train_indices]
+                    .astype(str)
+                    .tolist()
+                )
+            )
             record["subject"] = int(subject)
             record["held_out_session"] = str(session)
+            record["history_policy"] = args.history_policy
+            record["observed_session_order"] = list(sessions)
+            record["source_sessions"] = list(source_sessions)
             record["calibration"] = calibration.manifest()
             split_records.append(record)
 
@@ -503,6 +573,7 @@ def main(argv: list[str] | None = None) -> int:
                         "dataset_id": source_id,
                         "subject": int(subject),
                         "held_out_session": str(session),
+                        "history_policy": args.history_policy,
                         "partition_fingerprint": partition.fingerprint,
                         "calibration_split_fingerprint": calibration.fingerprint,
                         "calibration_per_class": int(budget),
@@ -535,6 +606,7 @@ def main(argv: list[str] | None = None) -> int:
             "kind": dataset_spec["paradigm"],
             "events": list(dataset_spec["events"] or ("left_hand", "right_hand")),
         },
+        "history_policy": args.history_policy,
         "subjects": [int(value) for value in args.subjects],
         "held_out_sessions_requested": args.held_out_sessions,
         "requested_calibration_per_class": [int(value) for value in args.budgets],
@@ -551,6 +623,8 @@ def main(argv: list[str] | None = None) -> int:
         "limitations": [
             "upstream MOABB/data-file checksums are not yet captured by this runner",
             "CSP+LDA is a transparent baseline, not an ORION superiority claim",
+            "prior policy assumes first-observed upstream session metadata order is chronological and must be verified before promotion",
+            "all-other policy is symmetric cross-session evaluation and is not prospective next-session evidence",
             "offline real-dataset evidence is not hardware or closed-loop qualification",
         ],
     }
@@ -586,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "output": str(output),
                 "dataset": source_id,
+                "history_policy": args.history_policy,
                 "rows": len(rows),
                 "subject_session_cases": len(split_records),
                 "artifacts": [path.name for path in controlled],
