@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from neuros.foundation_models import GroupedEvaluationData
 
@@ -46,12 +47,19 @@ def _synthetic_longitudinal_eeg() -> GroupedEvaluationData:
     )
 
 
+def _patch_data_sources(runner, monkeypatch, bundle):
+    monkeypatch.setattr(
+        runner,
+        "_dataset_and_paradigm",
+        lambda *args, **kwargs: (object(), object()),
+    )
+    monkeypatch.setattr(runner, "collect_moabb", lambda *args, **kwargs: bundle)
+
+
 def test_runner_writes_consistent_prior_only_evidence_bundle(tmp_path, monkeypatch):
     runner = _load_runner()
     bundle = _synthetic_longitudinal_eeg()
-
-    monkeypatch.setattr(runner, "_dataset_and_paradigm", lambda *args, **kwargs: (object(), object()))
-    monkeypatch.setattr(runner, "collect_moabb", lambda *args, **kwargs: bundle)
+    _patch_data_sources(runner, monkeypatch, bundle)
 
     output = tmp_path / "evidence"
     code = runner.main(
@@ -80,6 +88,7 @@ def test_runner_writes_consistent_prior_only_evidence_bundle(tmp_path, monkeypat
         rows = list(csv.DictReader(handle))
 
     assert manifest["history_policy"] == "prior"
+    assert manifest["allow_incomplete_budgets"] is False
     assert [item["held_out_session"] for item in manifest["splits"]] == ["1", "2"]
     assert manifest["splits"][0]["source_sessions"] == ["0"]
     assert manifest["splits"][1]["source_sessions"] == ["0", "1"]
@@ -88,10 +97,19 @@ def test_runner_writes_consistent_prior_only_evidence_bundle(tmp_path, monkeypat
     assert len(rows) == 4  # two eligible held-out sessions x two budgets
     assert {row["history_policy"] for row in rows} == {"prior"}
     assert {row["calibration_per_class"] for row in rows} == {"0", "1"}
-    assert len({row["calibration_split_fingerprint"] for row in rows if row["held_out_session"] == "1"}) == 1
+    assert len(
+        {
+            row["calibration_split_fingerprint"]
+            for row in rows
+            if row["held_out_session"] == "1"
+        }
+    ) == 1
 
+    assert summary["paired_case_sets_identical"] is True
     assert [point["calibration_per_class"] for point in summary["curve"]] == [0, 1]
+    assert len({point["case_set_fingerprint"] for point in summary["curve"]}) == 1
     assert "future sessions excluded" in report
+    assert "paired across identical subject-session cases" in report
     assert set(hashes["sha256"]) == {
         "results.csv",
         "summary.json",
@@ -101,3 +119,30 @@ def test_runner_writes_consistent_prior_only_evidence_bundle(tmp_path, monkeypat
 
     for name in hashes["sha256"]:
         assert len(hashes["sha256"][name]) == 64
+
+
+def test_runner_fails_closed_if_requested_frontier_would_be_unpaired(tmp_path, monkeypatch):
+    runner = _load_runner()
+    bundle = _synthetic_longitudinal_eeg()
+    _patch_data_sources(runner, monkeypatch, bundle)
+
+    # With 10 examples per class and a 0.5 frozen evaluation fraction, the
+    # balanced calibration maximum is 5/class. A promoted 6/class point must
+    # fail instead of dropping this subject/session from the right side of the curve.
+    with pytest.raises(RuntimeError, match="not paired"):
+        runner.main(
+            [
+                "--dataset",
+                "kumar2024",
+                "--subjects",
+                "1",
+                "--budgets",
+                "0,6",
+                "--history-policy",
+                "prior",
+                "--csp-components",
+                "2",
+                "--output",
+                str(tmp_path / "strict-failure"),
+            ]
+        )
