@@ -1,407 +1,132 @@
-# NeuroFM-X: Neural Foundation Model
+# neurOS NeuroFM
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+`neuros-neurofm` is the **alpha research package** for native neural foundation-model experiments inside neurOS.
 
-**A foundation model for neural population dynamics using selective state-space models (Mamba), multi-modal fusion (Perceiver-IO), and population transformers (PopT).**
+It contains exploratory architectures and utilities for neural population modeling, including state-space backbones, population-level aggregation, multimodal fusion, adaptation, continual-learning, evaluation, and mechanistic-analysis integration.
 
----
+> **Maturity boundary:** this package is research software. It is not a promoted ORION implementation, a hardware-qualified decoder, or a source of production/clinical claims. Model quality, latency, transfer, and mechanism claims require an immutable model artifact plus a leakage-controlled evaluation manifest on named data and hardware where applicable.
 
-## 🎯 Overview
+See [`../../docs/PROJECT_STATUS.md`](../../docs/PROJECT_STATUS.md) for the repository-wide maturity map.
 
-NeuroFM-X is designed for:
-- **Cross-task learning** (navigation, vision, decision-making)
-- **Cross-species generalization** (mouse, NHP, human)
-- **Multi-modal fusion** (Neuropixels, 2-photon, calcium imaging, LFP)
-- **Transfer learning** with few-shot adaptation
-- **Efficient training** with linear-complexity SSMs
+## Why this package exists
 
-### Key Features
+neurOS deliberately separates three concerns:
 
-- 🧠 **State-Space Models (Mamba):** O(L) complexity for long sequences
-- 🎨 **Perceiver-IO Fusion:** Handles variable-size inputs across modalities
-- 🔄 **Population Transformer (PopT):** Population-level aggregation
-- 🎯 **Multi-Task Heads:** Reconstruction, decoding, contrastive learning
-- ⚡ **Production-Ready:** Docker deployment, cloud training, monitoring
+- `neuros-foundation` catalogs and evaluates external neural foundation-model ecosystems behind common protocols.
+- `neuros-neurofm` is the sandbox for **native** neurOS foundation-model R&D.
+- `neuros-orion` is the representation/adaptation plane that receives research components only after comparative evidence justifies promotion.
 
-### Architecture
+That separation lets the project explore ambitious architectures without making experimental code part of the deployment contract by accident.
 
-```
-Neural Data → Tokenizers → Mamba Backbone → Perceiver-IO → PopT → Task Heads
-   (B,S,N)       ↓            (B,S,d)         (B,L,d)      (B,d)     (B,Y)
-              [Binned]      [4 blocks]      [32 latents]  [2 layers] [Decoder]
-              [Calcium]     [Multi-rate]    [Cross-attn]             [Encoder]
-              [LFP]                                                   [Contrast]
-```
+## Current research surface
 
-**Parameters:** 3-10M (efficient!)
-**Inference:** <10ms per sample
-**GPU Memory:** 2-6 GB (fits RTX 3070 Ti)
+The source tree includes work on:
 
----
+- neural population and state-space models;
+- modality-specific tokenization and dataset adapters;
+- multimodal fusion;
+- continual/adaptive learning;
+- augmentation and diffusion experiments;
+- evaluation utilities;
+- inference and integration helpers;
+- mechanistic-interpretability integration.
 
-## 🚀 Quick Start
+The presence of a module means the implementation is available for research. It does **not** imply that the method has beaten a baseline, generalized across subjects/sessions/devices, or passed a hardware qualification profile.
 
-### Installation
+## Installation from this monorepo
+
+From the repository root:
 
 ```bash
-# Clone repository
-git clone <repo-url>
-cd neuros-neurofm
-
-# Install package
-pip install -e .
-
-# Install Mamba (REQUIRED for fast training)
-pip install mamba-ssm causal-conv1d
+git clone https://github.com/sidhulyalkar/neurOS-v1.git
+cd neurOS-v1
+python -m pip install -e "packages/neuros-neurofm[dev]"
 ```
 
-### Run Training
-
-**Quick validation (2-3 hours):**
-```bash
-python training/train.py --config configs/quick_test.yaml
-```
-
-**Full training (8-12 hours on RTX 3070 Ti):**
-```bash
-python training/train.py --config configs/local_full.yaml
-```
-
-**Cloud training (24-40 hours, AWS A100):**
-```bash
-python training/train.py --config configs/cloud_aws_a100.yaml
-```
-
-### Monitor Progress
+Optional research profiles are declared in `pyproject.toml`:
 
 ```bash
-# Checkpoint analysis
-python scripts/monitor_training.py --checkpoint checkpoints/latest.pt
+# state-space / Mamba experiments
+python -m pip install -e "packages/neuros-neurofm[mamba]"
 
-# TensorBoard
-tensorboard --logdir=logs
+# training stack
+python -m pip install -e "packages/neuros-neurofm[training]"
 
-# Benchmark
-python benchmarks/benchmark_neurofmx.py --checkpoint checkpoints/best.pt
+# DANDI / NWB / Allen / IBL dataset tooling
+python -m pip install -e "packages/neuros-neurofm[datasets]"
+
+# mechanistic-analysis integration
+python -m pip install -e "packages/neuros-neurofm[mechint]"
 ```
 
----
+Install only the extras required by the experiment. GPU/CUDA compatibility depends on the selected PyTorch and optional backend versions.
 
-## 📦 Project Structure
+## Evidence requirements
 
-```
-neuros-neurofm/
-├── src/neuros_neurofm/       # Core library
-│   ├── models/                # Model architectures
-│   ├── tokenizers/            # Modality-specific tokenizers
-│   ├── fusion/                # Perceiver-IO fusion
-│   └── adapters/              # Transfer learning
-│
-├── training/                  # Training scripts
-│   ├── train.py               # Main training (YAML-based)
-│   ├── train_legacy.py        # Old training script
-│   └── train_legacy_logging.py
-│
-├── scripts/                   # Utilities
-│   ├── data_utils.py          # Data loading
-│   ├── monitor_training.py    # Training monitoring
-│   ├── prepare_full_dataset.py
-│   └── download_allen_data.py
-│
-├── configs/                   # Training configurations
-│   ├── quick_test.yaml        # Fast validation (4 sessions)
-│   ├── local_full.yaml        # Full local training
-│   └── cloud_aws_a100.yaml    # Cloud training
-│
-├── deployment/                # Production
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   └── aws_setup.sh
-│
-├── benchmarks/                # Evaluation
-│   └── benchmark_neurofmx.py
-│
-└── docs/                      # Documentation
-    ├── QUICK_START.md
-    ├── SCALING_STRATEGY.md
-    ├── TRAINING_GUIDE.md
-    └── OPTIMAL_TRAINING_PLAN.md
+A NeuroFM experiment should not be promoted based on a single training curve or favorable held-out fold. At minimum, a comparative result should record:
+
+1. dataset identity and version;
+2. subject/session/site/device split unit;
+3. preprocessing and tokenization fingerprint;
+4. architecture and parameter-count identity;
+5. training/calibration budget;
+6. random seeds and repeated-run uncertainty;
+7. task utility metrics;
+8. representation diagnostics such as geometry and domain leakage;
+9. robustness to missing/noisy channels or units where relevant;
+10. artifact/checkpoint hashes and exact code/package versions.
+
+For transfer/adaptation studies, fit, adaptation, calibration, and evaluation partitions must be disjoint according to the declared protocol.
+
+For mechanistic studies, attribution alone is insufficient. Intervention, held-out faithfulness, replication, and cross-session/subject stability should be reported separately.
+
+## Recommended real-data progression
+
+The current roadmap is to test native NeuroFM ideas through shared neurOS benchmark protocols rather than maintain a private scoreboard inside this package:
+
+```text
+synthetic falsification
+  -> one real multi-session dataset
+  -> subject/session-disjoint comparison
+  -> cross-dataset/device transfer
+  -> few-shot adaptation/calibration-cost study
+  -> mechanism stability study
+  -> promoted ORION component only if evidence survives
 ```
 
----
+Useful external sources include MOABB/MNE for EEG benchmarking and DANDI/FALCON/NLB-style NWB datasets for population/spiking studies. The exact supported benchmark bridge should live in maintained neurOS evaluation code, not be implied by this README.
 
-## 🎓 Usage
+## Development
 
-### Basic Training
-
-```python
-# Load configuration
-config = load_config("configs/quick_test.yaml")
-
-# Create model
-model = NeuroFMXMultiTask(
-    d_model=config['model']['d_model'],
-    n_mamba_blocks=config['model']['n_mamba_blocks'],
-    ...
-)
-
-# Train
-trainer = ConfigurableTrainer(config, model, train_loader, val_loader)
-trainer.train()
-```
-
-### Inference
-
-```python
-from neuros_neurofm.models import NeuroFMXComplete
-
-# Load trained model
-model = NeuroFMXComplete.from_pretrained("checkpoints/best.pt")
-
-# Decode behavior
-behavior = model.decode_behavior(neural_data)
-
-# Extract latents
-latents = model.encode(neural_data)
-```
-
-### Transfer Learning
-
-```python
-# Add adapter for new dataset
-model.add_unit_id_adapter(n_units=new_dataset.n_units, freeze_backbone=True)
-
-# Fine-tune (only adapter trains)
-trainer.fit(model, new_dataloader)
-```
-
----
-
-## 📊 Training Strategy
-
-We recommend **progressive scaling**:
-
-| Phase | Sessions | Duration | Cost | Purpose |
-|-------|----------|----------|------|---------|
-| 1. Validation | 4 | 2-3 hrs | $0 | Test architecture |
-| 2. Optimization | 10-20 | 4-8 hrs | $0-50 | Find best config |
-| 3. Baseline | 20-30 | 8-12 hrs | $30-50 | Publishable results |
-| 4. Foundation | 50-100 | 20-40 hrs | $100-200 | Strong model |
-| 5. Multi-Modal | 200+ | 40-80 hrs | $200-400 | Ultimate generalization |
-
-**Key insight:** Start small, optimize, then scale. See [docs/SCALING_STRATEGY.md](docs/SCALING_STRATEGY.md)
-
----
-
-## 🔧 Configuration
-
-All training is configured via YAML:
-
-```yaml
-# configs/my_experiment.yaml
-name: "my_experiment"
-
-data:
-  batch_size: 16
-  num_sessions: 20
-  max_units: 384
-
-model:
-  d_model: 128
-  n_mamba_blocks: 4
-  n_latents: 32
-
-training:
-  max_epochs: 50
-  learning_rate: 3.0e-4
-  use_amp: true
-```
-
-Templates: [configs/](configs/)
-
----
-
-## 🌐 Cloud Deployment
-
-### Docker
+From the repository root:
 
 ```bash
-# Build
-docker build -t neurofmx:latest -f deployment/Dockerfile .
-
-# Run
-docker run --gpus all \
-  -v $(pwd)/data:/data \
-  -v $(pwd)/checkpoints:/checkpoints \
-  neurofmx:latest --config configs/local_full.yaml
+python -m pip install -e "packages/neuros-neurofm[dev]"
+pytest -q packages/neuros-neurofm/tests
 ```
 
-### AWS
+Dataset- or GPU-dependent tests should remain explicitly marked so the default software contract suite does not silently depend on large downloads or specialized hardware.
 
-```bash
-# Setup instance
-./deployment/aws_setup.sh <instance-id>
+## Relationship to ORION
 
-# Start training
-python training/train.py --config configs/cloud_aws_a100.yaml
-```
+ORION should consume a NeuroFM idea only when the experiment answers a practical question such as:
 
-Cost monitoring and auto-shutdown included! See [deployment/](deployment/)
+- Does this representation reduce calibration cost on a new session or subject?
+- Does it improve robustness to channel/unit dropout or device drift?
+- Does it preserve task information while reducing subject/session leakage?
+- Does a proposed mechanism remain causally important under held-out interventions?
+- Does the benefit survive matched downstream capacity and matched training budgets?
 
----
+Until then, the implementation remains research material by design.
 
-## 📈 Performance
+## Documentation
 
-### Benchmarks (20 Allen Neuropixels sessions)
+- [Project maturity map](../../docs/PROJECT_STATUS.md)
+- [Architecture](../../docs/ARCHITECTURE.md)
+- [Roadmap](../../ROADMAP.md)
+- [Contributing](../../CONTRIBUTING.md)
+- [Package documentation](docs/)
 
-| Metric | NeuroFM-X | CEBRA |
-|--------|-----------|-------|
-| Reconstruction R² | 0.65-0.75 | 0.55-0.65 |
-| Behavior Decoding R² | 0.45-0.60 | 0.40-0.50 |
-| Inference Speed | 8-12 ms | 15-20 ms |
-| Parameters | 3-10M | 5-15M |
+## License
 
-### With Foundation Training (200+ sessions, multi-modal):
-- Reconstruction R²: **0.75-0.85**
-- Transfer Learning: **90%+ with <10 examples**
-- Cross-Modal: **Zero-shot across modalities**
-
----
-
-## 🛠️ Development
-
-### Requirements
-
-- Python 3.10+
-- PyTorch 2.0+
-- CUDA 11.8+ (for GPU training)
-- `mamba-ssm` (REQUIRED for fast training)
-- `causal-conv1d`
-
-### Installation for Development
-
-```bash
-# Install in editable mode
-pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
-
-# Run tests
-pytest tests/
-```
-
-### Project Dependencies
-
-```
-torch>=2.0.0
-numpy>=1.24.0
-scipy>=1.10.0
-scikit-learn>=1.2.0
-tqdm>=4.65.0
-pyyaml>=6.0
-tensorboard>=2.12.0
-mamba-ssm>=1.1.0
-causal-conv1d>=1.1.0
-allensdk  # For Allen data
-h5py
-pynwb
-```
-
----
-
-## 📚 Documentation
-
-### Getting Started
-- **[Quick Start](docs/QUICK_START.md)** - Get running in 5 minutes
-- **[Training Guide](docs/TRAINING_GUIDE.md)** - Detailed instructions
-
-### Advanced
-- **[Scaling Strategy](docs/SCALING_STRATEGY.md)** - Progressive training approach
-- **[Optimal Training Plan](docs/OPTIMAL_TRAINING_PLAN.md)** - Multi-dataset strategy
-
-### Reference
-- **Architecture:** [src/neuros_neurofm/models/](src/neuros_neurofm/models/)
-- **Configs:** [configs/](configs/)
-- **Deployment:** [deployment/](deployment/)
-
----
-
-## 🔬 Supported Datasets
-
-### Currently Integrated
-- Allen Brain Observatory - Neuropixels
-- Allen Brain Observatory - 2-Photon
-
-### Ready to Integrate (Public & Free)
-- International Brain Laboratory (IBL)
-- CRCNS Hippocampus
-- Miniscope
-- DANDI Archive
-- Neural Latents Benchmark (NHP)
-
-See [docs/OPTIMAL_TRAINING_PLAN.md](docs/OPTIMAL_TRAINING_PLAN.md) for multi-dataset training.
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Areas:
-- Additional tokenizers (ECoG, Utah arrays, EEG)
-- New task heads (RL, attention, sleep staging)
-- Optimization improvements
-- Multi-GPU training
-- Additional benchmarks
-
----
-
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details
-
----
-
-## 🙏 Acknowledgments
-
-- **Allen Institute** - Neuropixels & 2-photon datasets
-- **Mamba (Gu & Dao)** - Selective state-space models
-- **Perceiver (Jaegle et al.)** - Cross-attention architecture
-- **CEBRA** - Contrastive learning inspiration
-
----
-
-## 📧 Support
-
-- **Issues:** [GitHub Issues](issues)
-- **Documentation:** [docs/](docs/)
-- **Discussions:** [GitHub Discussions](discussions)
-
----
-
-## 🚀 Quick Commands
-
-```bash
-# Install
-pip install -e . && pip install mamba-ssm causal-conv1d
-
-# Train (quick test)
-python training/train.py --config configs/quick_test.yaml
-
-# Train (full)
-python training/train.py --config configs/local_full.yaml
-
-# Monitor
-python scripts/monitor_training.py --checkpoint checkpoints/latest.pt
-
-# Benchmark
-python benchmarks/benchmark_neurofmx.py --checkpoint checkpoints/best.pt
-
-# Docker
-docker-compose up neurofm-train
-```
-
----
-
-**Build neural foundation models. Start training now! 🧠✨**
+MIT. See the repository [`LICENSE`](../../LICENSE).
