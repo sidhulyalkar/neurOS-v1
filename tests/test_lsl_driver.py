@@ -204,6 +204,7 @@ async def test_lsl_rejects_ambiguous_streams(monkeypatch):
     with pytest.raises(RuntimeError, match="selection is ambiguous"):
         await driver.start()
 
+    assert FakeLSLRuntime.resolve_calls == [("type", "EEG", 2, 2.0)]
     assert FakeLSLRuntime.inlet_instances == []
     assert driver._running is False
 
@@ -229,11 +230,14 @@ async def test_lsl_emits_explicitly_synchronized_canonical_frames(monkeypatch):
     descriptor = driver.descriptor
     assert descriptor.clock_domain is ClockDomain.SYNCHRONIZED
     assert descriptor.channel_names == ("C3", "C4")
+    assert descriptor.manufacturer is None
+    assert descriptor.metadata["transport"] == "lsl"
     assert descriptor.metadata["lsl_source_id"] == "headset-1"
     assert descriptor.metadata["lsl_postprocessing_flags"] == 0
     assert descriptor.metadata["timing_semantics"] == (
         "raw_lsl_timestamp_plus_time_correction"
     )
+    assert FakeLSLRuntime.resolve_calls == [("source_id", "headset-1", 2, 2.0)]
 
     frames = []
     async for frame in driver.frames():
