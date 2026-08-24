@@ -258,7 +258,13 @@ def prepare_frozen_encoder_case(
             [np.asarray(values, dtype=np.int64) for values in split.calibration_order_by_class.values()]
         )
     )
-    target_pool_embedding = encoder.encode(X[target_pool_indices])
+    if len(target_pool_indices):
+        target_pool_embedding = encoder.encode(X[target_pool_indices])
+    else:
+        target_pool_embedding = np.empty(
+            (0, source_embedding.shape[1]),
+            dtype=source_embedding.dtype,
+        )
     source_session = np.asarray(data.groups["session"])[split.source_train_indices].astype(str)
     source_embeddings_by_session = {
         session: source_embedding[source_session == session]
