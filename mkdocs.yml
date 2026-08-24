@@ -55,6 +55,7 @@ nav:
   - Real-World Evidence:
       - Evidence Program: REAL_WORLD_EVIDENCE.md
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
+      - Longitudinal EEG Showcase: LONGITUDINAL_EEG_SHOWCASE.md
   - Installation: getting-started/installation.md
   - Architecture: ARCHITECTURE.md
   - API Surface: API_REFERENCE.md
