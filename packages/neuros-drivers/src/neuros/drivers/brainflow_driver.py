@@ -1,34 +1,54 @@
-"""
-BrainFlow driver for neurOS.
+"""Fail-closed BrainFlow EEG source for neurOS.
 
-This module provides integration with the BrainFlow library for acquiring
-data from a wide variety of consumer and research-grade biosignal devices.
-If the optional ``brainflow`` package is not installed, the driver will
-gracefully fall back to the :class:`MockDriver`.  Users can specify a
-board ID and optional parameters such as serial port or IP address.  In
-production, this driver enables neurOS to support dozens of devices
-uniformly.
+BrainFlow's returned matrix is board-specific. This driver therefore uses
+BrainFlow's channel metadata instead of assuming EEG occupies the first rows,
+drains the board ringbuffer so samples are emitted once, and never silently
+substitutes synthetic data when hardware support is unavailable.
 """
 
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import AsyncIterator, Optional
 
+import numpy as np
+
+from neuros.contracts import ClockDomain, StreamDescriptor
 from neuros.drivers.base_driver import BaseDriver
-from neuros.drivers.mock_driver import MockDriver
+from neuros.runtime import OverflowPolicy
 
 
 class BrainFlowDriver(BaseDriver):
-    """Driver that uses BrainFlow to stream neural data.
+    """Stream EEG samples from a BrainFlow-supported board.
 
-    This driver wraps the optional BrainFlow library.  When BrainFlow is
-    available, it will stream data from the specified board.  If
-    BrainFlow cannot be imported, a :class:`MockDriver` is used as a
-    fallback so that pipelines can still run without hardware.  The
-    driver exposes the standard :class:`BaseDriver` interface by
-    implementing the `_stream` coroutine which is invoked by the
-    base class to produce timestamped samples.
+    Parameters
+    ----------
+    board_id:
+        BrainFlow board identifier.
+    sampling_rate:
+        Optional *expected* prepared-session sampling rate. BrainFlow controls
+        the hardware sampling rate; neurOS does not pretend this argument can
+        resample the device. If supplied, startup fails when the actual rate
+        differs.
+    channels:
+        Optional number of EEG channels to expose, selected from BrainFlow's
+        declared EEG row indices. It must not exceed the board's EEG channel
+        count.
+    stream_id:
+        neurOS stream identifier.
+    overflow_policy:
+        Queue overload behavior inherited from :class:`BaseDriver`.
+    **params:
+        BrainFlow ``BrainFlowInputParams`` fields such as ``serial_port``,
+        ``ip_address``, or ``master_board``. Unknown fields are rejected so a
+        misspelled hardware parameter cannot be ignored silently.
+
+    Notes
+    -----
+    BrainFlow is an optional dependency. Constructing this driver without it
+    installed raises an actionable :class:`ImportError`. Use ``MockDriver``
+    explicitly for synthetic data.
     """
 
     def __init__(
@@ -36,121 +56,242 @@ class BrainFlowDriver(BaseDriver):
         board_id: int = 0,
         sampling_rate: Optional[float] = None,
         channels: Optional[int] = None,
+        *,
+        stream_id: str | None = None,
+        overflow_policy: OverflowPolicy = OverflowPolicy.DROP_OLDEST,
         **params,
     ) -> None:
-        """Initialise a BrainFlow driver.
-
-        Parameters
-        ----------
-        board_id : int, optional
-            Identifier of the BrainFlow board.  Defaults to 0 (synthetic).
-        sampling_rate : float, optional
-            Desired sampling rate.  If omitted, the board's native rate is
-            used.
-        channels : int, optional
-            Number of channels to acquire.  If omitted, the number of EEG
-            channels reported by the board is used.
-        **params
-            Additional keyword arguments are passed through to the
-            BrainFlow ``BrainFlowInputParams`` object.  These allow
-            specifying serial port, IP address, etc.  Unknown keys are
-            ignored.
-        """
-        # Attempt to import BrainFlow.  If it fails, fall back to the mock
-        # driver.  We defer importing BrainFlow until runtime so that
-        # neurOS does not require it as a hard dependency.
         try:
             from brainflow.board_shim import BoardShim, BrainFlowInputParams  # type: ignore
-        except ImportError:
-            # no brainflow: set up a mock driver and inherit its config
-            mock = MockDriver(
-                sampling_rate=sampling_rate or 250.0,
-                channels=channels or 8,
-            )
-            # call BaseDriver constructor to initialise queues and state
-            super().__init__(sampling_rate=mock.sampling_rate, channels=mock.channels)
-            self._delegate: Optional[BaseDriver] = mock
-            self._board: Optional[object] = None
-            return
+        except ImportError as exc:
+            raise ImportError(
+                "BrainFlowDriver requires the optional BrainFlow dependency. "
+                "Install `neuros-drivers[eeg]` or use MockDriver explicitly "
+                "for synthetic data."
+            ) from exc
 
-        # brainflow available: configure the board
-        # instantiate input parameters and assign any provided values
+        if channels is not None and int(channels) <= 0:
+            raise ValueError("channels must be positive when provided")
+        if sampling_rate is not None and float(sampling_rate) <= 0:
+            raise ValueError("sampling_rate must be positive when provided")
+
         input_params = BrainFlowInputParams()
-        for k, v in params.items():
-            if hasattr(input_params, k):
-                setattr(input_params, k, v)
-        # determine channel count and sampling rate from board if not given
-        # BrainFlow provides functions to query these properties
-        board_fs = BoardShim.get_sampling_rate(board_id)
-        eeg_chans = BoardShim.get_eeg_channels(board_id)
-        n_ch = channels or len(eeg_chans)
-        fs = sampling_rate or board_fs
-        # initialise base driver
-        super().__init__(sampling_rate=fs, channels=n_ch)
-        # store BrainFlow board
-        self._board_id = board_id
+        unknown_params: list[str] = []
+        for key, value in params.items():
+            if not hasattr(input_params, key):
+                unknown_params.append(key)
+                continue
+            setattr(input_params, key, value)
+        if unknown_params:
+            joined = ", ".join(sorted(unknown_params))
+            raise ValueError(f"Unknown BrainFlowInputParams field(s): {joined}")
+
+        self._BoardShim = BoardShim
+        self._board_id = int(board_id)
         self._params = input_params
-        self._board = BoardShim(board_id, input_params)
-        self._delegate = None
+        self._board = BoardShim(self._board_id, input_params)
+        self._requested_channels = int(channels) if channels is not None else None
+        self._expected_sampling_rate = (
+            float(sampling_rate) if sampling_rate is not None else None
+        )
+        self._session_prepared = False
+        self._board_streaming = False
+
+        self._master_board_id = self._resolve_master_board_id()
+        self._eeg_channels = self._resolve_eeg_channels(self._master_board_id)
+        initial_rate = float(BoardShim.get_sampling_rate(self._master_board_id))
+        self._timestamp_channel = self._resolve_timestamp_channel(self._master_board_id)
+        self._device_name = self._resolve_device_name(self._master_board_id)
+
+        super().__init__(
+            sampling_rate=initial_rate,
+            channels=len(self._eeg_channels),
+            stream_id=stream_id,
+            modality="eeg",
+            overflow_policy=overflow_policy,
+        )
+
+    def _resolve_master_board_id(self) -> int:
+        get_board_id = getattr(self._board, "get_board_id", None)
+        if callable(get_board_id):
+            return int(get_board_id())
+        return self._board_id
+
+    def _resolve_eeg_channels(self, board_id: int) -> tuple[int, ...]:
+        rows = tuple(int(row) for row in self._BoardShim.get_eeg_channels(board_id))
+        if not rows:
+            raise ValueError(f"BrainFlow board {board_id} exposes no EEG channels")
+        if self._requested_channels is not None:
+            if self._requested_channels > len(rows):
+                raise ValueError(
+                    f"Requested {self._requested_channels} EEG channels but BrainFlow "
+                    f"board {board_id} exposes {len(rows)}"
+                )
+            rows = rows[: self._requested_channels]
+        return rows
+
+    def _resolve_timestamp_channel(self, board_id: int) -> int | None:
+        try:
+            return int(self._BoardShim.get_timestamp_channel(board_id))
+        except Exception:
+            # Some BrainFlow-compatible streams do not expose a timestamp row.
+            # This is optional metadata; EEG row discovery is not optional.
+            return None
+
+    def _resolve_device_name(self, board_id: int) -> str:
+        getter = getattr(self._BoardShim, "get_device_name", None)
+        if callable(getter):
+            try:
+                return str(getter(board_id))
+            except Exception:
+                pass
+        return f"BrainFlow board {board_id}"
+
+    @property
+    def descriptor(self) -> StreamDescriptor:
+        """Describe the actual BrainFlow EEG rows exposed by this source."""
+        return StreamDescriptor(
+            stream_id=self.stream_id,
+            modality="eeg",
+            sample_rate_hz=self.sampling_rate,
+            channel_names=tuple(f"eeg_{index}" for index in range(self.channels)),
+            channel_types=tuple("eeg" for _ in range(self.channels)),
+            device=self._device_name,
+            manufacturer="BrainFlow",
+            clock_domain=ClockDomain.UNKNOWN,
+            metadata={
+                "brainflow_board_id": self._board_id,
+                "brainflow_master_board_id": self._master_board_id,
+                "brainflow_eeg_rows": self._eeg_channels,
+                "brainflow_timestamp_row": self._timestamp_channel,
+            },
+        )
 
     async def start(self) -> None:
-        """Start streaming.
-
-        If BrainFlow is available, this prepares and starts the board.
-        Otherwise it delegates to the mock driver.  In all cases
-        ``BaseDriver.start`` is called to spawn the streaming task.
-        """
-        if self._delegate is not None:
-            # use mock driver
-            await self._delegate.start()
+        """Prepare the hardware session, validate it, and start acquisition."""
+        if self._running:
             return
-        # prepare and start the BrainFlow board
-        # BoardShim.prepare_session and start_stream are synchronous
-        self._board.prepare_session()  # type: ignore[attr-defined]
-        self._board.start_stream()  # type: ignore[attr-defined]
-        await super().start()
+
+        try:
+            self._board.prepare_session()
+            self._session_prepared = True
+
+            # Playback/streaming boards can resolve to a different master board.
+            self._master_board_id = self._resolve_master_board_id()
+            self._eeg_channels = self._resolve_eeg_channels(self._master_board_id)
+            self.channels = len(self._eeg_channels)
+            self._timestamp_channel = self._resolve_timestamp_channel(self._master_board_id)
+            self._device_name = self._resolve_device_name(self._master_board_id)
+
+            actual_rate_getter = getattr(self._board, "get_board_sampling_rate", None)
+            if callable(actual_rate_getter):
+                actual_rate = float(actual_rate_getter())
+            else:
+                actual_rate = float(self._BoardShim.get_sampling_rate(self._master_board_id))
+            if actual_rate <= 0:
+                raise RuntimeError(
+                    f"BrainFlow reported invalid prepared-session sampling rate {actual_rate}"
+                )
+            if self._expected_sampling_rate is not None and not math.isclose(
+                actual_rate,
+                self._expected_sampling_rate,
+                rel_tol=0.0,
+                abs_tol=1e-9,
+            ):
+                raise ValueError(
+                    "BrainFlow controls the device sampling rate: expected "
+                    f"{self._expected_sampling_rate:g} Hz but the prepared session "
+                    f"reports {actual_rate:g} Hz"
+                )
+            self.sampling_rate = actual_rate
+
+            self._board.start_stream()
+            self._board_streaming = True
+            await super().start()
+        except Exception:
+            await self._cleanup_board(raise_errors=False)
+            raise
 
     async def stop(self) -> None:
-        """Stop streaming and clean up resources."""
-        if self._delegate is not None:
-            await self._delegate.stop()
-            return
-        # call BaseDriver.stop to cancel the stream task and flush the queue
+        """Stop neurOS streaming and release the BrainFlow session."""
         await super().stop()
-        # stop the board and release resources
-        try:
-            self._board.stop_stream()  # type: ignore[attr-defined]
-            self._board.release_session()  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        await self._cleanup_board(raise_errors=True)
+
+    async def _cleanup_board(self, *, raise_errors: bool) -> None:
+        errors: list[BaseException] = []
+
+        if self._board_streaming:
+            try:
+                self._board.stop_stream()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self._board_streaming = False
+
+        if self._session_prepared:
+            try:
+                self._board.release_session()
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                self._session_prepared = False
+
+        if errors and raise_errors:
+            raise RuntimeError(
+                "BrainFlow cleanup failed; the hardware session may require manual recovery"
+            ) from errors[0]
 
     async def _stream(self) -> AsyncIterator[tuple[float, list[float]]]:
-        """Internal coroutine that yields timestamped samples.
+        """Drain buffered BrainFlow samples exactly once using declared EEG rows."""
+        idle_sleep = min(max(1.0 / self.sampling_rate, 0.001), 0.02)
 
-        This implementation delegates to the mock driver when BrainFlow
-        is unavailable.  Otherwise it repeatedly queries the board for
-        the most recent sample and yields it along with a timestamp.
-        The loop runs until the driver is stopped.
-        """
-        # if fallback driver is present, delegate streaming
-        if self._delegate is not None:
-            async for ts, data in self._delegate:
-                yield ts, data
-            return
-        import time
-        # compute sleep interval based on sampling rate to reduce busy looping
-        period = 1.0 / (self.sampling_rate or 1.0)
-        while True:
+        while self._running:
             try:
-                # BrainFlow returns an array shape (n_channels_total, n_samples)
-                data = self._board.get_current_board_data(1)  # type: ignore[attr-defined]
-                if data.size != 0:
-                    # extract the latest sample for the configured channels
-                    ts = time.time()
-                    # data[:n_channels, -1] gives the last sample for each channel
-                    sample = data[: self.channels, -1]
-                    # convert to Python list for consistency with MockDriver
-                    yield ts, sample.tolist()
-                await asyncio.sleep(period)
+                available = int(self._board.get_board_data_count())
+                if available <= 0:
+                    await asyncio.sleep(idle_sleep)
+                    continue
+
+                # get_board_data removes returned samples from BrainFlow's ringbuffer.
+                # Using get_current_board_data here would repeatedly emit the same
+                # latest sample when neurOS polls faster than the device.
+                matrix = np.asarray(self._board.get_board_data(), dtype=np.float64)
+                if matrix.ndim != 2:
+                    raise RuntimeError(
+                        f"BrainFlow returned a non-matrix payload with shape {matrix.shape}"
+                    )
+                if matrix.shape[1] == 0:
+                    await asyncio.sleep(idle_sleep)
+                    continue
+
+                max_required_row = max(
+                    (*self._eeg_channels,)
+                    + ((self._timestamp_channel,) if self._timestamp_channel is not None else ())
+                )
+                if max_required_row >= matrix.shape[0]:
+                    raise RuntimeError(
+                        "BrainFlow payload row count does not match the board metadata: "
+                        f"required row {max_required_row}, received {matrix.shape[0]} rows"
+                    )
+
+                for column in range(matrix.shape[1]):
+                    if self._timestamp_channel is not None:
+                        timestamp = float(matrix[self._timestamp_channel, column])
+                        if not math.isfinite(timestamp):
+                            raise RuntimeError("BrainFlow emitted a non-finite timestamp")
+                    else:
+                        # A host wall-clock fallback is explicit only when the board
+                        # exposes no timestamp channel. Canonical host receipt timing is
+                        # still recorded by SignalFrame.from_legacy/BaseDriver.frames().
+                        import time
+
+                        timestamp = time.time()
+
+                    sample = matrix[np.asarray(self._eeg_channels, dtype=int), column]
+                    if not np.isfinite(sample).all():
+                        raise RuntimeError("BrainFlow emitted NaN or infinite EEG values")
+                    yield timestamp, sample.tolist()
+
+                await asyncio.sleep(0)
             except asyncio.CancelledError:
                 break
