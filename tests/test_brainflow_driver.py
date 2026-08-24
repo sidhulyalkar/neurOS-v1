@@ -1,3 +1,4 @@
+import asyncio
 import builtins
 import sys
 import types
@@ -165,3 +166,26 @@ def test_brainflow_channel_count_cannot_exceed_declared_eeg_rows(monkeypatch):
 
     with pytest.raises(ValueError, match="Requested 3 EEG channels.*exposes 2"):
         BrainFlowDriver(board_id=7, channels=3)
+
+
+@pytest.mark.asyncio
+async def test_brainflow_acquisition_failure_still_releases_session(monkeypatch):
+    install_fake_brainflow(monkeypatch)
+    driver = BrainFlowDriver(board_id=7)
+    board = FakeBoardShim.instances[-1]
+
+    def malformed_payload():
+        board._consumed = True
+        # Metadata requires rows 1, 3, and 5, so this payload must fail.
+        return np.zeros((2, 1), dtype=float)
+
+    board.get_board_data = malformed_payload
+
+    await driver.start()
+    await asyncio.sleep(0.02)
+
+    with pytest.raises(RuntimeError, match="payload row count does not match"):
+        await driver.stop()
+
+    assert board.streaming is False
+    assert board.released is True
