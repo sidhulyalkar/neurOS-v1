@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from neuros.compatibility import compatibility_payload
 from neuros.errors import ConfigurationError
 from neuros.plugins import PluginKind
 
@@ -37,6 +38,18 @@ def _parse_args() -> argparse.Namespace:
 
     devices_parser = subparsers.add_parser("devices", help="List installed source/device plugins")
     _add_json_flag(devices_parser)
+
+    compatibility_parser = subparsers.add_parser(
+        "compatibility",
+        help="Show ecosystem integrations and the strongest evidence tier actually qualified",
+    )
+    compatibility_parser.add_argument(
+        "integration",
+        nargs="?",
+        default=None,
+        help="Optional integration ID, for example brainflow, lsl, nwb, or moabb",
+    )
+    _add_json_flag(compatibility_parser)
 
     validate_parser = subparsers.add_parser("validate", help="Validate and resolve a runtime YAML config")
     validate_parser.add_argument("config", type=str)
@@ -195,6 +208,10 @@ def main() -> None:
 
         if args.command == "devices":
             _emit(devices(), machine=args.json)
+            return
+
+        if args.command == "compatibility":
+            _emit(compatibility_payload(args.integration), machine=args.json)
             return
 
         if args.command == "validate":
