@@ -18,7 +18,9 @@ from neuros.foundation_models.catalog import DEFAULT_MODEL_CARDS, catalog_by_id
 from neuros.foundation_models.integration import FoundationEmbeddingDecoder
 from neuros.foundation_models.longitudinal import (
     NestedCalibrationSplit,
+    chronological_partition,
     make_nested_calibration_split,
+    ordered_group_values,
 )
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
@@ -138,6 +140,8 @@ __all__ = [
     "EvaluationPartition",
     "collect_moabb",
     "hold_out_groups",
+    "ordered_group_values",
+    "chronological_partition",
     "NestedCalibrationSplit",
     "make_nested_calibration_split",
     "FoundationEmbeddingDecoder",
