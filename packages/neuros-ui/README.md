@@ -1,82 +1,57 @@
 # neurOS UI
 
-User interfaces for neurOS - Streamlit dashboard, FastAPI server, and visualizations.
+`neuros-ui` contains optional dashboard, API, and visualization integrations for neurOS.
 
-## Features
-
-- **Real-Time Dashboard**: Streamlit-based monitoring interface
-- **REST API**: FastAPI server for programmatic access
-- **Interactive Visualizations**: Plotly, Matplotlib, Seaborn
-- **Live Data Streaming**: WebSocket support for real-time updates
-- **Experiment Tracking**: Built-in visualization for training runs
+> **Maturity boundary:** this package currently builds as part of the workspace, but it does not yet have the same release-blocking behavioral qualification as `neuros-core`. Treat it as an integration/prototyping surface until dedicated dashboard/API contract tests and supported reference deployments are added.
 
 ## Installation
 
 ```bash
-# Minimal installation (visualization only)
 pip install neuros-ui
-
-# With Streamlit dashboard
-pip install neuros-ui[dashboard]
-
-# With FastAPI server
-pip install neuros-ui[api]
-
-# Everything
-pip install neuros-ui[all]
+pip install "neuros-ui[dashboard]"  # Streamlit
+pip install "neuros-ui[api]"        # FastAPI + Uvicorn
+pip install "neuros-ui[viz]"        # Plotly + Seaborn
+pip install "neuros-ui[all]"
 ```
 
-## Quick Start
+## Architectural role
 
-### Streamlit Dashboard
+UI code should consume the same neurOS configuration, runtime, recording, and event contracts used by local execution. It should **not** become a second orchestration engine with different lifecycle, timing, or model semantics.
 
-```bash
-# Launch dashboard
-streamlit run -m neuros.ui.dashboard
+The intended direction is:
+
+```text
+RuntimeGraph / recording / quality / model evidence
+                    |
+                    v
+              API / dashboard
 ```
 
-### FastAPI Server
+High-value UI work for the Developer Preview includes:
 
-```python
-from neuros.ui.api import create_app
+- runtime graph and stream health;
+- queue loss and latency distributions;
+- recording/replay inspection;
+- device/model/config provenance;
+- qualification/evidence history;
+- model/representation comparison artifacts;
+- explicit warning surfaces when a claim has only software, synthetic, or dataset-level evidence.
 
-# Create API server
-app = create_app()
+## Product rule
 
-# Run server
-# uvicorn neuros.ui.api:app --reload
-```
-
-### Visualization
-
-```python
-from neuros.viz import plot_eeg_signal, plot_confusion_matrix
-
-# Plot EEG signal
-plot_eeg_signal(data, sampling_rate=250)
-
-# Plot model evaluation
-plot_confusion_matrix(y_true, y_pred, labels=['Class A', 'Class B'])
-```
-
-## Features
-
-### Dashboard
-- Live signal monitoring
-- Model performance metrics
-- Training progress visualization
-- Multi-modal data display
-
-### API Endpoints
-- `/predict`: Real-time inference
-- `/train`: Model training
-- `/metrics`: Performance metrics
-- `/status`: System health
+Real-time BCI execution should remain local by default. A dashboard may observe, configure, or request actions through stable APIs, but UI availability must never become a hidden prerequisite for acquisition or safety-critical runtime behavior.
 
 ## Documentation
 
-Full documentation: https://neuros.readthedocs.io
+Current platform documentation and package maturity live in:
+
+- `docs/PROJECT_STATUS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `ROADMAP.md`
+
+Repository: https://github.com/sidhulyalkar/neurOS-v1
 
 ## License
 
-MIT License
+MIT License.
