@@ -5,12 +5,52 @@ from pathlib import Path
 
 import pytest
 
+from neuros.contracts import DecoderOutput
 from neuros.qualification import (
     QUALIFICATION_SCHEMA_VERSION,
+    _OutputDigest,
     qualify_config,
     reproduce_qualification,
     verify_qualification_bundle,
 )
+
+
+@pytest.mark.asyncio
+async def test_semantic_output_digest_ignores_latency_not_decision():
+    first = _OutputDigest()
+    second = _OutputDigest()
+    changed = _OutputDigest()
+
+    await first(
+        DecoderOutput(
+            prediction=1,
+            model_id="semantic-test",
+            model_version="1",
+            inference_time_ns=100,
+            metadata={"score": 0.75},
+        )
+    )
+    await second(
+        DecoderOutput(
+            prediction=1,
+            model_id="semantic-test",
+            model_version="1",
+            inference_time_ns=999999,
+            metadata={"score": 0.75},
+        )
+    )
+    await changed(
+        DecoderOutput(
+            prediction=0,
+            model_id="semantic-test",
+            model_version="1",
+            inference_time_ns=100,
+            metadata={"score": 0.75},
+        )
+    )
+
+    assert first.to_dict() == second.to_dict()
+    assert first.to_dict()["sha256"] != changed.to_dict()["sha256"]
 
 
 @pytest.mark.asyncio
@@ -61,6 +101,8 @@ async def test_qualification_bundle_is_sealed_and_reproducible(tmp_path: Path):
     assert manifest["reproducibility"]["replay_completed"] is True
     assert manifest["reproducibility"]["decoder_output_digest_exact"] is True
     assert manifest["config_semantic_hash"] == manifest["archive_config_hash"]
+    assert manifest["record_summary"]["archive"] == "session"
+    assert ".staging-" not in json.dumps(manifest, sort_keys=True)
 
     model = json.loads((bundle / "model.json").read_text(encoding="utf-8"))
     assert model["artifact_bound"] is False
