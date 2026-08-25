@@ -102,7 +102,22 @@ async def test_qualification_bundle_is_sealed_and_reproducible(tmp_path: Path):
     assert manifest["reproducibility"]["decoder_output_digest_exact"] is True
     assert manifest["config_semantic_hash"] == manifest["archive_config_hash"]
     assert manifest["record_summary"]["archive"] == "session"
+    assert manifest["integrity_model"]["origin_authenticity"].startswith("requires_external")
     assert ".staging-" not in json.dumps(manifest, sort_keys=True)
+
+    session_manifest = json.loads(
+        (bundle / "session" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert session_manifest["metadata"]["config_path"] == "config.yaml"
+    assert session_manifest["metadata"]["config_path_scope"] == "qualification_bundle"
+
+    runtime = json.loads((bundle / "runtime.json").read_text(encoding="utf-8"))
+    assert runtime["record_quality"]["runtime_state"] == "stopped"
+    assert runtime["record_quality"]["node_failures"] == 0
+    assert runtime["record_quality"]["edge_items_dropped"] == 0
+    assert runtime["replay_quality"]["runtime_state"] == "stopped"
+    assert runtime["replay_quality"]["node_failures"] == 0
+    assert runtime["replay_quality"]["edge_items_dropped"] == 0
 
     model = json.loads((bundle / "model.json").read_text(encoding="utf-8"))
     assert model["artifact_bound"] is False
@@ -110,10 +125,21 @@ async def test_qualification_bundle_is_sealed_and_reproducible(tmp_path: Path):
 
     verification = verify_qualification_bundle(bundle)
     assert verification["integrity"] == "verified"
+    assert verification["origin_authenticity"] == "not_established"
     assert verification["frame_count"] > 0
 
-    reproduced = await reproduce_qualification(bundle)
+    pinned = verify_qualification_bundle(bundle, expected_sha256=result["bundle_sha256"])
+    assert pinned["origin_authenticity"] == "externally_pinned"
+
+    with pytest.raises(IOError, match="externally pinned"):
+        verify_qualification_bundle(bundle, expected_sha256="0" * 64)
+
+    reproduced = await reproduce_qualification(
+        bundle,
+        expected_sha256=result["bundle_sha256"],
+    )
     assert reproduced["reproduced"] is True
+    assert reproduced["origin_authenticity"] == "externally_pinned"
     assert reproduced["runtime_state"] == "stopped"
     assert reproduced["decoder_outputs"] == result["decoder_outputs"]
 
