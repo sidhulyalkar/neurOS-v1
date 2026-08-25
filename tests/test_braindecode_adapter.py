@@ -1,9 +1,13 @@
+import asyncio
 import importlib.metadata
 
 import numpy as np
 import pytest
 
+from neuros.contracts import SignalFrame, StreamDescriptor, WindowSpec
 from neuros.models import BraindecodeDecoder
+from neuros.processing import SlidingWindowTransform
+from neuros.runtime import NodeKind, RuntimeEdge, RuntimeExecutor, RuntimeGraph, RuntimeNode
 
 
 def test_braindecode_adapter_rejects_unqualified_or_ambiguous_contracts():
@@ -26,7 +30,43 @@ def test_braindecode_adapter_rejects_unqualified_or_ambiguous_contracts():
         decoder.train(np.ones((2, 3, 128), dtype=np.float32), np.array([0, 1]))
 
 
-def test_braindecode_adapter_trains_upstream_eegnet_without_hidden_preprocessing():
+class _OneWindowSource:
+    def __init__(self, sample_major: np.ndarray) -> None:
+        self.sample_major = np.asarray(sample_major, dtype=np.float32)
+        self._descriptor = StreamDescriptor(
+            stream_id="braindecode-eeg",
+            modality="eeg",
+            sample_rate_hz=128.0,
+            channel_names=("C3", "C4"),
+        )
+
+    @property
+    def descriptor(self) -> StreamDescriptor:
+        return self._descriptor
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
+
+    async def frames(self):
+        yield SignalFrame(
+            stream_id=self._descriptor.stream_id,
+            sequence_id=0,
+            data=self.sample_major,
+            sample_rate_hz=self._descriptor.sample_rate_hz,
+            host_receive_time_ns=1_000_000_000,
+            metadata={
+                "axis_order": ("sample", "channel"),
+                "channel_names": self._descriptor.channel_names,
+            },
+        )
+        await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_braindecode_eegnet_runs_through_neuros_window_runtime_without_hidden_preprocessing():
     version = importlib.metadata.version("braindecode")
     assert version.startswith("1.7."), version
 
@@ -48,19 +88,48 @@ def test_braindecode_adapter_trains_upstream_eegnet_without_hidden_preprocessing
     )
     decoder.train(X, y)
 
-    output = decoder.infer(X[:1])
-    assert output.model_id == "Braindecode:EEGNet"
-    assert output.model_version == version
-    assert output.probabilities is not None
-    probabilities = np.asarray(output.probabilities)
+    direct = decoder.infer(X[:1])
+    assert direct.model_id == "Braindecode:EEGNet"
+    assert direct.model_version == version
+    assert direct.probabilities is not None
+    probabilities = np.asarray(direct.probabilities)
     assert probabilities.shape == (2,)
     assert np.isfinite(probabilities).all()
     assert np.isclose(probabilities.sum(), 1.0, atol=1e-5)
-    assert output.confidence is not None
+    assert direct.confidence is not None
+    assert direct.metadata["backend"] == "braindecode/torch"
+    assert direct.metadata["upstream_training"] == "EEGClassifier"
+    assert direct.metadata["hidden_preprocessing"] is False
+    assert direct.metadata["input_contract"] == "batch,channel,time"
+
+    source = _OneWindowSource(X[0].T)
+    graph = RuntimeGraph()
+    graph.add_node(RuntimeNode("source", NodeKind.SOURCE, source))
+    graph.add_node(
+        RuntimeNode(
+            "window",
+            NodeKind.TRANSFORM,
+            SlidingWindowTransform(WindowSpec(128, 128), descriptor=source.descriptor),
+        )
+    )
+    graph.add_node(RuntimeNode("decoder", NodeKind.DECODER, decoder))
+    graph.connect(RuntimeEdge("source", "window", overflow="block"))
+    graph.connect(RuntimeEdge("window", "decoder", overflow="block"))
+
+    executor = RuntimeExecutor(graph)
+    await executor.start()
+    outputs = [output async for output in executor.outputs()]
+    await executor.wait()
+
+    assert len(outputs) == 1
+    output = outputs[0]
+    assert output.model_id == "Braindecode:EEGNet"
+    assert output.metadata["neuros_stream_id"] == "braindecode-eeg"
+    assert output.metadata["neuros_window_id"] == 0
+    assert output.metadata["window_channel_names"] == ("C3", "C4")
+    assert output.metadata["source_sequence_ids"] == (0,)
     assert output.metadata["backend"] == "braindecode/torch"
-    assert output.metadata["upstream_training"] == "EEGClassifier"
     assert output.metadata["hidden_preprocessing"] is False
-    assert output.metadata["input_contract"] == "batch,channel,time"
 
     module = decoder.analysis_model()
     assert module is not None
