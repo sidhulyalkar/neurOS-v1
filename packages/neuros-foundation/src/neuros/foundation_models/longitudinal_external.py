@@ -35,16 +35,27 @@ ExternalTaskDecoderId = Literal["braindecode-eegnet"]
 
 @dataclass(frozen=True, slots=True)
 class ExternalTaskDecoderMethodSpec:
-    """Frozen identity/configuration for one optional external task decoder."""
+    """Frozen identity/configuration for one optional external task decoder.
+
+    ``sample_rate_hz`` is explicit evidence metadata rather than something
+    inferred from ``n_times``. Two windows with equal sample counts but different
+    physical durations are not the same decoder input contract.
+    """
 
     method_id: ExternalTaskDecoderId
     model_seed: int
+    sample_rate_hz: float | None = None
     model_kwargs: Mapping[str, Any] = field(default_factory=dict)
     schema_version: int = 1
 
     def __post_init__(self) -> None:
         if self.method_id != "braindecode-eegnet":
             raise ValueError(f"unsupported external task decoder {self.method_id!r}")
+        if self.sample_rate_hz is not None:
+            rate = float(self.sample_rate_hz)
+            if not np.isfinite(rate) or rate <= 0:
+                raise ValueError("sample_rate_hz must be finite and positive when provided")
+            object.__setattr__(self, "sample_rate_hz", rate)
         forbidden = {
             "model_name",
             "n_channels",
@@ -80,6 +91,7 @@ class ExternalTaskDecoderMethodSpec:
             "schema_version": self.schema_version,
             "method_id": self.method_id,
             "model_seed": int(self.model_seed),
+            "sample_rate_hz": self.sample_rate_hz,
             "model_kwargs": dict(self.model_kwargs),
         }
 
@@ -186,6 +198,7 @@ def _external_model_for(
         n_channels=int(n_channels),
         n_times=int(n_times),
         n_classes=int(n_classes),
+        sample_rate_hz=spec.sample_rate_hz,
         random_state=int(spec.model_seed),
         **dict(spec.model_kwargs),
     )
@@ -291,6 +304,7 @@ def run_external_task_decoder_case(
                 "model_seed": int(spec.model_seed),
                 "model_state_sha256": state_sha256,
                 "upstream_model_version": model.model_version,
+                "sample_rate_hz": spec.sample_rate_hz,
                 "calibration_per_class": int(budget),
                 "source_train_samples": int(len(split.source_train_indices)),
                 "calibration_samples": int(len(calibration_indices)),
@@ -367,9 +381,7 @@ def pair_task_performance(
                     f"paired evidence identity mismatch at budget={budget}: {key}"
                 )
 
-        row: dict[str, Any] = {
-            key: native_row.get(key) for key in identity_keys
-        }
+        row: dict[str, Any] = {key: native_row.get(key) for key in identity_keys}
         row.update(
             {
                 "calibration_per_class": budget,
@@ -380,6 +392,7 @@ def pair_task_performance(
                 "native_model_state_sha256": native_row["model_state_sha256"],
                 "external_model_state_sha256": external_row["model_state_sha256"],
                 "external_upstream_model_version": external_row["upstream_model_version"],
+                "sample_rate_hz": external_row["sample_rate_hz"],
                 "external_representation_evidence_available": bool(
                     external_row["representation_evidence_available"]
                 ),
