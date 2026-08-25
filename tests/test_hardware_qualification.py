@@ -8,9 +8,11 @@ import pytest
 from neuros.hardware_qualification import (
     HardwareQualificationThresholds,
     MeasurementOrigin,
+    evaluate_hardware_evidence_bundle,
     evaluate_hardware_qualification,
     manifest_from_mapping,
 )
+from neuros.qualification import qualify_config
 
 
 def synthetic_evidence() -> dict:
@@ -78,10 +80,44 @@ def test_synthetic_fixture_can_pass_thresholds_but_never_hardware_qualification(
     assert result.measurements_complete is True
     assert result.thresholds_pass is True
     assert result.physical_evidence is False
+    assert result.qualification_bundle_verified is False
     assert result.hardware_qualified is False
     assert result.claim_boundary["hardware_qualified"] is False
     physical_gate = next(gate for gate in result.gates if gate.name == "physical_measurement")
     assert physical_gate.status.value == "fail"
+    bundle_gate = next(gate for gate in result.gates if gate.name == "verified_runtime_bundle")
+    assert bundle_gate.status.value == "not_tested"
+
+
+def test_matching_root_value_without_actual_bundle_verification_is_not_enough():
+    manifest = manifest_from_mapping(synthetic_evidence())
+    result = evaluate_hardware_qualification(
+        manifest,
+        verified_qualification_bundle_sha256="a" * 64,
+    )
+
+    assert result.qualification_bundle_verified is True
+    assert result.thresholds_pass is True
+    assert result.hardware_qualified is False
+    assert result.physical_evidence is False
+
+
+@pytest.mark.asyncio
+async def test_synthetic_evidence_can_bind_real_runtime_bundle_but_still_cannot_promote(tmp_path: Path):
+    config = Path("configs/examples/mock_bci.yaml").resolve()
+    bundle = tmp_path / "qualification"
+    qualification = await qualify_config(config, bundle, duration_s=0.04)
+
+    raw = synthetic_evidence()
+    raw["qualification_bundle_sha256"] = qualification["bundle_sha256"]
+    manifest = manifest_from_mapping(raw)
+    result = evaluate_hardware_evidence_bundle(manifest, bundle)
+
+    assert result.qualification_bundle_verified is True
+    assert result.claim_boundary["runtime_record_replay_qualified"] is True
+    assert result.thresholds_pass is True
+    assert result.physical_evidence is False
+    assert result.hardware_qualified is False
 
 
 def test_threshold_failure_is_reported_without_changing_measurements():
@@ -112,7 +148,16 @@ def test_synthetic_flag_blocks_physical_origin():
     raw["measurement_origin"] = "physical_measurement"
     raw["physical_run"] = True
 
-    with pytest.raises(ValueError, match="cannot claim physical_measurement"):
+    with pytest.raises(ValueError, match="must use synthetic_contract_test origin"):
+        manifest_from_mapping(raw)
+
+
+def test_imported_measurement_also_requires_a_physical_run():
+    raw = synthetic_evidence()
+    raw["measurement_origin"] = "imported_external_measurement"
+    raw["synthetic_contract_test"] = False
+
+    with pytest.raises(ValueError, match="requires physical_run=true"):
         manifest_from_mapping(raw)
 
 
@@ -144,9 +189,11 @@ def test_serialized_result_exposes_gate_evidence(tmp_path: Path):
 
     assert parsed["hardware_qualified"] is False
     assert parsed["thresholds_pass"] is True
+    assert parsed["qualification_bundle_verified"] is False
     assert len(parsed["evidence_sha256"]) == 64
     assert {gate["name"] for gate in parsed["gates"]} >= {
         "physical_measurement",
+        "verified_runtime_bundle",
         "minimum_duration",
         "sample_loss_fraction",
         "queue_drop_fraction",
