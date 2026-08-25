@@ -7,9 +7,10 @@ from typing import Any
 
 import numpy as np
 
-from neuros.contracts import SignalFrame
+from neuros.contracts import SignalFrame, WindowSpec
 from neuros.processing.feature_extraction import BandPowerExtractor
 from neuros.processing.filters import BandpassFilter, SmoothingFilter
+from neuros.processing.windowing import SlidingWindowTransform
 
 
 def _map(item: Any, data: np.ndarray, *, representation: str) -> Any:
@@ -47,3 +48,18 @@ class BandPowerTransform:
     def transform(self, item: Any) -> Any:
         data = np.asarray(item.data if isinstance(item, SignalFrame) else item)
         return _map(item, self.extractor.extract(data), representation="bandpower")
+
+
+class NeuralWindowTransform(SlidingWindowTransform):
+    """Configuration-friendly adapter for canonical decoder windows."""
+
+    def __init__(
+        self,
+        window_samples: int,
+        stride_samples: int,
+        discontinuity: str = "error",
+    ) -> None:
+        super().__init__(
+            WindowSpec(window_samples=window_samples, stride_samples=stride_samples),
+            discontinuity=discontinuity,
+        )
