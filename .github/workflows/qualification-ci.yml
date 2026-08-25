@@ -37,15 +37,25 @@ jobs:
           python scripts/bootstrap.py --profile bci --test-tools
       - name: Run qualification contract suite
         run: pytest -q tests/test_qualification_bundle.py
-      - name: Exercise public qualify and reproduce commands
+      - name: Exercise public qualify and pinned reproduce commands
         run: |
           OUT="${RUNNER_TEMP}/qualification"
+          RESULT="${RUNNER_TEMP}/qualification-result.json"
           neuros qualify configs/examples/mock_bci.yaml \
             --output "${OUT}" \
             --session-id ci \
             --duration 0.05 \
-            --json
-          neuros reproduce "${OUT}" --json
+            --json | tee "${RESULT}"
+          ROOT_SHA=$(python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          result = json.loads((Path(os.environ["RUNNER_TEMP"]) / "qualification-result.json").read_text())
+          print(result["bundle_sha256"])
+          PY
+          )
+          neuros reproduce "${OUT}" --expected-sha256 "${ROOT_SHA}" --json
           python - <<'PY'
           import json
           import os
@@ -53,8 +63,11 @@ jobs:
 
           root = Path(os.environ["RUNNER_TEMP"]) / "qualification"
           manifest = json.loads((root / "manifest.json").read_text())
+          session = json.loads((root / "session" / "manifest.json").read_text())
           assert manifest["claim_boundary"]["runtime_record_replay_qualified"] is True
           assert manifest["claim_boundary"]["hardware_qualified"] is False
           assert manifest["claim_boundary"]["closed_loop_qualified"] is False
           assert manifest["claim_boundary"]["clinical_qualified"] is False
+          assert session["metadata"]["config_path"] == "config.yaml"
+          assert session["metadata"]["config_path_scope"] == "qualification_bundle"
           PY
