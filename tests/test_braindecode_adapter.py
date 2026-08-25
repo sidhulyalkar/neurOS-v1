@@ -23,11 +23,55 @@ def test_braindecode_adapter_rejects_unqualified_or_ambiguous_contracts():
             model_options={"n_chans": 99},
         )
 
+    with pytest.raises(ValueError, match="JSON-serializable"):
+        BraindecodeDecoder(
+            "EEGNet",
+            2,
+            128,
+            2,
+            model_options={"activation": object()},
+        )
+
     decoder = BraindecodeDecoder("EEGNet", 2, 128, 2, n_epochs=1)
     with pytest.raises(ValueError, match="batch, channels, time"):
         decoder.train(np.ones((2, 128), dtype=np.float32), np.array([0, 1]))
     with pytest.raises(ValueError, match="geometry"):
         decoder.train(np.ones((2, 3, 128), dtype=np.float32), np.array([0, 1]))
+
+
+def test_adapter_configuration_fingerprint_is_stable_and_sensitive():
+    first = BraindecodeDecoder(
+        "EEGNet",
+        2,
+        128,
+        2,
+        sample_rate_hz=128.0,
+        n_epochs=1,
+        random_state=7,
+    )
+    same = BraindecodeDecoder(
+        "eeg_net",
+        2,
+        128,
+        2,
+        sample_rate_hz=128.0,
+        n_epochs=1,
+        random_state=7,
+    )
+    changed = BraindecodeDecoder(
+        "EEGNet",
+        2,
+        128,
+        2,
+        sample_rate_hz=128.0,
+        n_epochs=1,
+        random_state=8,
+    )
+
+    assert first.configuration() == same.configuration()
+    assert first.configuration_fingerprint == same.configuration_fingerprint
+    assert first.configuration_fingerprint != changed.configuration_fingerprint
+    assert len(first.configuration_fingerprint) == 16
 
 
 @pytest.mark.parametrize(
@@ -127,6 +171,8 @@ async def test_braindecode_eegnet_runs_through_neuros_window_runtime_without_hid
     assert direct.metadata["upstream_training"] == "EEGClassifier"
     assert direct.metadata["hidden_preprocessing"] is False
     assert direct.metadata["input_contract"] == "batch,channel,time"
+    assert direct.metadata["adapter_config_fingerprint"] == decoder.configuration_fingerprint
+    assert direct.metadata["random_state"] == 11
 
     source = _OneWindowSource(X[0].T)
     graph = RuntimeGraph()
@@ -156,6 +202,7 @@ async def test_braindecode_eegnet_runs_through_neuros_window_runtime_without_hid
     assert output.metadata["source_sequence_ids"] == (0,)
     assert output.metadata["backend"] == "braindecode/torch"
     assert output.metadata["hidden_preprocessing"] is False
+    assert output.metadata["adapter_config_fingerprint"] == decoder.configuration_fingerprint
 
     module = decoder.analysis_model()
     assert module is not None
