@@ -92,11 +92,16 @@ class BraindecodeDecoder(BaseModel):
                 + ", ".join(conflicts)
             )
         try:
-            json.dumps(options, sort_keys=True, separators=(",", ":"))
+            json.dumps(
+                options,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                "model_options must be JSON-serializable so the adapter configuration "
-                "can be fingerprinted reproducibly"
+                "model_options must be finite JSON-serializable values so the adapter "
+                "configuration can be fingerprinted reproducibly"
             ) from exc
 
         self.model_name = _SUPPORTED_MODELS[key]
