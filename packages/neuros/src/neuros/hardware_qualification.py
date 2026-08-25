@@ -48,8 +48,8 @@ class DeviceIdentity:
 
     def validate(self) -> None:
         for name, value in asdict(self).items():
-            if not str(value).strip():
-                raise ValueError(f"device.{name} must be non-empty")
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"device.{name} must be a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +68,12 @@ class SignalGeometry:
             raise ValueError("signal.channel_names must be unique")
         if len(self.channel_types) != count or len(self.units) != count:
             raise ValueError("signal channel names/types/units must have identical lengths")
+        if any(not item.strip() for item in self.channel_names):
+            raise ValueError("signal.channel_names must not contain empty values")
+        if any(not item.strip() for item in self.channel_types):
+            raise ValueError("signal.channel_types must not contain empty values")
+        if any(not item.strip() for item in self.units):
+            raise ValueError("signal.units must not contain empty values")
         if self.nominal_sample_rate_hz <= 0 or not math.isfinite(self.nominal_sample_rate_hz):
             raise ValueError("signal.nominal_sample_rate_hz must be positive and finite")
         if self.measured_sample_rate_hz <= 0 or not math.isfinite(self.measured_sample_rate_hz):
@@ -84,16 +90,22 @@ class TimingEvidence:
     uncertainty_p95_ms: float
 
     def validate(self) -> None:
-        if not self.timestamp_source.strip() or not self.clock_domain.strip():
-            raise ValueError("timing timestamp_source and clock_domain must be non-empty")
+        if not isinstance(self.timestamp_source, str) or not self.timestamp_source.strip():
+            raise ValueError("timing.timestamp_source must be a non-empty string")
+        if not isinstance(self.clock_domain, str) or not self.clock_domain.strip():
+            raise ValueError("timing.clock_domain must be a non-empty string")
         values = (
             self.offset_p50_ms,
             self.offset_p95_ms,
             self.drift_ppm,
             self.uncertainty_p95_ms,
         )
-        if not all(math.isfinite(value) for value in values):
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
+            raise ValueError("timing measurements must be numeric")
+        if not all(math.isfinite(float(value)) for value in values):
             raise ValueError("timing measurements must be finite")
+        if self.offset_p50_ms > self.offset_p95_ms:
+            raise ValueError("timing offset percentiles must satisfy p50 <= p95")
         if self.uncertainty_p95_ms < 0:
             raise ValueError("timing.uncertainty_p95_ms must be non-negative")
 
@@ -110,7 +122,9 @@ class ReliabilityEvidence:
     reconnect_tested: bool = False
 
     def validate(self) -> None:
-        if self.duration_s <= 0 or not math.isfinite(self.duration_s):
+        if isinstance(self.duration_s, bool) or not isinstance(self.duration_s, (int, float)):
+            raise ValueError("reliability.duration_s must be numeric")
+        if self.duration_s <= 0 or not math.isfinite(float(self.duration_s)):
             raise ValueError("reliability.duration_s must be positive and finite")
         for name in (
             "expected_samples",
@@ -120,8 +134,13 @@ class ReliabilityEvidence:
             "reconnect_attempts",
             "reconnect_successes",
         ):
-            if int(getattr(self, name)) < 0:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"reliability.{name} must be an integer")
+            if value < 0:
                 raise ValueError(f"reliability.{name} must be non-negative")
+        if not isinstance(self.reconnect_tested, bool):
+            raise ValueError("reliability.reconnect_tested must be boolean")
         if self.expected_samples <= 0:
             raise ValueError("reliability.expected_samples must be positive")
         if self.observed_samples > self.expected_samples:
@@ -154,14 +173,22 @@ class LatencyEvidence:
             self.source_to_decision_p95_ms,
             self.source_to_decision_p99_ms,
         )
-        if not all(math.isfinite(value) and value >= 0 for value in values):
-            raise ValueError("latency measurements must be finite and non-negative")
+        if not all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and value >= 0
+            for value in values
+        ):
+            raise ValueError("latency measurements must be numeric, finite, and non-negative")
         if not (
             self.source_to_decision_p50_ms
             <= self.source_to_decision_p95_ms
             <= self.source_to_decision_p99_ms
         ):
             raise ValueError("latency percentiles must satisfy p50 <= p95 <= p99")
+        if isinstance(self.sample_count, bool) or not isinstance(self.sample_count, int):
+            raise ValueError("latency.sample_count must be an integer")
         if self.sample_count <= 0:
             raise ValueError("latency.sample_count must be positive")
 
@@ -179,6 +206,8 @@ class HardwareQualificationThresholds:
     require_reconnect_test: bool = False
 
     def validate(self) -> None:
+        if isinstance(self.min_duration_s, bool) or not isinstance(self.min_duration_s, (int, float)):
+            raise ValueError("thresholds.min_duration_s must be numeric")
         if self.min_duration_s <= 0:
             raise ValueError("thresholds.min_duration_s must be positive")
         for name in (
@@ -186,8 +215,10 @@ class HardwareQualificationThresholds:
             "max_queue_drop_fraction",
             "max_sample_rate_error_fraction",
         ):
-            value = float(getattr(self, name))
-            if not 0 <= value <= 1:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"thresholds.{name} must be numeric")
+            if not 0 <= float(value) <= 1:
                 raise ValueError(f"thresholds.{name} must be in [0, 1]")
         for name in (
             "max_abs_clock_drift_ppm",
@@ -195,9 +226,13 @@ class HardwareQualificationThresholds:
             "max_source_to_decision_p95_ms",
             "max_source_to_decision_p99_ms",
         ):
-            value = float(getattr(self, name))
-            if value < 0 or not math.isfinite(value):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"thresholds.{name} must be numeric")
+            if value < 0 or not math.isfinite(float(value)):
                 raise ValueError(f"thresholds.{name} must be finite and non-negative")
+        if not isinstance(self.require_reconnect_test, bool):
+            raise ValueError("thresholds.require_reconnect_test must be boolean")
         if self.max_source_to_decision_p99_ms < self.max_source_to_decision_p95_ms:
             raise ValueError("p99 latency threshold cannot be stricter than p95 threshold")
 
@@ -220,8 +255,12 @@ class HardwareQualificationManifest:
     def validate(self) -> None:
         if self.schema_version != HARDWARE_QUALIFICATION_SCHEMA_VERSION:
             raise ValueError("unsupported hardware qualification schema version")
-        if not self.evidence_id.strip():
-            raise ValueError("evidence_id must be non-empty")
+        if not isinstance(self.evidence_id, str) or not self.evidence_id.strip():
+            raise ValueError("evidence_id must be a non-empty string")
+        if not isinstance(self.physical_run, bool):
+            raise ValueError("physical_run must be boolean")
+        if not isinstance(self.synthetic_contract_test, bool):
+            raise ValueError("synthetic_contract_test must be boolean")
         _normalize_sha256(self.qualification_bundle_sha256)
         self.device.validate()
         self.signal.validate()
@@ -282,7 +321,15 @@ class HardwareQualificationResult:
         }
 
 
+def _strict_bool(value: Any, *, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be boolean")
+    return value
+
+
 def _normalize_sha256(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("qualification_bundle_sha256 must be a string")
     normalized = value.strip().lower()
     if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
         raise ValueError("qualification_bundle_sha256 must be a 64-character SHA-256 digest")
@@ -370,8 +417,11 @@ def evaluate_hardware_qualification(
         QualificationGate(
             name="verified_runtime_bundle",
             status=(
-                GateStatus.PASS if qualification_bundle_verified else GateStatus.NOT_TESTED
-                if verified_root is None else GateStatus.FAIL
+                GateStatus.PASS
+                if qualification_bundle_verified
+                else GateStatus.NOT_TESTED
+                if verified_root is None
+                else GateStatus.FAIL
             ),
             observed={
                 "manifest_root": manifest_root,
@@ -401,7 +451,7 @@ def evaluate_hardware_qualification(
         ),
         threshold_gate(
             "sample_rate_error_fraction",
-            sample_rate_error,
+            _sample_rate_error(manifest.signal),
             thresholds.max_sample_rate_error_fraction,
         ),
         threshold_gate(
@@ -492,7 +542,10 @@ def evaluate_hardware_evidence_bundle(
 def _tuple_strings(value: Any, *, field_name: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"{field_name} must be an array")
-    return tuple(str(item) for item in value)
+    result = tuple(str(item) for item in value)
+    if any(not item.strip() for item in result):
+        raise ValueError(f"{field_name} must not contain empty values")
+    return result
 
 
 def manifest_from_mapping(raw: Mapping[str, Any]) -> HardwareQualificationManifest:
@@ -506,15 +559,43 @@ def manifest_from_mapping(raw: Mapping[str, Any]) -> HardwareQualificationManife
         latency_raw = raw["latency"]
     except KeyError as exc:
         raise ValueError(f"hardware evidence missing required section: {exc.args[0]}") from exc
+    for name, section in (
+        ("device", device_raw),
+        ("signal", signal_raw),
+        ("timing", timing_raw),
+        ("reliability", reliability_raw),
+        ("latency", latency_raw),
+    ):
+        if not isinstance(section, Mapping):
+            raise ValueError(f"hardware evidence section {name} must be an object")
+
+    device_values = dict(device_raw)
+    for field_name in (
+        "manufacturer",
+        "device",
+        "board_id",
+        "firmware_version",
+        "acquisition_library",
+        "acquisition_library_version",
+        "operating_system",
+        "transport",
+    ):
+        if field_name not in device_values:
+            raise ValueError(f"hardware evidence missing device.{field_name}")
+        if not isinstance(device_values[field_name], str):
+            raise ValueError(f"device.{field_name} must be a string")
 
     manifest = HardwareQualificationManifest(
         schema_version=int(raw.get("schema_version", HARDWARE_QUALIFICATION_SCHEMA_VERSION)),
         evidence_id=str(raw["evidence_id"]),
         measurement_origin=MeasurementOrigin(str(raw["measurement_origin"])),
         qualification_bundle_sha256=str(raw["qualification_bundle_sha256"]),
-        physical_run=bool(raw["physical_run"]),
-        synthetic_contract_test=bool(raw.get("synthetic_contract_test", False)),
-        device=DeviceIdentity(**dict(device_raw)),
+        physical_run=_strict_bool(raw["physical_run"], field_name="physical_run"),
+        synthetic_contract_test=_strict_bool(
+            raw.get("synthetic_contract_test", False),
+            field_name="synthetic_contract_test",
+        ),
+        device=DeviceIdentity(**device_values),
         signal=SignalGeometry(
             channel_names=_tuple_strings(
                 signal_raw["channel_names"], field_name="signal.channel_names"
@@ -523,8 +604,8 @@ def manifest_from_mapping(raw: Mapping[str, Any]) -> HardwareQualificationManife
                 signal_raw["channel_types"], field_name="signal.channel_types"
             ),
             units=_tuple_strings(signal_raw["units"], field_name="signal.units"),
-            nominal_sample_rate_hz=float(signal_raw["nominal_sample_rate_hz"]),
-            measured_sample_rate_hz=float(signal_raw["measured_sample_rate_hz"]),
+            nominal_sample_rate_hz=signal_raw["nominal_sample_rate_hz"],
+            measured_sample_rate_hz=signal_raw["measured_sample_rate_hz"],
         ),
         timing=TimingEvidence(**dict(timing_raw)),
         reliability=ReliabilityEvidence(**dict(reliability_raw)),
