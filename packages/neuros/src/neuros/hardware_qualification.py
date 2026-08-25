@@ -5,7 +5,9 @@ physical acquisition configuration to the hardware evidence tier. It does not
 measure hardware itself and software CI must never fabricate that distinction.
 
 A schema-valid synthetic fixture can exercise every threshold gate while still
-being structurally ineligible for ``hardware_qualified=True``.
+being structurally ineligible for ``hardware_qualified=True``. Hardware
+promotion additionally requires an independently verified neurOS qualification
+bundle root so physical measurements are bound to the exact computational run.
 """
 
 from __future__ import annotations
@@ -228,10 +230,12 @@ class HardwareQualificationManifest:
         self.latency.validate()
         if self.measurement_origin is MeasurementOrigin.PHYSICAL and not self.physical_run:
             raise ValueError("physical_measurement origin requires physical_run=true")
+        if self.measurement_origin is MeasurementOrigin.IMPORTED and not self.physical_run:
+            raise ValueError("imported_external_measurement origin requires physical_run=true")
         if self.measurement_origin is MeasurementOrigin.SYNTHETIC and not self.synthetic_contract_test:
             raise ValueError("synthetic_contract_test origin requires synthetic_contract_test=true")
-        if self.synthetic_contract_test and self.measurement_origin is MeasurementOrigin.PHYSICAL:
-            raise ValueError("synthetic contract evidence cannot claim physical_measurement origin")
+        if self.synthetic_contract_test and self.measurement_origin is not MeasurementOrigin.SYNTHETIC:
+            raise ValueError("synthetic contract evidence must use synthetic_contract_test origin")
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +253,7 @@ class HardwareQualificationResult:
     measurements_complete: bool
     thresholds_pass: bool
     physical_evidence: bool
+    qualification_bundle_verified: bool
     hardware_qualified: bool
     gates: tuple[QualificationGate, ...]
     evidence_sha256: str
@@ -261,8 +266,17 @@ class HardwareQualificationResult:
             "measurements_complete": self.measurements_complete,
             "thresholds_pass": self.thresholds_pass,
             "physical_evidence": self.physical_evidence,
+            "qualification_bundle_verified": self.qualification_bundle_verified,
             "hardware_qualified": self.hardware_qualified,
-            "gates": [asdict(gate) for gate in self.gates],
+            "gates": [
+                {
+                    "name": gate.name,
+                    "status": gate.status.value,
+                    "observed": gate.observed,
+                    "requirement": gate.requirement,
+                }
+                for gate in self.gates
+            ],
             "evidence_sha256": self.evidence_sha256,
             "claim_boundary": dict(self.claim_boundary),
         }
@@ -299,13 +313,28 @@ def evidence_sha256(manifest: HardwareQualificationManifest) -> str:
 def evaluate_hardware_qualification(
     manifest: HardwareQualificationManifest,
     thresholds: HardwareQualificationThresholds | None = None,
+    *,
+    verified_qualification_bundle_sha256: str | None = None,
 ) -> HardwareQualificationResult:
-    """Evaluate a named hardware evidence record without inventing measurements."""
+    """Evaluate named hardware evidence without inventing measurements.
+
+    Passing numerical thresholds is deliberately insufficient for promotion.
+    ``hardware_qualified`` additionally requires non-synthetic physical evidence
+    and an independently verified neurOS qualification-bundle root that exactly
+    matches the root named by the hardware manifest.
+    """
 
     thresholds = thresholds or HardwareQualificationThresholds()
     manifest.validate()
     thresholds.validate()
 
+    manifest_root = _normalize_sha256(manifest.qualification_bundle_sha256)
+    verified_root = (
+        _normalize_sha256(verified_qualification_bundle_sha256)
+        if verified_qualification_bundle_sha256 is not None
+        else None
+    )
+    qualification_bundle_verified = verified_root == manifest_root
     sample_rate_error = _sample_rate_error(manifest.signal)
     physical_evidence = (
         manifest.physical_run
@@ -333,7 +362,22 @@ def evaluate_hardware_qualification(
                 "physical_run": manifest.physical_run,
                 "synthetic_contract_test": manifest.synthetic_contract_test,
             },
-            requirement="physical/imported measured evidence, physical_run=true, synthetic_contract_test=false",
+            requirement=(
+                "physical/imported measured evidence, physical_run=true, "
+                "synthetic_contract_test=false"
+            ),
+        ),
+        QualificationGate(
+            name="verified_runtime_bundle",
+            status=(
+                GateStatus.PASS if qualification_bundle_verified else GateStatus.NOT_TESTED
+                if verified_root is None else GateStatus.FAIL
+            ),
+            observed={
+                "manifest_root": manifest_root,
+                "verified_root": verified_root,
+            },
+            requirement="verified neurOS qualification bundle root exactly matches manifest root",
         ),
         QualificationGate(
             name="minimum_duration",
@@ -400,9 +444,10 @@ def evaluate_hardware_qualification(
             )
         )
 
-    non_physical_gates = [gate for gate in gates if gate.name != "physical_measurement"]
-    thresholds_pass = all(gate.status is GateStatus.PASS for gate in non_physical_gates)
-    hardware_qualified = physical_evidence and thresholds_pass
+    prerequisite_names = {"physical_measurement", "verified_runtime_bundle"}
+    threshold_gates = [gate for gate in gates if gate.name not in prerequisite_names]
+    thresholds_pass = all(gate.status is GateStatus.PASS for gate in threshold_gates)
+    hardware_qualified = physical_evidence and qualification_bundle_verified and thresholds_pass
 
     return HardwareQualificationResult(
         evidence_id=manifest.evidence_id,
@@ -410,16 +455,37 @@ def evaluate_hardware_qualification(
         measurements_complete=True,
         thresholds_pass=thresholds_pass,
         physical_evidence=physical_evidence,
+        qualification_bundle_verified=qualification_bundle_verified,
         hardware_qualified=hardware_qualified,
         gates=tuple(gates),
         evidence_sha256=evidence_sha256(manifest),
         claim_boundary={
-            "runtime_record_replay_qualified": False,
+            "runtime_record_replay_qualified": qualification_bundle_verified,
             "real_dataset_qualified": False,
             "hardware_qualified": hardware_qualified,
             "closed_loop_qualified": False,
             "clinical_qualified": False,
         },
+    )
+
+
+def evaluate_hardware_evidence_bundle(
+    manifest: HardwareQualificationManifest,
+    qualification_bundle: str | Path,
+    thresholds: HardwareQualificationThresholds | None = None,
+) -> HardwareQualificationResult:
+    """Verify the referenced runtime bundle before evaluating hardware promotion."""
+
+    from neuros.qualification import verify_qualification_bundle
+
+    verification = verify_qualification_bundle(
+        qualification_bundle,
+        expected_sha256=manifest.qualification_bundle_sha256,
+    )
+    return evaluate_hardware_qualification(
+        manifest,
+        thresholds,
+        verified_qualification_bundle_sha256=str(verification["bundle_sha256"]),
     )
 
 
@@ -450,8 +516,12 @@ def manifest_from_mapping(raw: Mapping[str, Any]) -> HardwareQualificationManife
         synthetic_contract_test=bool(raw.get("synthetic_contract_test", False)),
         device=DeviceIdentity(**dict(device_raw)),
         signal=SignalGeometry(
-            channel_names=_tuple_strings(signal_raw["channel_names"], field_name="signal.channel_names"),
-            channel_types=_tuple_strings(signal_raw["channel_types"], field_name="signal.channel_types"),
+            channel_names=_tuple_strings(
+                signal_raw["channel_names"], field_name="signal.channel_names"
+            ),
+            channel_types=_tuple_strings(
+                signal_raw["channel_types"], field_name="signal.channel_types"
+            ),
             units=_tuple_strings(signal_raw["units"], field_name="signal.units"),
             nominal_sample_rate_hz=float(signal_raw["nominal_sample_rate_hz"]),
             measured_sample_rate_hz=float(signal_raw["measured_sample_rate_hz"]),
