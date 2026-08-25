@@ -44,6 +44,7 @@ dev = [
 bandpass = "neuros.processing.plugin_transforms:BandpassTransform"
 smoothing = "neuros.processing.plugin_transforms:SmoothingTransform"
 bandpower = "neuros.processing.plugin_transforms:BandPowerTransform"
+window = "neuros.processing.plugin_transforms:NeuralWindowTransform"
 
 [project.urls]
 Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
