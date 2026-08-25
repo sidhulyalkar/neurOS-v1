@@ -1,0 +1,88 @@
+name: Braindecode Compatibility
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-models/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros/**"
+      - "tests/test_braindecode_adapter.py"
+      - "tests/test_neural_windows.py"
+      - ".github/workflows/braindecode-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/neuros-models/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros/**"
+      - "tests/test_braindecode_adapter.py"
+      - "tests/test_neural_windows.py"
+      - ".github/workflows/braindecode-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  adapter:
+    name: Braindecode 1.7 adapter / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install local window + Braindecode stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e "packages/neuros-models[braindecode]"
+      - name: Verify pinned upstream compatibility
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import braindecode
+          from neuros.models import BraindecodeDecoder
+
+          version = importlib.metadata.version("braindecode")
+          assert version.startswith("1.7."), version
+          assert BraindecodeDecoder.__module__ == "neuros.models.braindecode_adapter"
+          print("braindecode", version)
+          PY
+      - name: Train and infer through upstream EEGClassifier
+        run: pytest -q tests/test_braindecode_adapter.py
+
+  kernel-isolation:
+    name: Python 3.10 kernel remains Braindecode-free
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install minimal kernel and models without optional ecosystem
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e packages/neuros-models
+      - name: Prove optional adapter imports but fails clearly when invoked
+        run: |
+          python - <<'PY'
+          import importlib.util
+          from neuros.models import BraindecodeDecoder
+
+          assert importlib.util.find_spec("braindecode") is None
+          decoder = BraindecodeDecoder("EEGNet", 2, 128, 2)
+          try:
+              decoder.train(__import__("numpy").ones((2, 2, 128)), __import__("numpy").array([0, 1]))
+          except ImportError as exc:
+              assert "Python 3.11+" in str(exc)
+          else:
+              raise AssertionError("Braindecode adapter must fail closed on Python 3.10")
+          PY
