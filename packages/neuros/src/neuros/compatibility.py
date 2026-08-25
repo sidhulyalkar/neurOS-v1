@@ -176,11 +176,26 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         integration_id="braindecode",
         name="Braindecode",
         category="decoder ecosystem",
-        status=IntegrationStatus.PLANNED,
-        capabilities=("model-adapter", "training-bridge", "decoder-bridge"),
-        evidence_tier=None,
-        evidence_paths=(),
-        notes="Planned as faithful adapters; neurOS should not copy the Braindecode model zoo.",
+        status=IntegrationStatus.EXPERIMENTAL,
+        capabilities=(
+            "neural-window",
+            "model-adapter",
+            "training-bridge",
+            "decoder-bridge",
+        ),
+        evidence_tier=EvidenceTier.INTEGRATION,
+        evidence_paths=(
+            "tests/test_braindecode_adapter.py",
+            ".github/workflows/braindecode-ci.yml",
+        ),
+        notes=(
+            "Braindecode 1.7 is integrated by delegation for a qualified raw-window "
+            "whitelist (EEGNet, EEGConformer, ShallowFBCSPNet, Deep4Net). The adapter "
+            "preserves exact window geometry and upstream training identity without hidden "
+            "resampling or preprocessing. Real-dataset utility, stable mechanistic hook "
+            "paths, and hardware/closed-loop behavior remain separate qualification steps."
+        ),
+        install_hint='pip install "neuros[braindecode]"',
     ),
     IntegrationRecord(
         integration_id="neuralbench",

@@ -66,6 +66,21 @@ def test_moabb_real_dataset_evidence_remains_experimental_surface():
     assert "longitudinal-authority" in record.capabilities
 
 
+def test_braindecode_is_integration_qualified_not_real_dataset_promoted():
+    record = get_integration("braindecode")
+
+    assert record.status is IntegrationStatus.EXPERIMENTAL
+    assert record.evidence_tier is EvidenceTier.INTEGRATION
+    assert "neural-window" in record.capabilities
+    assert "training-bridge" in record.capabilities
+    assert "tests/test_braindecode_adapter.py" in record.evidence_paths
+    assert ".github/workflows/braindecode-ci.yml" in record.evidence_paths
+    assert record.install_hint == 'pip install "neuros[braindecode]"'
+    assert "Real-dataset" in record.notes
+    assert "mechint" not in record.capabilities
+    assert "hardware" not in record.capabilities
+
+
 def test_openbci_is_indirect_not_hardware_qualified():
     record = get_integration("openbci")
 

@@ -22,6 +22,17 @@ def test_compatibility_cli_status_filter(monkeypatch, capsys):
     main()
 
     output = capsys.readouterr().out
-    assert "braindecode" in output
     assert "neuralbench" in output
+    assert "braindecode" not in output
     assert "brainflow" not in output
+
+
+def test_compatibility_cli_experimental_filter_includes_braindecode(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["neuros", "compatibility", "--status", "experimental"])
+
+    main()
+
+    output = capsys.readouterr().out
+    assert "braindecode" in output
+    assert "evidence=integration" in output
+    assert "neuralbench" not in output

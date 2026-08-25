@@ -36,6 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pytorch = ["torch>=2.1.0"]
+braindecode = ["braindecode>=1.7,<1.8; python_version >= '3.11'"]
 mechint = [
     "torch>=2.1.0",
     "neuros-mechint>=1.0.0",
@@ -48,6 +49,7 @@ dev = [
 all = [
     "torch>=2.1.0",
     "neuros-mechint>=1.0.0",
+    "braindecode>=1.7,<1.8; python_version >= '3.11'",
 ]
 test = ["pytest>=7.4"]
 
@@ -63,6 +65,7 @@ cnn = "neuros.models.cnn_model:CNNModel"
 transformer = "neuros.models.transformer_model:TransformerModel"
 eeg_conformer = "neuros.models.eeg_conformer_model:EEGConformerModel"
 attention_fusion = "neuros.models.attention_fusion_model:AttentionFusionModel"
+braindecode = "neuros.models.braindecode_adapter:BraindecodeDecoder"
 
 [project.scripts]
 neuros-models = "neuros.models.cli:main"
