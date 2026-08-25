@@ -88,6 +88,13 @@ def test_external_spec_refuses_evidence_authority_overrides():
             model_kwargs={"learning_rate": float("nan")},
         )
 
+    with pytest.raises(ValueError, match="finite and positive"):
+        ExternalTaskDecoderMethodSpec(
+            "braindecode-eegnet",
+            model_seed=7,
+            sample_rate_hz=float("nan"),
+        )
+
 
 def test_braindecode_eegnet_is_paired_with_native_eegnet_under_one_authority():
     data = _fixture()
@@ -115,6 +122,7 @@ def test_braindecode_eegnet_is_paired_with_native_eegnet_under_one_authority():
         spec=ExternalTaskDecoderMethodSpec(
             "braindecode-eegnet",
             model_seed=101,
+            sample_rate_hz=128.0,
             model_kwargs=common,
         ),
         budgets_per_class=(0, 1),
@@ -124,6 +132,8 @@ def test_braindecode_eegnet_is_paired_with_native_eegnet_under_one_authority():
     assert external.upstream_version is not None
     assert external.upstream_version.startswith("1.7.")
     assert external.parameter_count > 0
+    assert external.resolved_model_config["sample_rate_hz"] == 128.0
+    assert external.method_spec.sample_rate_hz == 128.0
     assert len(external.method_run_fingerprint) == 16
     assert len(external.analysis_manifest_fingerprint) == 16
 
@@ -133,6 +143,7 @@ def test_braindecode_eegnet_is_paired_with_native_eegnet_under_one_authority():
         assert row["processed_data_sha256"] == authority.processed_data_sha256
         assert row["partition_fingerprint"] == authority.partition_fingerprint
         assert row["calibration_split_fingerprint"] == authority.calibration_split_fingerprint
+        assert row["sample_rate_hz"] == 128.0
         assert row["representation_evidence_available"] is False
         assert row["mechanistic_evidence_available"] is False
         assert 0.0 <= float(row["balanced_accuracy"]) <= 1.0
@@ -146,6 +157,7 @@ def test_braindecode_eegnet_is_paired_with_native_eegnet_under_one_authority():
     for row in paired.rows:
         assert row["native_method_id"] == "eegnet"
         assert row["external_method_id"] == "braindecode-eegnet"
+        assert row["sample_rate_hz"] == 128.0
         assert row["external_representation_evidence_available"] is False
         assert row["external_mechanistic_evidence_available"] is False
         expected = float(row["external_balanced_accuracy"]) - float(
@@ -171,6 +183,7 @@ def test_pairing_refuses_results_from_different_authorities():
         spec=ExternalTaskDecoderMethodSpec(
             "braindecode-eegnet",
             model_seed=5,
+            sample_rate_hz=128.0,
             model_kwargs=common,
         ),
         budgets_per_class=(0,),
