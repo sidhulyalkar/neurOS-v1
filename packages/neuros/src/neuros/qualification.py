@@ -13,6 +13,7 @@ bundle.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import platform
 import shutil
@@ -132,6 +133,13 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _normalize_sha256(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) != 64 or any(char not in "0123456789abcdef" for char in normalized):
+        raise ValueError("expected_sha256 must be a 64-character hexadecimal SHA-256 digest")
+    return normalized
+
+
 def _installed_versions() -> dict[str, str]:
     versions: dict[str, str] = {}
     for name in _RELEVANT_PACKAGES:
@@ -183,6 +191,22 @@ def _runtime_quality(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "max_node_p99_latency_ms": max(p99_values, default=0.0),
         "runtime_failure": snapshot.get("failure"),
     }
+
+
+def _assert_runtime_qualifiable(label: str, quality: Mapping[str, Any]) -> None:
+    problems: list[str] = []
+    if quality.get("runtime_state") != "stopped":
+        problems.append(f"state={quality.get('runtime_state')!r}")
+    if int(quality.get("node_failures", 0)) != 0:
+        problems.append(f"node_failures={quality.get('node_failures')}")
+    if int(quality.get("edge_items_dropped", 0)) != 0:
+        problems.append(f"edge_items_dropped={quality.get('edge_items_dropped')}")
+    if quality.get("runtime_failure") is not None:
+        problems.append(f"runtime_failure={quality.get('runtime_failure')!r}")
+    if problems:
+        raise RuntimeError(
+            f"{label} runtime is not eligible for qualification: " + ", ".join(problems)
+        )
 
 
 def _stream_evidence(reader: SessionArchiveReader) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -264,6 +288,18 @@ def _artifact_index(root: Path) -> dict[str, Any]:
     }
 
 
+def _normalize_session_metadata(session_root: Path) -> None:
+    """Remove host-local config paths before the session enters a portable bundle."""
+
+    path = session_root / "manifest.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    metadata = dict(raw.get("metadata", {}))
+    metadata["config_path"] = "config.yaml"
+    metadata["config_path_scope"] = "qualification_bundle"
+    raw["metadata"] = metadata
+    _write_json(path, raw)
+
+
 def _safe_replace_directory(staging: Path, destination: Path, *, overwrite: bool) -> None:
     if destination.exists():
         if not overwrite:
@@ -323,8 +359,12 @@ async def qualify_config(
         record_summary = dict(record_summary)
         record_summary["archive"] = "session"
         record_summary["exports"] = {}
+        _normalize_session_metadata(session_root)
 
         archive_summary = inspect_archive(session_root, verify_hashes=True)
+        if sum(int(count) for count in archive_summary.get("streams", {}).values()) <= 0:
+            raise RuntimeError("Qualification recording contains no SignalFrames")
+
         replay_snapshot = await replay_archive(
             session_root,
             bundled_config,
@@ -336,15 +376,21 @@ async def qualify_config(
 
         live_digest = live_outputs.to_dict()
         replay_digest = replay_outputs.to_dict()
+        if int(live_digest["count"]) <= 0:
+            raise RuntimeError("Qualification runtime produced no decoder outputs")
         if live_digest != replay_digest:
             raise RuntimeError(
                 "Qualification replay output mismatch: the recorded session did not "
-                "reproduce the canonical decoder-output digest"
+                "reproduce the canonical semantic decoder-output digest"
             )
 
         reader = SessionArchiveReader(session_root, verify_hashes=True)
         devices, clocks = _stream_evidence(reader)
         session_manifest = reader.manifest
+        config_hash = canonical_hash(raw_config)
+        if session_manifest.get("config_hash") != config_hash:
+            raise RuntimeError("Recorded session config hash differs from qualification config")
+
         environment = _environment_payload(raw_config)
         integrations = _used_integrations(raw_config)
         compatibility = {
@@ -371,6 +417,8 @@ async def qualify_config(
         record_runtime = session_manifest.get("runtime_metrics", {})
         replay_quality = _runtime_quality(replay_snapshot)
         record_quality = _runtime_quality(record_runtime)
+        _assert_runtime_qualifiable("record", record_quality)
+        _assert_runtime_qualifiable("replay", replay_quality)
 
         _write_json(staging / "environment.json", environment)
         _write_json(staging / "compatibility.json", compatibility)
@@ -402,7 +450,7 @@ async def qualify_config(
             "session_id": session_id,
             "git_sha": environment.get("git_sha"),
             "config_file_sha256": _sha256_file(bundled_config),
-            "config_semantic_hash": canonical_hash(raw_config),
+            "config_semantic_hash": config_hash,
             "archive_config_hash": session_manifest.get("config_hash"),
             "archive": "session",
             "record_summary": record_summary,
@@ -412,6 +460,11 @@ async def qualify_config(
                 "replay_completed": replay_snapshot.get("state") == "stopped",
                 "decoder_output_digest_exact": True,
                 "decoder_output_digest": live_digest,
+            },
+            "integrity_model": {
+                "artifact_hashes": "sha256",
+                "structural_integrity": "self-verifiable",
+                "origin_authenticity": "requires_external_bundle_sha256_pin_or_future_signature",
             },
             "claim_boundary": {
                 "runtime_record_replay_qualified": True,
@@ -449,8 +502,17 @@ async def qualify_config(
         raise
 
 
-def verify_qualification_bundle(path: str | Path) -> dict[str, Any]:
-    """Verify the sealed artifact index and embedded session archive."""
+def verify_qualification_bundle(
+    path: str | Path,
+    *,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Verify the sealed artifact index and embedded session archive.
+
+    ``expected_sha256`` is an optional externally pinned root digest. Without
+    an external pin (or a future signature), a self-contained bundle can prove
+    structural consistency but cannot by itself establish who authored it.
+    """
 
     root = Path(path).resolve()
     manifest_path = root / "manifest.json"
@@ -491,17 +553,26 @@ def verify_qualification_bundle(path: str | Path) -> dict[str, Any]:
     bundle_sha256 = hashlib.sha256(_canonical_bytes(rows)).hexdigest()
     if bundle_sha256 != index.get("bundle_sha256"):
         raise IOError("Qualification bundle digest mismatch")
+    if expected_sha256 is not None:
+        expected = _normalize_sha256(expected_sha256)
+        if not hmac.compare_digest(bundle_sha256, expected):
+            raise IOError(
+                "Qualification bundle SHA-256 does not match the externally pinned digest"
+            )
 
     reader = SessionArchiveReader(root / str(manifest.get("archive", "session")), verify_hashes=True)
     frame_count = 0
     for stream_id in reader.stream_ids:
         frame_count += sum(1 for _ in reader.iter_frames(stream_id))
+    if frame_count <= 0:
+        raise IOError("Qualification session contains no verified SignalFrames")
 
     return {
         "bundle": str(root),
         "bundle_id": manifest.get("bundle_id"),
         "schema_version": QUALIFICATION_SCHEMA_VERSION,
         "integrity": "verified",
+        "origin_authenticity": "externally_pinned" if expected_sha256 is not None else "not_established",
         "artifact_count": len(rows),
         "frame_count": frame_count,
         "bundle_sha256": bundle_sha256,
@@ -509,10 +580,14 @@ def verify_qualification_bundle(path: str | Path) -> dict[str, Any]:
     }
 
 
-async def reproduce_qualification(path: str | Path) -> dict[str, Any]:
+async def reproduce_qualification(
+    path: str | Path,
+    *,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
     """Verify a bundle and deterministically replay its recorded computational path."""
 
-    verification = verify_qualification_bundle(path)
+    verification = verify_qualification_bundle(path, expected_sha256=expected_sha256)
     root = Path(path).resolve()
     expected = json.loads((root / "decoder_outputs.json").read_text(encoding="utf-8"))["record"]
     capture = _OutputDigest()
@@ -527,8 +602,11 @@ async def reproduce_qualification(path: str | Path) -> dict[str, Any]:
     observed = capture.to_dict()
     if observed != expected:
         raise RuntimeError(
-            "Qualification reproduction failed: decoder-output digest differs from sealed bundle"
+            "Qualification reproduction failed: semantic decoder-output digest differs "
+            "from the sealed bundle"
         )
+    quality = _runtime_quality(snapshot)
+    _assert_runtime_qualifiable("reproduction", quality)
     return {
         **verification,
         "reproduced": True,
