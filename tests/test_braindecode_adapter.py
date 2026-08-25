@@ -30,6 +30,32 @@ def test_braindecode_adapter_rejects_unqualified_or_ambiguous_contracts():
         decoder.train(np.ones((2, 3, 128), dtype=np.float32), np.array([0, 1]))
 
 
+@pytest.mark.parametrize(
+    "model_name",
+    ["EEGNet", "EEGConformer", "ShallowFBCSPNet", "Deep4Net"],
+)
+def test_qualified_braindecode_models_share_the_neuros_window_geometry(model_name):
+    import torch
+
+    decoder = BraindecodeDecoder(
+        model_name,
+        n_channels=4,
+        n_times=512,
+        n_classes=3,
+        sample_rate_hz=128.0,
+        n_epochs=1,
+        batch_size=2,
+        device="cpu",
+    )
+    module = decoder._build_module()
+    module.eval()
+    with torch.no_grad():
+        output = module(torch.zeros(2, 4, 512, dtype=torch.float32))
+    if isinstance(output, tuple):
+        output = output[0]
+    assert tuple(output.shape) == (2, 3)
+
+
 class _OneWindowSource:
     def __init__(self, sample_major: np.ndarray) -> None:
         self.sample_major = np.asarray(sample_major, dtype=np.float32)
