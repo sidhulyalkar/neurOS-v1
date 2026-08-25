@@ -4,7 +4,7 @@
 
 Version 1 deliberately qualifies one narrow property:
 
-> A declared neurOS runtime configuration was executed, its exact `SignalFrame` inputs were recorded with integrity hashes, and the sealed recording reproduced the same canonical decoder-output digest through deterministic replay.
+> A declared neurOS runtime configuration was executed without runtime failure or queue loss, its exact `SignalFrame` inputs were recorded with integrity hashes, and the sealed recording reproduced the same canonical semantic decoder-output digest through replay.
 
 That is an **integration-level runtime/replay claim**. It is not automatically a real-dataset, hardware, closed-loop, or clinical claim.
 
@@ -17,22 +17,39 @@ neuros qualify configs/examples/mock_bci.yaml \
   --duration 1.0
 ```
 
-The command stages the bundle outside the final path, runs the live configuration, records the canonical input frames, verifies every recorded frame hash, replays the recording through the bundled configuration, compares the canonical decoder-output digest, seals every artifact with SHA-256, verifies the completed bundle, and only then publishes the final directory.
+The command stages the bundle outside the final path, runs the live configuration, records the canonical input frames, verifies every recorded frame hash, replays the recording through the bundled configuration, requires zero runtime failures and zero queue drops in both runs, compares the canonical semantic decoder-output digest, seals every artifact with SHA-256, verifies the completed bundle, and only then publishes the final directory.
+
+Qualification also fails if no `SignalFrame`s or no decoder outputs were produced. An empty or lossy run is evidence of a problem, not a successful qualification.
 
 An existing destination is never replaced unless `--overwrite` is explicit.
 
 ## Reproduce a bundle
 
+Basic structural verification and replay:
+
 ```bash
 neuros reproduce qualification/mock
+```
+
+For externally anchored bundle identity, preserve the `bundle_sha256` emitted by `neuros qualify` outside the bundle and use it during reproduction:
+
+```bash
+neuros reproduce qualification/mock \
+  --expected-sha256 <published-bundle-sha256>
 ```
 
 Reproduction happens in two stages:
 
 1. every sealed file hash, artifact size, artifact-set membership, bundle digest, and embedded session-frame hash is verified;
-2. only after integrity verification succeeds is the recorded session replayed through the bundled config and compared with the sealed decoder-output digest.
+2. only after integrity verification succeeds is the recorded session replayed through the bundled config and compared with the sealed semantic decoder-output digest.
 
 A modified file therefore fails before its contents can silently influence the reproduction result.
+
+### Integrity versus authenticity
+
+A self-contained hash index can prove that a bundle is internally consistent. By itself it cannot prove who authored that bundle, because an attacker able to rewrite every file could also rewrite an unanchored hash index.
+
+For provenance-sensitive exchange, publish or otherwise preserve `bundle_sha256` independently of the bundle and pass it back with `--expected-sha256`. The verifier then labels origin identity `externally_pinned` only when the computed root matches that outside value. A future signing layer can replace manual root pinning with public-key signatures without changing the underlying qualification schema.
 
 ## Bundle layout
 
@@ -66,13 +83,16 @@ The top-level authority for the qualification claim. It records:
 - embedded archive identity;
 - record/replay integrity status;
 - canonical decoder-output digest;
+- the integrity/authenticity model;
 - the explicit claim boundary.
 
-All internal artifact references are bundle-relative. Temporary staging paths are never sealed into the portable manifest.
+All internal artifact references are bundle-relative. Temporary or host-local source config paths are normalized before the session enters the portable evidence bundle.
 
 ### `artifact_hashes.json`
 
-Contains the byte size and SHA-256 of every other file in the bundle and a canonical digest over the complete artifact index. Unexpected files are considered a mutation of the sealed evidence bundle and make verification fail.
+Contains the byte size and SHA-256 of every other file in the bundle and a canonical root digest over the complete artifact index. Unexpected files are considered a mutation of the sealed evidence bundle and make verification fail.
+
+The root digest is emitted as `bundle_sha256`. Preserve it externally when authorship or distribution integrity matters.
 
 ### `environment.json`
 
@@ -93,6 +113,8 @@ Records the decoder config and any `ModelArtifactManifest` entries bound to the 
 ### `runtime.json`
 
 Contains both the record and replay runtime snapshots, including node failure counts, queue acceptance/drop statistics, and node latency summaries.
+
+Version 1 promotes a bundle only when both record and replay finish in the `stopped` state with no node failure and no queue drops. This is intentionally stricter than merely completing the process.
 
 Latency is evidence in its own right. It is intentionally not mixed into semantic decoder identity because the duration of an inference call is expected to differ between the original run and replay.
 
@@ -145,6 +167,7 @@ The goal is to make neurOS results transportable as evidence. A collaborator sho
 - Did queues drop data or nodes fail?
 - Was a promoted learned-weight artifact bound?
 - Can the computational path reproduce the same semantic decoder outputs from the recorded neural stream?
+- Is the bundle merely self-consistent, or does it match an independently pinned root digest?
 - What stronger claims are explicitly unsupported?
 
 That evidence contract is more valuable than a generic "pipeline completed successfully" flag and becomes the substrate for real-device, ORION, closed-loop, and eventually regulated qualification layers.
