@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neuros"
-version = "2.0.0"
-description = "User-facing SDK and CLI for the neurOS BCI runtime"
+version = "2.1.0"
+description = "User-facing SDK and CLI for the neurOS neural execution and evidence platform"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -32,6 +32,7 @@ all = [
     "neuros-sourceweigher>=0.2.0",
     "neuros-ui>=2.0.0",
     "neuros-cloud>=2.0.0",
+    "mne>=1.6",
 ]
 bci = [
     "neuros-drivers[eeg]>=2.0.0",
@@ -49,6 +50,8 @@ deployment = [
     "neuros-cloud[all]>=2.0.0",
 ]
 orion = ["neuros-orion>=0.1.0"]
+interop = ["mne>=1.6"]
+interop-mne = ["mne>=1.6"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",

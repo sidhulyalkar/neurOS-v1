@@ -1,5 +1,5 @@
 site_name: neurOS Documentation
-site_description: Reliable neural runtime and ORION representation research
+site_description: Reliable neural execution, ORION intelligence, and evidence-aware BCI engineering
 site_author: neurOS Development Team
 repo_name: sidhulyalkar/neurOS-v1
 repo_url: https://github.com/sidhulyalkar/neurOS-v1
@@ -51,21 +51,25 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Project Status: PROJECT_STATUS.md
+  - Platform:
+      - Four Public Surfaces: PLATFORM.md
+      - Ecosystem Compatibility: COMPATIBILITY.md
+      - Architecture: ARCHITECTURE.md
+      - Project Status: PROJECT_STATUS.md
   - Real-World Evidence:
       - Evidence Program: REAL_WORLD_EVIDENCE.md
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
       - Longitudinal EEG Showcase: LONGITUDINAL_EEG_SHOWCASE.md
       - Longitudinal Model Ladder: LONGITUDINAL_MODEL_LADDER.md
-  - Research Extensions: RESEARCH_EXTENSIONS.md
-  - Installation: getting-started/installation.md
-  - Architecture: ARCHITECTURE.md
-  - API Surface: API_REFERENCE.md
-  - Neurotokenization Research:
+  - ORION / Neurotokenization:
       - Master Plan: neurotokenization/00_MASTER_PLAN.md
       - Tokenizer Specs: neurotokenization/01_TOKENIZER_SPECS.md
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
+  - SDK:
+      - Installation: getting-started/installation.md
+      - API Surface: API_REFERENCE.md
+  - Research Extensions: RESEARCH_EXTENSIONS.md
   - Historical Archive: archive/README.md
 
 extra:

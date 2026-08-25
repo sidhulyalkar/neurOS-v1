@@ -1,49 +1,71 @@
 # neurOS Documentation
 
-neurOS is a modular runtime and SDK for building reproducible brain-computer interface systems. The architecture centers on explicit neural-data contracts, typed runtime graphs, deterministic recording/replay, plugin discovery, measurable timing/backpressure, task-specific decoder contracts, and a separate ORION neural-intelligence layer.
+**neurOS is an open execution and evidence platform for neural interfaces.** It is designed so neural systems can be replayed, measured, compared, adapted, and eventually qualified across changing hardware, models, datasets, and people.
 
-> neurOS is an active research and engineering platform. Generic software tests are not hardware qualification, medical validation, biological evidence, or clinical certification.
+The public architecture has four surfaces:
+
+| Surface | Question it answers |
+| --- | --- |
+| **neurOS** | How should neural systems execute reliably and reproducibly? |
+| **ORION** | How should neural activity be represented, transferred, and adapted? |
+| **Evidence** | What does a neural-system claim actually have evidence for? |
+| **Studio** | How can a developer inspect the live/replayed system and its evidence? |
+
+> neurOS is an active research and engineering platform. Software tests are not hardware qualification, medical validation, biological proof, or clinical certification.
 
 ## Start here
 
+- [Platform architecture and design rules](PLATFORM.md)
+- [Evidence-backed ecosystem compatibility](COMPATIBILITY.md)
 - [Project status and maturity](PROJECT_STATUS.md)
 - [Real-world evidence program](REAL_WORLD_EVIDENCE.md)
 - [Installation](getting-started/installation.md)
-- [Architecture](ARCHITECTURE.md)
+- [Detailed runtime architecture](ARCHITECTURE.md)
 - [API surface](API_REFERENCE.md)
-- [Repository roadmap](../ROADMAP.md)
-- [Contributing](../CONTRIBUTING.md)
 
-## Platform at a glance
+## One platform, many ecosystems
+
+neurOS should integrate established neuroscience software rather than replace it.
 
 ```text
-hardware / datasets / replay
-          |
-          v
-      Source plugins
-          |
-          v
+BrainFlow / LSL / datasets
+           |
+           v
        SignalFrame
-          |
-          v
-      RuntimeGraph
+           |
+           +-----------> MNE / scientific interop
+           |
+           v
+       RuntimeGraph
  source -> transform -> fusion -> decoder -> sink
-          |                       |
-          |                       +-> DecoderOutput + embedding
-          |
- timing / quality / recording / replay / provenance
-          |
-          +----------------------------+
-          |                            |
-          v                            v
- model + transfer ecosystem           ORION
- models | foundation | mechint     tokenization | representation
- source reliability                adaptation | personalization
+           |                       |
+           |                       +-> DecoderOutput / representation
+           |
+ timing / queues / recording / replay / quality
+           |
+           +-------------+-------------------+
+                         |                   |
+                         v                   v
+                       ORION              Evidence
+                 representation +      benchmarks +
+                    adaptation          qualification
+                         \                   /
+                          +--------+--------+
+                                   v
+                                 Studio
 ```
 
-Every runtime edge has explicit capacity and overflow policy. Runtime snapshots expose queue loss/high-water metrics and node latency/failure statistics. Live and replay sources use the same executor.
+Compatibility is machine-readable:
 
-## Config-first operation
+```bash
+neuros compatibility
+neuros compatibility mne --json
+neuros compatibility --status planned --json
+```
+
+A supported integration must point to executable evidence. Planned integrations cannot claim a qualification tier.
+
+## Quick runtime
 
 ```bash
 neuros doctor --json
@@ -53,9 +75,9 @@ neuros validate configs/examples/mock_bci.yaml --json
 neuros run configs/examples/mock_bci.yaml --duration 2 --json
 ```
 
-Configuration is versioned and resolved through Python entry-point plugins. Kernel code does not need to import concrete hardware or decoder packages.
+Configuration is versioned and resolved through entry-point plugins. Standard `Pipeline` facades compile to the same native `RuntimeGraph` executor used by the config-first path.
 
-## Recording and replay
+## Record once, replay everywhere
 
 ```bash
 neuros record configs/examples/mock_bci.yaml \
@@ -69,64 +91,65 @@ neuros replay /tmp/session \
   --json
 ```
 
-The canonical neurOS archive preserves exact sequence, timing, quality, and provenance semantics. NWB and Zarr are optional interoperability exports.
+The canonical archive preserves sequence, timing, quality, provenance, configuration identity, runtime metrics, and frame integrity. NWB and Zarr remain interoperability exports rather than alternate runtime authorities.
 
-## Decoder and representation ecosystem
+## MNE bridge
 
-`neuros-models` owns faithful task-specific decoders, logits/embeddings, stable analysis surfaces, and model-side metadata. Its deep decoders use an explicit PyTorch implementation rather than environment-dependent algorithm substitution.
-
-```bash
-neuros-models list
-neuros-models list --mechint-ready
-neuros-models show eeg-conformer
-```
-
-`neuros-foundation` owns discovery, adapter capability metadata, representation probes, split/protocol-aware comparisons, and pre-model real-world evidence manifests across neural foundation-model ecosystems. Catalog presence is not treated as proof that a model is locally runnable or independently reproduced.
+MNE is the first direct scientific object bridge under the convergence architecture:
 
 ```bash
-neuros-foundation evidence
-neuros-foundation evidence --role longitudinal_bci
+pip install "neuros[interop-mne]"
 ```
 
-`neuros-sourceweigher` owns source/domain reliability estimation and transfer-risk-aware fusion. It can consume representations without making model packages depend on its algorithms.
+```python
+from neuros.interop import frames_from_raw, raw_from_signal_frames, stream_descriptor_from_raw
 
-`neuros-mechint` owns causal intervention, faithfulness, held-out evidence, replication, and evidence-artifact contracts. Its v1 release explicitly separates software readiness from empirical evidence completion.
+raw = ...
+descriptor = stream_descriptor_from_raw(raw, stream_id="subject-01/eeg")
+frames = tuple(frames_from_raw(raw, stream_id=descriptor.stream_id, chunk_samples=256))
+reconstructed = raw_from_signal_frames(frames, descriptor=descriptor)
+```
+
+The adapter preserves channel identity and sampling rate, records explicit array-axis semantics, propagates absolute measurement timing when MNE provides it, and refuses ambiguous geometry rather than guessing.
+
+## Evidence before breadth
+
+The repository separates evidence into progressively stronger responsibilities:
+
+```text
+software contract
+      -> integration
+      -> real-dataset evidence
+      -> hardware qualification
+      -> closed-loop qualification
+      -> clinical evidence
+```
+
+The longitudinal EEG program already establishes frozen subject/session/run-aware evaluation and real MOABB dataset lanes. The next goal is not to add dozens of algorithms. It is to make the same evidence authority work across external model ecosystems, ORION representations, transfer methods, hardware sessions, and mechanistic interventions.
 
 ## ORION
 
-ORION is the neural-intelligence layer. Its initial tokenization work uses explicit spike provenance and a controlled benchmark across:
+ORION is the neural-intelligence plane. Current stable work begins with explicit neural tokenization and representation contracts, while research packages explore learned encoders, transfer, source reliability, adaptation, and native foundation models.
 
-- event tokens,
-- binned counts,
-- relative-ISI WAIT/SPIKE tokens,
-- burst/pause/rebound tokens,
-- synchrony packets,
-- vector-quantized motifs,
-- population assemblies.
+Promotion should require deployment-unit-disjoint evidence. A representation that wins on random windows but fails across subjects or sessions is not a useful ORION representation.
 
-The synthetic benchmark uses separately seeded train/test sessions, labeled neural motifs, timing jitter, and unit dropout. Fit-requiring tokenizers never auto-fit during evaluation.
+## Studio
 
-Real-world promotion is intentionally modality-specific. Current event/spike tokenizers should first be evaluated on population-neural sources whose released representation supports those semantics; EEG requires its own explicit ORION input/token contract rather than an implicit translation from spike tokens.
+`neuros-ui` is being treated as the implementation substrate for Studio, not as an alternate orchestration framework. Studio should ultimately show:
 
-## Quality and evidence
+- runtime graph state and queue pressure;
+- synchronized live/replayed signals and quality flags;
+- latency and failure telemetry;
+- decoder probabilities, uncertainty, and embeddings;
+- ORION representations and adaptation events;
+- source/transfer weights;
+- benchmark and qualification evidence;
+- replay-to-replay regression comparisons.
 
-The repository separates evidence rather than collapsing it into one green badge:
-
-- kernel contracts across supported Python versions,
-- end-to-end BCI/config execution,
-- persistent replay and storage interoperability,
-- deterministic scientific/latency gates,
-- model/mechanistic-analysis contracts,
-- foundation-model interoperability regressions,
-- deployment-unit-disjoint real-world evidence contracts,
-- SourceWeigher regressions,
-- ORION tokenization contracts and synthetic benchmark evidence,
-- mech-int scientific software gates and executed tutorials.
-
-Hardware qualification, completed real-dataset benchmark results, closed-loop qualification, and clinical evidence remain stronger and separate tiers.
+The runtime remains authoritative. Studio observes it.
 
 ## Repository organization
 
-Current product documentation stays under `docs/`. Historical plans and session notes live under `docs/archive/` and should not be treated as current API or performance documentation.
+The workspace remains internally modular because dependency boundaries matter. Users should think in the four public surfaces rather than memorizing every internal distribution.
 
-Research notebooks, papers, and exploratory code live under `experiments/` or research packages. A research artifact becomes a supported example or stable ORION component only after it satisfies the relevant contract and evidence gates.
+Research notebooks and exploratory algorithms remain under `experiments/` or research packages until they satisfy a stable contract and evidence gate. Historical migration notes live under `docs/archive/` and are retained for provenance, not as current architecture guidance.

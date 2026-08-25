@@ -1,0 +1,122 @@
+name: Ecosystem Compatibility
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-models/**"
+      - "packages/neuros-foundation/**"
+      - "tests/test_compatibility_registry.py"
+      - "tests/test_compatibility_cli.py"
+      - "tests/test_mne_interop.py"
+      - "tests/test_autoconfig.py"
+      - "tests/test_benchmarks.py"
+      - "scripts/check_dependency_boundaries.py"
+      - "docs/PLATFORM.md"
+      - "docs/COMPATIBILITY.md"
+      - "mkdocs.yml"
+      - ".github/workflows/compatibility-ci.yml"
+  push:
+    branches:
+      - main
+      - "agent/**"
+    paths:
+      - "packages/neuros/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-models/**"
+      - "packages/neuros-foundation/**"
+      - "tests/test_compatibility_registry.py"
+      - "tests/test_compatibility_cli.py"
+      - "tests/test_mne_interop.py"
+      - "tests/test_autoconfig.py"
+      - "tests/test_benchmarks.py"
+      - "scripts/check_dependency_boundaries.py"
+      - "docs/PLATFORM.md"
+      - "docs/COMPATIBILITY.md"
+      - "mkdocs.yml"
+      - ".github/workflows/compatibility-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compatibility-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-boundaries:
+    name: Kernel dependency firewall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Prove neuros-core remains ecosystem-independent
+        run: python scripts/check_dependency_boundaries.py
+
+  registry-contract:
+    name: Compatibility registry and composition regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install local SDK stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros[dev]"
+      - name: Run compatibility and moved-composition regressions
+        run: |
+          pytest -q \
+            tests/test_compatibility_registry.py \
+            tests/test_compatibility_cli.py \
+            tests/test_autoconfig.py \
+            tests/test_benchmarks.py
+      - name: Exercise installed CLI inventory
+        run: |
+          neuros compatibility --json
+          neuros compatibility mne --json
+          neuros compatibility --status planned --json
+
+  mne-interop:
+    name: MNE object interoperability / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install local SDK with MNE bridge
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros[interop-mne]"
+          python -m pip install pytest pytest-asyncio
+      - name: Verify MNE Raw and SignalFrame round trips
+        run: pytest -q tests/test_mne_interop.py
+      - name: Clean import smoke
+        run: |
+          python - <<'PY'
+          import mne
+          import neuros
+          from neuros.interop import frames_from_raw, raw_from_signal_frames, stream_descriptor_from_raw
+          print("mne", mne.__version__)
+          print("neuros", neuros.__file__)
+          print(frames_from_raw, raw_from_signal_frames, stream_descriptor_from_raw)
+          PY
