@@ -1,14 +1,16 @@
 """Faithful optional adapters for selected Braindecode raw-window decoders.
 
 neurOS owns the runtime/evidence boundary; Braindecode owns these published model
-implementations and their Skorch-based training loop.  This module therefore
+implementations and their Skorch-based training loop. This module therefore
 wraps upstream objects rather than copying architectures or training code.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import inspect
+import json
 import sys
 import time
 from typing import Any, Mapping
@@ -89,6 +91,13 @@ class BraindecodeDecoder(BaseModel):
                 "model_options cannot override neurOS geometry parameters: "
                 + ", ".join(conflicts)
             )
+        try:
+            json.dumps(options, sort_keys=True, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "model_options must be JSON-serializable so the adapter configuration "
+                "can be fingerprinted reproducibly"
+            ) from exc
 
         self.model_name = _SUPPORTED_MODELS[key]
         self.n_channels = int(n_channels)
@@ -110,6 +119,37 @@ class BraindecodeDecoder(BaseModel):
     @property
     def capabilities(self) -> DecoderCapabilities:
         return DecoderCapabilities(probabilities=True)
+
+    def configuration(self) -> dict[str, Any]:
+        """Return the stable adapter/training configuration used for evidence identity."""
+
+        return {
+            "adapter": "BraindecodeDecoder",
+            "model_name": self.model_name,
+            "n_channels": self.n_channels,
+            "n_times": self.n_times,
+            "n_classes": self.n_classes,
+            "sample_rate_hz": self.sample_rate_hz,
+            "model_options": dict(self.model_options),
+            "criterion": "torch.nn.CrossEntropyLoss",
+            "optimizer": "torch.optim.AdamW",
+            "learning_rate": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "n_epochs": self.n_epochs,
+            "batch_size": self.batch_size,
+            "device": self.device,
+            "random_state": self.random_state,
+        }
+
+    @property
+    def configuration_fingerprint(self) -> str:
+        payload = json.dumps(
+            self.configuration(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
     @staticmethod
     def _require_upstream() -> tuple[Any, Any, Any]:
@@ -272,6 +312,8 @@ class BraindecodeDecoder(BaseModel):
                 "sample_rate_hz": self.sample_rate_hz,
                 "upstream_training": "EEGClassifier",
                 "hidden_preprocessing": False,
+                "adapter_config_fingerprint": self.configuration_fingerprint,
+                "random_state": self.random_state,
             },
         )
 
