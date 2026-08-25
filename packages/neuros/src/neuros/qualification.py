@@ -18,7 +18,7 @@ import platform
 import shutil
 import sys
 import uuid
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from importlib import metadata as importlib_metadata
@@ -60,8 +60,20 @@ _RELEVANT_PACKAGES = (
 
 
 def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return _jsonable(asdict(value))
+    """Convert evidence values without deepcopying immutable mapping proxies.
+
+    ``dataclasses.asdict`` recursively deep-copies values. neurOS contracts use
+    immutable ``MappingProxyType`` metadata by design, and deep-copying those
+    objects fails. Evidence serialization instead walks dataclass fields and
+    mappings directly so the digest reflects values without mutating or copying
+    their authority wrappers.
+    """
+
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, np.ndarray):
@@ -287,6 +299,13 @@ async def qualify_config(
             overwrite=False,
             on_output=live_outputs,
         )
+        # ``record_config`` correctly reports the path it wrote to, but this run
+        # occurs inside a temporary staging directory that is renamed once the
+        # bundle has verified. Persist only portable bundle-relative references.
+        record_summary = dict(record_summary)
+        record_summary["archive"] = "session"
+        record_summary["exports"] = {}
+
         archive_summary = inspect_archive(session_root, verify_hashes=True)
         replay_snapshot = await replay_archive(
             session_root,
