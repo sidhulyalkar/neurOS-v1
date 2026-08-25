@@ -1,0 +1,77 @@
+name: Neural Window Contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-core/**"
+      - "packages/neuros-models/**"
+      - "tests/test_neural_windows.py"
+      - "tests/test_neural_window_model_integration.py"
+      - ".github/workflows/neural-window-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/neuros-core/**"
+      - "packages/neuros-models/**"
+      - "tests/test_neural_windows.py"
+      - "tests/test_neural_window_model_integration.py"
+      - ".github/workflows/neural-window-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  window-contracts:
+    name: Neural window contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install kernel test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+      - name: Verify window, runtime, config, and plugin contracts
+        run: |
+          pytest -q \
+            tests/test_neural_windows.py \
+            tests/test_runtime_executor.py \
+            tests/test_plugin_registry.py \
+            tests/test_config_schema.py
+
+  installed-window-model:
+    name: Installed EEGNet neural-window integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install kernel and raw-window model stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e "packages/neuros-models[pytorch]"
+      - name: Verify installed window transform entry point
+        run: |
+          python - <<'PY'
+          from importlib.metadata import entry_points
+
+          transforms = {entry.name: entry for entry in entry_points(group="neuros.transforms")}
+          assert "window" in transforms, sorted(transforms)
+          transform_type = transforms["window"].load()
+          transform = transform_type(window_samples=64, stride_samples=32)
+          assert transform.spec.window_samples == 64
+          assert transform.spec.stride_samples == 32
+          PY
+      - name: Run a maintained raw-window decoder through RuntimeGraph
+        run: pytest -q tests/test_neural_window_model_integration.py
