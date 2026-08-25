@@ -69,6 +69,7 @@ nav:
   - SDK:
       - Installation: getting-started/installation.md
       - Neural Windows: NEURAL_WINDOWS.md
+      - Braindecode: BRAINDECODE.md
       - API Surface: API_REFERENCE.md
   - Research Extensions: RESEARCH_EXTENSIONS.md
   - Historical Archive: archive/README.md
