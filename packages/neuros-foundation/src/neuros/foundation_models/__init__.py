@@ -27,6 +27,13 @@ from neuros.foundation_models.longitudinal_authority import (
     processed_data_sha256,
 )
 from neuros.foundation_models.longitudinal_baseline import CSPCaseResult, run_csp_case
+from neuros.foundation_models.longitudinal_external import (
+    ExternalTaskDecoderCaseResult,
+    ExternalTaskDecoderMethodSpec,
+    PairedTaskPerformanceResult,
+    pair_task_performance,
+    run_external_task_decoder_case,
+)
 from neuros.foundation_models.longitudinal_ladder import (
     LADDER_METHODS,
     SOURCEWEIGHER_METHODS,
@@ -186,6 +193,11 @@ __all__ = [
     "TaskDecoderMethodSpec",
     "TaskDecoderCaseResult",
     "run_task_decoder_case",
+    "ExternalTaskDecoderMethodSpec",
+    "ExternalTaskDecoderCaseResult",
+    "PairedTaskPerformanceResult",
+    "run_external_task_decoder_case",
+    "pair_task_performance",
     "FrozenTransferMethodSpec",
     "FrozenTransferCaseResult",
     "PreparedFrozenEncoderCase",

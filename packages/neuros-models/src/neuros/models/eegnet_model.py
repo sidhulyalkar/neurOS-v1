@@ -32,6 +32,7 @@ class EEGNetModel(TorchDecoderModel):
         separable_kernel: int = 15,
         dropout: float = 0.25,
         learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
         n_epochs: int = 20,
         batch_size: int = 32,
         device: str = "auto",
@@ -44,6 +45,7 @@ class EEGNetModel(TorchDecoderModel):
         super().__init__(
             n_classes=n_classes,
             learning_rate=learning_rate,
+            weight_decay=weight_decay,
             n_epochs=n_epochs,
             batch_size=batch_size,
             device=device,
