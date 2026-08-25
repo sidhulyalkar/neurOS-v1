@@ -11,16 +11,22 @@ from neuros.processing.feature_extraction import (  # noqa: F401
 )
 from neuros.processing.filters import BandpassFilter, SmoothingFilter  # noqa: F401
 from neuros.processing.operators import FeatureTransform  # noqa: F401
+from neuros.processing.windowing import (  # noqa: F401
+    DiscontinuityPolicy,
+    SlidingWindowTransform,
+)
 
 __all__ = [
     "AdaptiveThreshold",
     "AudioFeatureExtractor",
     "BandPowerExtractor",
     "BandpassFilter",
+    "DiscontinuityPolicy",
     "FeatureTransform",
     "HeartRateExtractor",
     "HormoneExtractor",
     "RespirationExtractor",
     "SkinConductanceExtractor",
+    "SlidingWindowTransform",
     "SmoothingFilter",
 ]

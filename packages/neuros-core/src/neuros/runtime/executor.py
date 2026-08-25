@@ -19,7 +19,7 @@ from typing import Any, AsyncIterator, Callable
 
 import numpy as np
 
-from neuros.contracts import DecoderOutput, SignalFrame
+from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, TransformEmission
 from neuros.errors import ProcessingError
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from neuros.runtime.lifecycle import RuntimeEvent, RuntimeState
@@ -276,7 +276,12 @@ class RuntimeExecutor:
             started = time.perf_counter_ns()
             result = await self._invoke(node, item)
             self._node_stats[node.node_id].observe(time.perf_counter_ns() - started)
-            if result is not None and node.kind is not NodeKind.SINK:
+            if result is None or node.kind is NodeKind.SINK:
+                continue
+            if isinstance(result, TransformEmission):
+                for emitted in result.items:
+                    await self._emit(node, emitted)
+            else:
                 await self._emit(node, result)
 
     async def _run_fusion(self, node: RuntimeNode) -> None:
@@ -355,10 +360,29 @@ class RuntimeExecutor:
         if node.kind is NodeKind.DECODER:
             if not hasattr(operator, "infer"):
                 raise TypeError(f"Decoder node {node.node_id} lacks infer()")
-            value = np.asarray(item.data if isinstance(item, SignalFrame) else item)
-            if value.ndim == 1:
-                value = value.reshape(1, -1)
-            return await self._invoke_callable(node, operator.infer, value)
+            if isinstance(item, NeuralWindow):
+                value = item.as_batch()
+            else:
+                value = np.asarray(item.data if isinstance(item, SignalFrame) else item)
+                if value.ndim == 1:
+                    value = value.reshape(1, -1)
+            result = await self._invoke_callable(node, operator.infer, value)
+            if isinstance(item, NeuralWindow) and isinstance(result, DecoderOutput):
+                result = replace(
+                    result,
+                    metadata={
+                        **dict(result.metadata),
+                        "neuros_stream_id": item.stream_id,
+                        "neuros_window_id": item.window_id,
+                        "window_start_time_ns": item.start_time_ns,
+                        "window_end_time_ns": item.end_time_ns,
+                        "window_sample_rate_hz": item.sample_rate_hz,
+                        "window_channel_names": item.channel_names,
+                        "source_sequence_ids": item.source_sequence_ids,
+                        "window_quality": int(item.quality),
+                    },
+                )
+            return result
         if node.kind is NodeKind.SINK:
             if not hasattr(operator, "write"):
                 raise TypeError(f"Sink node {node.node_id} lacks write()")
