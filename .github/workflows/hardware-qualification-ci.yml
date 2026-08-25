@@ -1,0 +1,108 @@
+name: neurOS hardware qualification contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/src/neuros/hardware_qualification.py"
+      - "tests/test_hardware_qualification.py"
+      - "docs/HARDWARE_QUALIFICATION.md"
+      - ".github/workflows/hardware-qualification-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros/src/neuros/hardware_qualification.py"
+      - "tests/test_hardware_qualification.py"
+      - "docs/HARDWARE_QUALIFICATION.md"
+      - ".github/workflows/hardware-qualification-ci.yml"
+
+jobs:
+  hardware-evidence-contracts:
+    name: Hardware evidence contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install BCI evidence profile
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile bci --test-tools
+      - name: Run hardware evidence contracts
+        run: pytest -q tests/test_hardware_qualification.py
+      - name: Prove CI cannot self-award hardware qualification
+        run: |
+          python - <<'PY'
+          from neuros.hardware_qualification import (
+              HardwareQualificationThresholds,
+              evaluate_hardware_qualification,
+              manifest_from_mapping,
+          )
+
+          raw = {
+              "schema_version": 1,
+              "evidence_id": "ci-perfect-synthetic",
+              "measurement_origin": "synthetic_contract_test",
+              "qualification_bundle_sha256": "a" * 64,
+              "physical_run": False,
+              "synthetic_contract_test": True,
+              "device": {
+                  "manufacturer": "Synthetic",
+                  "device": "CI Fixture",
+                  "board_id": "fixture",
+                  "firmware_version": "0",
+                  "acquisition_library": "neuros-test",
+                  "acquisition_library_version": "1",
+                  "operating_system": "ci",
+                  "transport": "memory",
+              },
+              "signal": {
+                  "channel_names": ["C3", "C4"],
+                  "channel_types": ["eeg", "eeg"],
+                  "units": ["uV", "uV"],
+                  "nominal_sample_rate_hz": 250.0,
+                  "measured_sample_rate_hz": 250.0,
+              },
+              "timing": {
+                  "timestamp_source": "synthetic",
+                  "clock_domain": "synchronized",
+                  "offset_p50_ms": 0.0,
+                  "offset_p95_ms": 0.0,
+                  "drift_ppm": 0.0,
+                  "uncertainty_p95_ms": 0.0,
+              },
+              "reliability": {
+                  "duration_s": 3600.0,
+                  "expected_samples": 900000,
+                  "observed_samples": 900000,
+                  "queue_accepted": 900000,
+                  "queue_dropped": 0,
+                  "reconnect_attempts": 1,
+                  "reconnect_successes": 1,
+                  "reconnect_tested": True,
+              },
+              "latency": {
+                  "source_to_decision_p50_ms": 1.0,
+                  "source_to_decision_p95_ms": 2.0,
+                  "source_to_decision_p99_ms": 3.0,
+                  "sample_count": 10000,
+              },
+          }
+          manifest = manifest_from_mapping(raw)
+          result = evaluate_hardware_qualification(
+              manifest,
+              HardwareQualificationThresholds(require_reconnect_test=True),
+              verified_qualification_bundle_sha256="a" * 64,
+          )
+          assert result.thresholds_pass is True
+          assert result.qualification_bundle_verified is True
+          assert result.physical_evidence is False
+          assert result.hardware_qualified is False
+          assert result.claim_boundary["closed_loop_qualified"] is False
+          assert result.claim_boundary["clinical_qualified"] is False
+          PY
