@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +105,12 @@ def _parse_args() -> argparse.Namespace:
         help="Verify a sealed qualification bundle and replay its computational path",
     )
     reproduce_parser.add_argument("bundle", type=str)
+    reproduce_parser.add_argument(
+        "--expected-sha256",
+        type=str,
+        default=None,
+        help="Optional externally pinned qualification root digest",
+    )
     _add_json_flag(reproduce_parser)
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect a neurOS session archive")
@@ -179,13 +185,18 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return {key: _jsonable(item) for key, item in asdict(value).items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if hasattr(value, "items"):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
@@ -305,7 +316,12 @@ def main() -> None:
         if args.command == "reproduce":
             from neuros.qualification import reproduce_qualification
 
-            result = cli_api.asyncio.run(reproduce_qualification(args.bundle))
+            result = cli_api.asyncio.run(
+                reproduce_qualification(
+                    args.bundle,
+                    expected_sha256=args.expected_sha256,
+                )
+            )
             _emit(result, machine=args.json)
             return
 
