@@ -54,6 +54,7 @@ nav:
   - Platform:
       - Four Public Surfaces: PLATFORM.md
       - Ecosystem Compatibility: COMPATIBILITY.md
+      - Qualification Bundles: QUALIFICATION.md
       - Architecture: ARCHITECTURE.md
       - Project Status: PROJECT_STATUS.md
   - Real-World Evidence:

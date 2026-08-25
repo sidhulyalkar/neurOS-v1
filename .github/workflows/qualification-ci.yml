@@ -1,0 +1,60 @@
+name: neurOS qualification bundles
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/src/neuros/qualification.py"
+      - "packages/neuros/src/neuros/cli/app.py"
+      - "tests/test_qualification_bundle.py"
+      - "configs/examples/mock_bci.yaml"
+      - ".github/workflows/qualification-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros/src/neuros/qualification.py"
+      - "packages/neuros/src/neuros/cli/app.py"
+      - "tests/test_qualification_bundle.py"
+      - "configs/examples/mock_bci.yaml"
+      - ".github/workflows/qualification-ci.yml"
+
+jobs:
+  qualification-contracts:
+    name: Qualification contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install BCI qualification profile
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/bootstrap.py --profile bci --test-tools
+      - name: Run qualification contract suite
+        run: pytest -q tests/test_qualification_bundle.py
+      - name: Exercise public qualify and reproduce commands
+        run: |
+          OUT="${RUNNER_TEMP}/qualification"
+          neuros qualify configs/examples/mock_bci.yaml \
+            --output "${OUT}" \
+            --session-id ci \
+            --duration 0.05 \
+            --json
+          neuros reproduce "${OUT}" --json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "qualification"
+          manifest = json.loads((root / "manifest.json").read_text())
+          assert manifest["claim_boundary"]["runtime_record_replay_qualified"] is True
+          assert manifest["claim_boundary"]["hardware_qualified"] is False
+          assert manifest["claim_boundary"]["closed_loop_qualified"] is False
+          assert manifest["claim_boundary"]["clinical_qualified"] is False
+          PY
