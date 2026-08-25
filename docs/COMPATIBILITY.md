@@ -22,8 +22,8 @@ The registry lives in `neuros.compatibility` and is covered by contract tests. D
 | NWB / PyNWB | supported | export, session provenance | integration | neurOS archive remains authoritative for exact runtime replay semantics |
 | Zarr | supported | export, session provenance | integration | export interoperability, not a replacement runtime format |
 | MOABB | experimental | dataset adapter, longitudinal split authority, model ladder | real dataset | benchmark surface is still evolving; result claims remain protocol-specific |
+| Braindecode | experimental | neural-window model adapter, upstream training bridge, decoder bridge | integration | qualified 1.7 whitelist only; no real-dataset, stable mech-int, hardware, or closed-loop claim yet |
 | OpenBCI | indirect | reachable through BrainFlow | none | no named OpenBCI configuration is hardware-qualified |
-| Braindecode | planned | model/training/decoder bridge | none | do not copy the model zoo |
 | Meta NeuralBench | planned | isolated benchmark worker, evidence extension | none | upstream runtime requirements must stay outside the kernel |
 | DANDI | planned | dataset discovery, provenance | none | no support claim yet |
 | SpikeInterface | planned | invasive recording/analyzer bridge | none | no support claim yet |
@@ -113,7 +113,26 @@ See:
 
 ### Braindecode
 
-Braindecode should arrive as model and training adapters. A Braindecode model should produce the same `DecoderOutput` / representation contracts used by native neurOS models while retaining upstream model identity and configuration.
+Braindecode is now an **experimental integration**, backed by a dedicated optional-dependency qualification lane rather than by copied architectures. Install with:
+
+```bash
+pip install "neuros[braindecode]"
+```
+
+The initial qualified surface is deliberately narrow:
+
+- `EEGNet`
+- `EEGConformer`
+- `ShallowFBCSPNet`
+- `Deep4Net`
+
+All four are exercised against the canonical neurOS `(batch, channel, time)` window contract on the pinned Braindecode 1.7 line. EEGNet is additionally trained through the real upstream `EEGClassifier` path and executed through `SignalFrame -> NeuralWindow -> RuntimeGraph -> DecoderOutput` with window provenance retained.
+
+The adapter never silently resamples, pads, crops, filters, changes channel order, or constructs sensor geometry. It records upstream version identity and a deterministic adapter/training configuration fingerprint. Python 3.10 remains free of the optional Braindecode dependency.
+
+This is an **integration** claim, not a task-performance claim. Braindecode remains below real-dataset evidence until one of its adapters runs under the frozen neurOS longitudinal authority on a named public dataset. Stable mechanistic hook paths are also deliberately unclaimed until architecture/version-specific intervention surfaces are qualified.
+
+See [Braindecode interoperability](BRAINDECODE.md) for the full boundary.
 
 ### NeuralBench
 
