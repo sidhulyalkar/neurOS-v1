@@ -132,7 +132,54 @@ The compatibility lane establishes an **integration** claim when it is green:
 
 That does **not** establish model utility on a neuroscience task.
 
-Promotion to real-dataset evidence requires a named protocol with frozen subject/session/run separation, preprocessing, calibration budget, metrics, seeds, and upstream model configuration. The natural next target is the existing longitudinal MOABB model ladder.
+## Paired longitudinal evidence
+
+neurOS now has a dedicated paired evidence contract for comparing maintained native EEGNet with upstream Braindecode EEGNet without giving either implementation authority over the evaluation split.
+
+`run_external_task_decoder_case(...)` restores the same serialized `LongitudinalCaseAuthority` used by the native decoder lane. `pair_task_performance(...)` refuses to create a paired result unless both runs agree on the authority fingerprint, processed-data SHA-256, partition fingerprint, calibration-split fingerprint, class vocabulary, sample counts, and calibration-budget set.
+
+The pair records:
+
+- native and upstream learned-state SHA-256 values;
+- adapter/method fingerprints;
+- accuracy and balanced accuracy;
+- ROC-AUC where defined;
+- Brier score and expected calibration error;
+- fit and inference cost;
+- explicit sampling frequency;
+- whether representation or mechanistic evidence is actually available.
+
+Braindecode representation and mechanistic fields remain unavailable rather than being fabricated to match the richer native decoder schema.
+
+The real-data runner is:
+
+```bash
+python scripts/evidence/run_moabb_braindecode_pair.py \
+  --dataset kumar2024 \
+  --subjects 1 \
+  --model-seeds 101,503,1601 \
+  --budgets 0,1,2,5,10 \
+  --history-policy prior \
+  --fmin 8 \
+  --fmax 30 \
+  --resample 128 \
+  --epochs 20 \
+  --batch-size 32 \
+  --learning-rate 0.001 \
+  --weight-decay 0.0001 \
+  --device cpu \
+  --output evidence-run/study
+```
+
+It emits `study_manifest.json`, `split_authority.json`, native/external/paired run JSON, paired CSV results, a descriptive summary/report, and SHA-256 declarations for the complete bundle. Optimization seeds are collapsed within subject/session case before case-level summaries so repeated training seeds are not counted as independent deployment units.
+
+## Running the real-data study in GitHub Actions
+
+The manual workflow **neurOS Braindecode paired real-data study** exposes the study authority as explicit `workflow_dispatch` inputs. It supports the maintained longitudinal MOABB dataset keys `kumar2024`, `ma2020`, `lee2019-mi`, and `wang2026`.
+
+The workflow intentionally does not run a real dataset on every pull request. Pull requests execute only a dependency-light contract check that proves the runner remains discoverable without installing Braindecode. A manual study run installs the pinned Braindecode/MOABB stack, records Python/package/Git identity, downloads data through the existing MOABB path, executes the paired study, verifies every declared artifact hash and authority fingerprint, then uploads the complete bundle for 90 days.
+
+A green manual workflow is **execution evidence**, not an automatic scientific promotion. Before a result is summarized publicly, inspect the uploaded `study_manifest.json`, `split_authority.json`, `summary.json`, `report.md`, and per-run learned-state/configuration fingerprints. Multi-subject claims should use participant-aware repeated-measures inference rather than treating subject/session cases or optimization seeds as independent participants.
 
 ## Mechanistic interpretation boundary
 
