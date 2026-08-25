@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +89,30 @@ def _parse_args() -> argparse.Namespace:
     record_parser.add_argument("--show-outputs", action="store_true")
     _add_json_flag(record_parser)
 
+    qualify_parser = subparsers.add_parser(
+        "qualify",
+        help="Run, record, replay, and seal a reproducible qualification bundle",
+    )
+    qualify_parser.add_argument("config", type=str)
+    qualify_parser.add_argument("--output", type=str, required=True, help="Qualification bundle directory")
+    qualify_parser.add_argument("--session-id", type=str, default="qualification")
+    qualify_parser.add_argument("--duration", type=float, default=1.0)
+    qualify_parser.add_argument("--overwrite", action="store_true")
+    _add_json_flag(qualify_parser)
+
+    reproduce_parser = subparsers.add_parser(
+        "reproduce",
+        help="Verify a sealed qualification bundle and replay its computational path",
+    )
+    reproduce_parser.add_argument("bundle", type=str)
+    reproduce_parser.add_argument(
+        "--expected-sha256",
+        type=str,
+        default=None,
+        help="Optional externally pinned qualification root digest",
+    )
+    _add_json_flag(reproduce_parser)
+
     inspect_parser = subparsers.add_parser("inspect", help="Inspect a neurOS session archive")
     inspect_parser.add_argument("archive", type=str)
     inspect_parser.add_argument("--verify", action="store_true", help="Verify every frame SHA-256")
@@ -161,13 +185,18 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return {key: _jsonable(item) for key, item in asdict(value).items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, np.ndarray):
         return value.tolist()
     if isinstance(value, np.generic):
         return value.item()
     if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if hasattr(value, "items"):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
@@ -262,6 +291,35 @@ def main() -> None:
                     overwrite=args.overwrite,
                     export_formats=args.export,
                     on_output=callback,
+                )
+            )
+            _emit(result, machine=args.json)
+            return
+
+        if args.command == "qualify":
+            from neuros.qualification import qualify_config
+
+            if args.duration <= 0:
+                raise ConfigurationError("qualification duration must be positive")
+            result = cli_api.asyncio.run(
+                qualify_config(
+                    args.config,
+                    args.output,
+                    session_id=args.session_id,
+                    duration_s=args.duration,
+                    overwrite=args.overwrite,
+                )
+            )
+            _emit(result, machine=args.json)
+            return
+
+        if args.command == "reproduce":
+            from neuros.qualification import reproduce_qualification
+
+            result = cli_api.asyncio.run(
+                reproduce_qualification(
+                    args.bundle,
+                    expected_sha256=args.expected_sha256,
                 )
             )
             _emit(result, machine=args.json)

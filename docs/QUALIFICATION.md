@@ -1,0 +1,173 @@
+# Qualification Bundles
+
+`neurOS` qualification is evidence generation, not a badge generator.
+
+Version 1 deliberately qualifies one narrow property:
+
+> A declared neurOS runtime configuration was executed without runtime failure or queue loss, its exact `SignalFrame` inputs were recorded with integrity hashes, and the sealed recording reproduced the same canonical semantic decoder-output digest through replay.
+
+That is an **integration-level runtime/replay claim**. It is not automatically a real-dataset, hardware, closed-loop, or clinical claim.
+
+## Create a bundle
+
+```bash
+neuros qualify configs/examples/mock_bci.yaml \
+  --output qualification/mock \
+  --session-id mock-reference \
+  --duration 1.0
+```
+
+The command stages the bundle outside the final path, runs the live configuration, records the canonical input frames, verifies every recorded frame hash, replays the recording through the bundled configuration, requires zero runtime failures and zero queue drops in both runs, compares the canonical semantic decoder-output digest, seals every artifact with SHA-256, verifies the completed bundle, and only then publishes the final directory.
+
+Qualification also fails if no `SignalFrame`s or no decoder outputs were produced. An empty or lossy run is evidence of a problem, not a successful qualification.
+
+An existing destination is never replaced unless `--overwrite` is explicit.
+
+## Reproduce a bundle
+
+Basic structural verification and replay:
+
+```bash
+neuros reproduce qualification/mock
+```
+
+For externally anchored bundle identity, preserve the `bundle_sha256` emitted by `neuros qualify` outside the bundle and use it during reproduction:
+
+```bash
+neuros reproduce qualification/mock \
+  --expected-sha256 <published-bundle-sha256>
+```
+
+Reproduction happens in two stages:
+
+1. every sealed file hash, artifact size, artifact-set membership, bundle digest, and embedded session-frame hash is verified;
+2. only after integrity verification succeeds is the recorded session replayed through the bundled config and compared with the sealed semantic decoder-output digest.
+
+A modified file therefore fails before its contents can silently influence the reproduction result.
+
+### Integrity versus authenticity
+
+A self-contained hash index can prove that a bundle is internally consistent. By itself it cannot prove who authored that bundle, because an attacker able to rewrite every file could also rewrite an unanchored hash index.
+
+For provenance-sensitive exchange, publish or otherwise preserve `bundle_sha256` independently of the bundle and pass it back with `--expected-sha256`. The verifier then labels origin identity `externally_pinned` only when the computed root matches that outside value. A future signing layer can replace manual root pinning with public-key signatures without changing the underlying qualification schema.
+
+## Bundle layout
+
+```text
+qualification/
+├── manifest.json
+├── artifact_hashes.json
+├── config.yaml
+├── config.json
+├── environment.json
+├── compatibility.json
+├── devices.json
+├── clocks.json
+├── model.json
+├── runtime.json
+├── decoder_outputs.json
+└── session/
+    ├── manifest.json
+    ├── config.json
+    └── streams/...
+```
+
+### `manifest.json`
+
+The top-level authority for the qualification claim. It records:
+
+- qualification schema version;
+- bundle identity and creation time;
+- Git identity when available;
+- exact config-file SHA-256 and semantic config hash;
+- embedded archive identity;
+- record/replay integrity status;
+- canonical decoder-output digest;
+- the integrity/authenticity model;
+- the explicit claim boundary.
+
+All internal artifact references are bundle-relative. Temporary or host-local source config paths are normalized before the session enters the portable evidence bundle.
+
+### `artifact_hashes.json`
+
+Contains the byte size and SHA-256 of every other file in the bundle and a canonical root digest over the complete artifact index. Unexpected files are considered a mutation of the sealed evidence bundle and make verification fail.
+
+The root digest is emitted as `bundle_sha256`. Preserve it externally when authorship or distribution integrity matters.
+
+### `environment.json`
+
+Captures Python/platform identity and installed versions of neurOS plus relevant neuroscience/runtime ecosystems when present.
+
+### `compatibility.json`
+
+Records compatibility-registry entries for recognized external runtime integrations actually selected by the config, such as BrainFlow, LSL, or Braindecode. It does not promote their evidence tier.
+
+### `devices.json` and `clocks.json`
+
+Extract exact stream-descriptor evidence from the recorded session. These files are useful inputs to future hardware qualification, but their presence does not imply hardware qualification.
+
+### `model.json`
+
+Records the decoder config and any `ModelArtifactManifest` entries bound to the recorded session. If no promoted model artifact is bound, the bundle says so explicitly and does **not** claim learned-weight identity.
+
+### `runtime.json`
+
+Contains both the record and replay runtime snapshots, including node failure counts, queue acceptance/drop statistics, and node latency summaries.
+
+Version 1 promotes a bundle only when both record and replay finish in the `stopped` state with no node failure and no queue drops. This is intentionally stricter than merely completing the process.
+
+Latency is evidence in its own right. It is intentionally not mixed into semantic decoder identity because the duration of an inference call is expected to differ between the original run and replay.
+
+### `decoder_outputs.json`
+
+Stores only the canonical semantic output count/digest, not a second unbounded copy of every prediction. Version 1 uses SHA-256 over canonical JSONL serialization of decoder semantics: prediction, confidence/uncertainty, probability/logit/embedding values, model identity, and output metadata. The volatile `DecoderOutput.inference_time_ns` measurement is excluded from this semantic digest and remains represented by runtime/performance evidence instead.
+
+This means changing only measured execution time does not manufacture a reproducibility failure, while changing the actual model decision or representation does.
+
+## Claim boundary
+
+A successful v1 bundle sets:
+
+```text
+runtime_record_replay_qualified = true
+real_dataset_qualified          = false
+hardware_qualified              = false
+closed_loop_qualified           = false
+clinical_qualified              = false
+```
+
+This distinction is foundational. A software replay passing on a laptop does not demonstrate packet-loss behavior, device clock uncertainty, firmware correctness, wireless reliability, source-to-decision latency on named hardware, intervention safety, or clinical validity.
+
+## Hardware qualification is the next evidence tier
+
+A future named hardware profile should extend the same evidence object with measured fields such as:
+
+- physical device and board ID;
+- firmware and acquisition-library versions;
+- operating system and transport;
+- channel names/types/units and actual sampling rate;
+- source timestamp and clock domain;
+- measured clock offset/drift/uncertainty;
+- packet/sample loss and neurOS queue loss;
+- reconnect/recovery behavior;
+- sustained run duration;
+- source-to-decision p50/p95/p99 latency;
+- exact recording/replay integrity.
+
+Only a bundle containing those measurements under a named configuration should be eligible for `hardware_qualified = true`.
+
+## Why this matters
+
+The goal is to make neurOS results transportable as evidence. A collaborator should be able to receive a bundle and answer:
+
+- What configuration ran?
+- What exact neural frames entered the computational path?
+- Which software and ecosystem versions were installed?
+- Which device/timing metadata were actually observed?
+- Did queues drop data or nodes fail?
+- Was a promoted learned-weight artifact bound?
+- Can the computational path reproduce the same semantic decoder outputs from the recorded neural stream?
+- Is the bundle merely self-consistent, or does it match an independently pinned root digest?
+- What stronger claims are explicitly unsupported?
+
+That evidence contract is more valuable than a generic "pipeline completed successfully" flag and becomes the substrate for real-device, ORION, closed-loop, and eventually regulated qualification layers.
