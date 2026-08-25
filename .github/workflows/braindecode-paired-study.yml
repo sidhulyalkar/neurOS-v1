@@ -1,0 +1,233 @@
+name: neurOS Braindecode paired real-data study
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/braindecode-paired-study.yml"
+      - "scripts/evidence/run_moabb_braindecode_pair.py"
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: Public MOABB longitudinal dataset key
+        required: true
+        type: choice
+        default: kumar2024
+        options:
+          - kumar2024
+          - ma2020
+          - lee2019-mi
+          - wang2026
+      subjects:
+        description: Comma-separated MOABB subject IDs
+        required: true
+        type: string
+        default: "1"
+      held_out_sessions:
+        description: Optional comma-separated target sessions; blank uses every eligible target
+        required: false
+        type: string
+        default: ""
+      model_seeds:
+        description: Comma-separated paired optimization seeds
+        required: true
+        type: string
+        default: "101,503,1601"
+      budgets:
+        description: Labeled target-session calibration examples per class
+        required: true
+        type: string
+        default: "0,1,2,5,10"
+      history_policy:
+        description: Prior-only is prospective-style; all-other is symmetric cross-session
+        required: true
+        type: choice
+        default: prior
+        options:
+          - prior
+          - all-other
+      split_seed:
+        description: Base split/calibration seed
+        required: true
+        type: string
+        default: "2026"
+      evaluation_fraction:
+        description: Fraction of each held-out class frozen for final evaluation
+        required: true
+        type: string
+        default: "0.5"
+      fmin:
+        description: Lower preprocessing band edge in Hz
+        required: true
+        type: string
+        default: "8.0"
+      fmax:
+        description: Upper preprocessing band edge in Hz
+        required: true
+        type: string
+        default: "30.0"
+      resample:
+        description: Explicit paired sample rate in Hz
+        required: true
+        type: string
+        default: "128.0"
+      epochs:
+        description: Fixed epochs for both implementations
+        required: true
+        type: string
+        default: "20"
+      batch_size:
+        description: Fixed training batch size for both implementations
+        required: true
+        type: string
+        default: "32"
+      learning_rate:
+        description: Fixed AdamW learning rate for both implementations
+        required: true
+        type: string
+        default: "0.001"
+      weight_decay:
+        description: Fixed AdamW weight decay for both implementations
+        required: true
+        type: string
+        default: "0.0001"
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-contract:
+    name: Paired-study workflow contract
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install dependency-light study contracts
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation
+      - name: Verify study runner remains discoverable without Braindecode
+        run: |
+          python scripts/evidence/run_moabb_braindecode_pair.py --help > /tmp/pair-help.txt
+          grep -q -- "--resample" /tmp/pair-help.txt
+          grep -q -- "--weight-decay" /tmp/pair-help.txt
+          python - <<'PY'
+          import importlib.util
+          assert importlib.util.find_spec("braindecode") is None
+          PY
+
+  study:
+    name: ${{ inputs.dataset }} / ${{ inputs.history_policy }} / native-vs-Braindecode EEGNet
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    concurrency:
+      group: braindecode-paired-study-${{ inputs.dataset }}-${{ inputs.subjects }}-${{ inputs.history_policy }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install paired real-data evidence stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-models[braindecode]"
+          python -m pip install -e "packages/neuros-foundation[evidence,braindecode-evidence]"
+
+      - name: Record execution environment
+        run: |
+          mkdir -p evidence-run
+          python -VV > evidence-run/python.txt
+          python -m pip freeze > evidence-run/pip-freeze.txt
+          git rev-parse HEAD > evidence-run/git-revision.txt
+          printf '%s\n' "${{ inputs.dataset }}" > evidence-run/requested-dataset.txt
+          printf '%s\n' "${{ inputs.subjects }}" > evidence-run/requested-subjects.txt
+          printf '%s\n' "${{ inputs.model_seeds }}" > evidence-run/requested-model-seeds.txt
+          printf '%s\n' "${{ inputs.budgets }}" > evidence-run/requested-budgets.txt
+
+      - name: Run real MOABB paired study
+        env:
+          MNE_DATA: ${{ runner.temp }}/mne-data
+        shell: bash
+        run: |
+          EXTRA=()
+          if [[ -n "${{ inputs.held_out_sessions }}" ]]; then
+            EXTRA+=(--held-out-sessions "${{ inputs.held_out_sessions }}")
+          fi
+          python scripts/evidence/run_moabb_braindecode_pair.py \
+            --dataset "${{ inputs.dataset }}" \
+            --subjects "${{ inputs.subjects }}" \
+            --model-seeds "${{ inputs.model_seeds }}" \
+            --budgets "${{ inputs.budgets }}" \
+            --history-policy "${{ inputs.history_policy }}" \
+            --split-seed "${{ inputs.split_seed }}" \
+            --evaluation-fraction "${{ inputs.evaluation_fraction }}" \
+            --fmin "${{ inputs.fmin }}" \
+            --fmax "${{ inputs.fmax }}" \
+            --resample "${{ inputs.resample }}" \
+            --epochs "${{ inputs.epochs }}" \
+            --batch-size "${{ inputs.batch_size }}" \
+            --learning-rate "${{ inputs.learning_rate }}" \
+            --weight-decay "${{ inputs.weight_decay }}" \
+            --device cpu \
+            --output evidence-run/study \
+            "${EXTRA[@]}"
+
+      - name: Verify immutable paired evidence bundle
+        run: |
+          for name in \
+            study_manifest.json \
+            split_authority.json \
+            native_runs.json \
+            external_runs.json \
+            paired_runs.json \
+            paired_results.csv \
+            summary.json \
+            report.md \
+            artifact_hashes.json; do
+            test -s "evidence-run/study/$name"
+          done
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("evidence-run/study")
+          declared = json.loads((root / "artifact_hashes.json").read_text())["sha256"]
+          for name, expected in declared.items():
+              actual = hashlib.sha256((root / name).read_bytes()).hexdigest()
+              assert actual == expected, (name, actual, expected)
+
+          manifest = json.loads((root / "study_manifest.json").read_text())
+          summary = json.loads((root / "summary.json").read_text())
+          authority = json.loads((root / "split_authority.json").read_text())
+          assert manifest["study"] == "native_vs_braindecode_eegnet_longitudinal_pair"
+          assert manifest["evidence_tier"] == "real_dataset"
+          assert manifest["authority_fingerprints"] == [
+              item["authority_fingerprint"] for item in authority["cases"]
+          ]
+          assert summary["descriptive_only"] is True
+          assert summary["paired_case_set_constant_across_budgets"] is True
+          print("paired real-data bundle verified")
+          PY
+
+      - name: Upload immutable paired evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: braindecode-paired-${{ inputs.dataset }}-${{ inputs.history_policy }}-${{ github.run_id }}
+          path: evidence-run/
+          if-no-files-found: error
+          retention-days: 90
