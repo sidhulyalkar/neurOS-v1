@@ -29,13 +29,14 @@ import numpy as np
 import yaml
 
 from neuros.compatibility import compatibility_payload
+from neuros.contracts import DecoderOutput
 from neuros.quality import BenchmarkManifest
 from neuros.recording import SessionArchiveReader, canonical_hash
 
 from .cli.recording_commands import inspect_archive, record_config, replay_archive
 
 QUALIFICATION_SCHEMA_VERSION = 1
-_OUTPUT_DIGEST_ALGORITHM = "sha256-canonical-jsonl-v1"
+_OUTPUT_DIGEST_ALGORITHM = "sha256-semantic-decoder-jsonl-v1"
 _RELEVANT_PACKAGES = (
     "neuros",
     "neuros-core",
@@ -99,6 +100,23 @@ def _canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _canonical_output_payload(output: Any) -> Any:
+    """Return the replay-stable semantic identity of one runtime output.
+
+    ``DecoderOutput.inference_time_ns`` measures how long this particular
+    execution took. It is intentionally expected to change between live and
+    replay execution, so including it in decision identity would make every
+    honest performance measurement look like a reproducibility failure.
+    Latency remains preserved separately in runtime telemetry.
+    """
+
+    payload = _jsonable(output)
+    if isinstance(output, DecoderOutput):
+        payload = dict(payload)
+        payload.pop("inference_time_ns", None)
+    return payload
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(
         json.dumps(_jsonable(value), indent=2, sort_keys=True, default=str) + "\n",
@@ -137,7 +155,7 @@ class _OutputDigest:
         self.count = 0
 
     async def __call__(self, output: Any) -> None:
-        self._digest.update(_canonical_bytes(output))
+        self._digest.update(_canonical_bytes(_canonical_output_payload(output)))
         self._digest.update(b"\n")
         self.count += 1
 
