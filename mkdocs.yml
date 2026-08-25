@@ -68,6 +68,7 @@ nav:
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
   - SDK:
       - Installation: getting-started/installation.md
+      - Neural Windows: NEURAL_WINDOWS.md
       - API Surface: API_REFERENCE.md
   - Research Extensions: RESEARCH_EXTENSIONS.md
   - Historical Archive: archive/README.md
