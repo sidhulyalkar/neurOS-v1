@@ -5,6 +5,7 @@ on:
     paths:
       - "packages/neuros-foundation/**"
       - "packages/neuros-models/**"
+      - "scripts/evidence/run_moabb_braindecode_pair.py"
       - ".github/workflows/braindecode-evidence-ci.yml"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - "packages/neuros-foundation/**"
       - "packages/neuros-models/**"
+      - "scripts/evidence/run_moabb_braindecode_pair.py"
       - ".github/workflows/braindecode-evidence-ci.yml"
 
 permissions:
@@ -45,9 +47,11 @@ jobs:
           assert version.startswith("1.7."), version
           print(version)
           PY
-      - name: Run paired authority evidence contracts
+      - name: Run paired authority and artifact-pipeline contracts
         run: |
-          pytest -q packages/neuros-foundation/tests/test_braindecode_longitudinal.py
+          pytest -q \
+            packages/neuros-foundation/tests/test_braindecode_longitudinal.py \
+            packages/neuros-foundation/tests/test_braindecode_pair_runner.py
 
   python310-firewall:
     name: Python 3.10 remains external-evidence dependency free
