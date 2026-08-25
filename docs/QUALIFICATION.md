@@ -68,6 +68,8 @@ The top-level authority for the qualification claim. It records:
 - canonical decoder-output digest;
 - the explicit claim boundary.
 
+All internal artifact references are bundle-relative. Temporary staging paths are never sealed into the portable manifest.
+
 ### `artifact_hashes.json`
 
 Contains the byte size and SHA-256 of every other file in the bundle and a canonical digest over the complete artifact index. Unexpected files are considered a mutation of the sealed evidence bundle and make verification fail.
@@ -92,9 +94,13 @@ Records the decoder config and any `ModelArtifactManifest` entries bound to the 
 
 Contains both the record and replay runtime snapshots, including node failure counts, queue acceptance/drop statistics, and node latency summaries.
 
+Latency is evidence in its own right. It is intentionally not mixed into semantic decoder identity because the duration of an inference call is expected to differ between the original run and replay.
+
 ### `decoder_outputs.json`
 
-Stores only the canonical output count/digest, not a second unbounded copy of every prediction. Version 1 uses SHA-256 over canonical JSONL serialization.
+Stores only the canonical semantic output count/digest, not a second unbounded copy of every prediction. Version 1 uses SHA-256 over canonical JSONL serialization of decoder semantics: prediction, confidence/uncertainty, probability/logit/embedding values, model identity, and output metadata. The volatile `DecoderOutput.inference_time_ns` measurement is excluded from this semantic digest and remains represented by runtime/performance evidence instead.
+
+This means changing only measured execution time does not manufacture a reproducibility failure, while changing the actual model decision or representation does.
 
 ## Claim boundary
 
@@ -138,7 +144,7 @@ The goal is to make neurOS results transportable as evidence. A collaborator sho
 - Which device/timing metadata were actually observed?
 - Did queues drop data or nodes fail?
 - Was a promoted learned-weight artifact bound?
-- Can the computational path reproduce the same outputs from the recorded neural stream?
+- Can the computational path reproduce the same semantic decoder outputs from the recorded neural stream?
 - What stronger claims are explicitly unsupported?
 
 That evidence contract is more valuable than a generic "pipeline completed successfully" flag and becomes the substrate for real-device, ORION, closed-loop, and eventually regulated qualification layers.
