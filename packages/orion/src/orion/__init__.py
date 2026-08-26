@@ -1,5 +1,15 @@
 """ORION neural intelligence interfaces and tokenization research layer."""
 
+from .adaptation import (
+    AdaptationApplication,
+    AdaptationAuthority,
+    AdaptationDecision,
+    AdaptationEvaluation,
+    AdaptationOutcome,
+    AdaptationPhase,
+    ArtifactIdentity,
+    GovernedAdaptationProposal,
+)
 from .contracts import (
     AdaptationProposal,
     AdaptiveDecoder,
@@ -21,12 +31,20 @@ from .tokenization import (
 )
 
 __all__ = [
+    "AdaptationApplication",
+    "AdaptationAuthority",
+    "AdaptationDecision",
+    "AdaptationEvaluation",
+    "AdaptationOutcome",
+    "AdaptationPhase",
     "AdaptationProposal",
     "AdaptiveDecoder",
+    "ArtifactIdentity",
     "AssemblyTokenizer",
     "BinnedCountTokenizer",
     "BurstTokenizer",
     "EventSpikeTokenizer",
+    "GovernedAdaptationProposal",
     "ISIRelativeTimeTokenizer",
     "NeuralEncoder",
     "NeuroTokenBatch",
