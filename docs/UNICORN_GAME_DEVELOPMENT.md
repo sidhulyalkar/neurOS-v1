@@ -136,6 +136,24 @@ The public raw-UDP interface transports `CNT` as float32. IEEE-754 float32 guara
 
 At 250 samples/s, that arithmetic corresponds to roughly 18.64 hours of uninterrupted counting. This **does not** establish physical device reset or wrap behavior. Because the public source does not document those semantics, the reference guard fails closed once exact step inference is no longer justified.
 
+### Explicit acquisition epochs
+
+The guard also does **not** infer a counter reset from a backward CNT value. That could be a late packet, a transport reorder, a device restart, or undocumented wrap behavior. Guessing would turn ambiguity into false authority.
+
+When the application itself knows that a new acquisition session has begun, explicitly start a new receiver epoch:
+
+```python
+guard.begin_new_epoch()
+```
+
+or in the dependency-free C# client:
+
+```csharp
+unicorn.BeginNewEpoch();
+```
+
+This clears the counter high-water and any precision-ambiguity state, revokes stream liveness and BCI authority, and requires the configured healthy recovery streak again. Stale traffic alone never triggers this reset automatically.
+
 ---
 
 ## 4. Unity / Godot C# integration
@@ -332,7 +350,8 @@ At minimum, exercise:
 12. stale source;
 13. mixed transport torture;
 14. controller-only continuity while BCI authority is false;
-15. deterministic replay across different acquisition chunk sizes.
+15. deterministic replay across different acquisition chunk sizes;
+16. explicit receiver epoch restart after a known acquisition reconnect.
 
 Passing this matrix means the software is harder to surprise. It does not validate human BCI performance.
 
