@@ -12,6 +12,8 @@ on:
       - "packages/neuros-foundation/tests/test_spectral_alignment.py"
       - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
       - "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py"
+      - "tests/test_compatibility_registry.py"
+      - "examples/neuroai/ngclearn_predictive_coding.py"
       - "scripts/evidence/verify_snap_upstream.py"
       - "docs/NEUROAI_ECOSYSTEM.md"
       - "docs/COMPATIBILITY.md"
@@ -29,6 +31,8 @@ on:
       - "packages/neuros-foundation/tests/test_spectral_alignment.py"
       - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
       - "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py"
+      - "tests/test_compatibility_registry.py"
+      - "examples/neuroai/ngclearn_predictive_coding.py"
       - "scripts/evidence/verify_snap_upstream.py"
       - "docs/NEUROAI_ECOSYSTEM.md"
       - "docs/COMPATIBILITY.md"
@@ -128,6 +132,10 @@ jobs:
           pytest -q \
             packages/neuros-foundation/tests/test_ngclearn_bridge.py \
             packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py
+      - name: Exercise public predictive-coding example
+        run: |
+          python examples/neuroai/ngclearn_predictive_coding.py > "${RUNNER_TEMP}/ngclearn-pc-example.json"
+          test -s "${RUNNER_TEMP}/ngclearn-pc-example.json"
       - name: Report exact upstream identity
         run: |
           python - <<'PY'

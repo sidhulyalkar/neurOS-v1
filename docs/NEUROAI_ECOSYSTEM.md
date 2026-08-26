@@ -17,7 +17,7 @@ This distinction prevents research-code environments from becoming hidden kernel
 
 ## SNAP-derived invariant spectral evidence
 
-The Chung NeuroAI Lab's SNAP work introduces a spectral vocabulary for relating representation geometry to neural or task targets. neurOS now exposes a dependency-light NumPy implementation through:
+The Chung NeuroAI Lab's SNAP work introduces a spectral vocabulary for relating representation geometry to neural or task targets. neurOS exposes a dependency-light NumPy implementation through:
 
 ```python
 from neuros.foundation_models import spectral_alignment_evidence
@@ -27,30 +27,19 @@ print(evidence.effective_dimension)
 print(evidence.residual_target_power)
 ```
 
-The v1 evidence object records:
-
-- positive representation eigenvalues;
-- target power captured by each positive-rank mode;
-- cumulative captured target power;
-- participation-ratio effective dimension;
-- an effective dimension of remaining task power;
-- aggregate target power outside the representation span;
-- input and target SHA-256 identities;
-- a deterministic evidence digest.
+The evidence object records positive representation eigenvalues, target power captured by positive-rank modes, cumulative captured target power, effective dimensions, aggregate residual target power, input/target SHA-256 identities, and a deterministic evidence digest.
 
 ### Why neurOS does not expose every SNAP null-space mode
 
-For a rank-deficient sample kernel, the eigenvectors associated with zero eigenvalues are not unique. Two correct linear-algebra backends may rotate that null space and therefore assign different target power to individual zero-eigenvalue vectors even though the represented subspace is identical.
+For a rank-deficient sample kernel, the eigenvectors associated with zero eigenvalues are not unique. Two correct linear-algebra backends may rotate that null space and assign different target power to individual zero-eigenvalue vectors even though the represented subspace is identical.
 
-neurOS treats that as an evidence-design problem rather than hiding it behind a tolerance. Positive-rank modes remain explicit and all target power outside their span is aggregated into one invariant residual quantity.
+neurOS therefore leaves positive-rank modes explicit and aggregates all target power outside their span into one invariant residual quantity. The dedicated CI lane also checks out a pinned SNAP revision and executes the authors' real `snap/metrics.py` against the neurOS implementation for invariant quantities.
 
-That gives the evidence a stable interpretation across valid eigensolver implementations.
-
-The current public claim is a **software-contract numerical-method claim**. It does not imply that SNAP's paper results were reproduced, that a model is biologically aligned, or that a representation is mechanistically equivalent to a brain circuit.
+The current public claim is a **numerical method / upstream conformance claim**. It does not imply that SNAP's published experiments were reproduced, that a model is biologically aligned, or that a representation is mechanistically equivalent to a brain circuit.
 
 ## ngc-learn interoperability
 
-`ngc-learn` is an actively maintained JAX toolkit for computational neuroscience and biologically plausible NeuroAI, including graded neural dynamics, spiking cells, predictive-coding building blocks, Hebbian/STDP synapses, and neural input encoders.
+`ngc-learn` is a JAX toolkit for computational neuroscience and biologically plausible NeuroAI, including graded neural dynamics, spiking cells, predictive-coding building blocks, and Hebbian/STDP synapses.
 
 neurOS keeps it optional:
 
@@ -58,7 +47,9 @@ neurOS keeps it optional:
 pip install "neuros-foundation[ngclearn]"
 ```
 
-The first qualified upstream surface is intentionally narrow: the **ngc-learn 3.2.x `RateCell`**.
+The qualified upstream surface is deliberately narrower than the upstream library.
+
+### RateCell execution
 
 ```python
 from neuros.foundation_models import NgcLearnRateCellTransform
@@ -71,31 +62,81 @@ transform = NgcLearnRateCellTransform(
 result = transform.transform(samples, sample_rate_hz=250.0)
 ```
 
-The bridge records:
+This surface records exact ngc-learn/JAX identity, explicit time-by-channel geometry, integration step, parameters, and deterministic input/output/evidence hashes. It performs no hidden resampling, filtering, normalization, padding, fitting, or channel reordering.
 
-- exact ngc-learn version;
-- exact JAX version and backend;
-- JAX x64 state when observable;
-- upstream component identity;
-- time-by-channel input and output geometry;
-- sample rate and derived integration step;
-- RateCell parameters and seed;
-- input/output hashes and an evidence digest.
+### Predictive reconstruction
 
-It performs **no hidden resampling, filtering, normalization, padding, fitting, or channel reordering**.
+neurOS now also qualifies an **inference-only fixed-weight predictive-coding circuit** using real ngc-learn 3.2 components:
 
-The integration CI exercises the real upstream package. neurOS does not infer support for all of ngc-learn from one successful component test.
+```text
+input target x -> GaussianErrorCell e0 -> transpose feedback E -> latent RateCell z
+                    ^                                         |
+                    |                                         v
+                    +----------- fixed generative W <---------+
+```
 
-### Planned ngc-learn evidence ladder
+```python
+from neuros.foundation_models import NgcLearnPredictiveCodingTransform
 
-1. RateCell upstream execution and geometry;
-2. an explicit predictive-coding circuit with frozen dynamics/evidence semantics;
-3. spiking-cell and STDP/Hebbian learning contracts;
-4. real neural-data evaluation under deployment-unit-disjoint protocols;
-5. comparison against ORION representations and adaptation strategies;
-6. closed-loop qualification only if a complete sensing-to-action system is actually measured.
+pc = NgcLearnPredictiveCodingTransform(
+    latent_dim=4,
+    settling_steps=30,
+    seed=7,
+)
+result = pc.transform(samples, sample_rate_hz=250.0)
 
-Each step must land with its own evidence before the compatibility claim is promoted.
+latents = result.values
+reconstruction = result.reconstruction
+print(result.evidence.error_reduction_fraction)
+```
+
+Each observation begins from a reset circuit. The observation is clamped as the `GaussianErrorCell` target; the latent `RateCell` iteratively changes under residual feedback; a fixed generative `StaticSynapse` reconstructs the input; and the feedback matrix is explicitly tied to the transpose of that fixed generative matrix.
+
+The result records:
+
+- exact ngc-learn and JAX runtime identity;
+- actual `RateCell`, `GaussianErrorCell`, and `StaticSynapse` class identities;
+- latent and reconstruction geometry;
+- settling count, settling timestep, membrane constant, prior, activation, and integration method;
+- reset-per-observation and tied-transpose-feedback semantics;
+- input, weight, latent, reconstruction, and error-trajectory SHA-256 identities;
+- initial/final reconstruction MSE and reduction fraction;
+- fraction of observations that improve during settling.
+
+The real-upstream CI contract goes beyond object construction. With an identity generative dictionary, the installed ngc-learn 3.2 circuit must reduce known reconstruction error by more than 90%, and repeated executions must be bit-identical after reset. That behavior passed on the qualified Python 3.10 and 3.11 lanes.
+
+The circuit does **not** learn its weights. That is intentional. Fixed weights make inference dynamics, state reset, geometry, and provenance independently testable before introducing another source of state mutation.
+
+### Current ngc-learn evidence ladder
+
+1. **Qualified:** RateCell upstream execution and geometry.
+2. **Qualified:** fixed-weight predictive reconstruction with iterative Gaussian residual feedback.
+3. **Not yet qualified:** Hebbian/STDP synaptic adaptation and explicit adaptation/evaluation authority.
+4. **Not yet qualified:** spiking-network representation contracts.
+5. **Not yet qualified:** real neural-data utility under deployment-unit-disjoint evaluation.
+6. **Not yet qualified:** comparison against ORION under matched downstream capacity and calibration budgets.
+7. **Not yet qualified:** hardware or closed-loop behavior.
+
+This ordering matters. A working predictive-coding circuit is not evidence that biologically local learning improves a BCI, and neither is evidence of a biological mechanism.
+
+## Why predictive coding matters to ORION
+
+The value of the ngc-learn bridge is not merely adding another model family. It gives ORION a scientifically different representation baseline.
+
+A conventional frozen encoder, an ORION tokenizer/encoder, and a predictive-coding latent can eventually be compared under the same evaluation authority for:
+
+- held-out task utility;
+- user-specific calibration examples/minutes;
+- cross-session and cross-subject transfer;
+- representation effective dimension and task-aligned spectral power;
+- residual target power;
+- artifact, channel, montage, and jitter sensitivity;
+- uncertainty calibration;
+- latency and memory;
+- intervention/adaptation stability;
+- immutable data/model/evidence identity.
+
+That allows a useful question: **does iterative error-correcting inference provide transferable neural structure, and if so, does it reduce calibration cost compared with simpler or learned alternatives?**
 
 ## Other evaluated NeuroAI projects
 
@@ -139,34 +180,13 @@ reference method / upstream package
  evidence conformance artifact
 ```
 
-A future `EvidenceConformanceManifest` should bind:
-
-- method name and citation;
-- upstream repository and revision;
-- license;
-- upstream environment identity;
-- neurOS operator/revision;
-- fixture/data hashes;
-- numerical tolerances or exact semantic rules;
-- comparison result;
-- explicit claim boundary.
+A future `EvidenceConformanceManifest` should bind method/citation, upstream repository and revision, license, upstream environment, neurOS operator/revision, fixture/data hashes, numerical semantics/tolerances, comparison result, and explicit claim boundary.
 
 This is the difference between saying **"neurOS has an implementation"** and saying **"this implementation has executable evidence connecting it to the referenced method."**
 
 ## ORION connection
 
-ORION should consume this ecosystem through stable neurOS contracts rather than bespoke research scripts. A future ORION representation card should pair task performance and calibration cost with evidence such as:
-
-- spectral effective dimension;
-- task-aligned mode power;
-- residual target power;
-- cross-session and cross-subject geometry;
-- domain leakage;
-- montage/device robustness;
-- causal intervention stability;
-- uncertainty calibration;
-- runtime latency;
-- immutable dataset/model/evidence identities.
+ORION should consume this ecosystem through stable neurOS contracts rather than bespoke research scripts. A future ORION representation card should pair task performance and calibration cost with spectral geometry, cross-session/subject invariance, domain leakage, montage/device robustness, causal/adaptation stability, uncertainty, runtime, and immutable identities.
 
 The research objective remains practical: achieve the same or better held-out neural performance with materially less user-specific calibration, while showing *why* the representation transfers and where the claim stops.
 
