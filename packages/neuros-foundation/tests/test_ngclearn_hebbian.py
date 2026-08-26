@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neuros.foundation_models.ngclearn_bridge import _array_sha256
+from neuros.foundation_models.ngclearn_bridge import _array_sha256, _matrix
 from neuros.foundation_models.ngclearn_hebbian import (
     HEBBIAN_PC_METHOD_ID,
     NgcLearnHebbianPredictiveCoding,
@@ -89,7 +89,9 @@ def test_real_upstream_hebbian_adaptation_changes_complete_state():
     assert before.weights_sha256 != after.weights_sha256
     assert before.optimizer_sha256 != after.optimizer_sha256
     assert result.evidence.weight_delta_l2 > 0.0
-    assert result.evidence.adaptation_input_sha256 == _array_sha256(samples[2:])
+    # Evidence identity is defined on the canonical float64 time x channel matrix
+    # that the ngc-learn bridge actually consumes, not the caller's source dtype.
+    assert result.evidence.adaptation_input_sha256 == _array_sha256(_matrix(samples[2:]))
 
     boundary = result.evidence.to_dict()["claim_boundary"]
     assert boundary["hebbian_synapse_executed"] is True
