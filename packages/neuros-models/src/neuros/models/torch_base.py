@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 from abc import abstractmethod
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -145,6 +146,47 @@ class TorchDecoderModel(BaseModel):
         if not self.is_trained:
             raise RuntimeError("Model has not been trained. Call train() first.")
 
+    def snapshot_state(
+        self,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Capture exact parameters, buffers, RNG state, and training provenance.
+
+        The returned object is a data-only ``TorchDecoderStateSnapshot``. Its
+        ``parameter_state_sha256`` preserves the existing longitudinal learned-
+        state hash semantics; ``learning_state_sha256`` additionally binds RNG
+        state for exact stochastic fine-tuning rollback.
+        """
+
+        from neuros.models.artifacts import snapshot_torch_decoder_state
+
+        return snapshot_torch_decoder_state(self, metadata=metadata)
+
+    def restore_state(self, snapshot: Any) -> None:
+        """Restore a compatible snapshot after validating the complete state geometry."""
+
+        from neuros.models.artifacts import restore_torch_decoder_state
+
+        restore_torch_decoder_state(self, snapshot)
+
+    def export_artifact(
+        self,
+        output: str | Path,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """Write a non-pickle JSON + NumPy decoder state artifact directory."""
+
+        from neuros.models.artifacts import write_torch_decoder_artifact
+
+        return write_torch_decoder_artifact(
+            self,
+            output,
+            metadata=metadata,
+            overwrite=overwrite,
+        )
 
     def infer(self, X: np.ndarray) -> DecoderOutput:
         """Run one representation pass and return logits/probabilities/embedding together."""
