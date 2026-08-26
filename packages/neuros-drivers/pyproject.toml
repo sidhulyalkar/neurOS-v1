@@ -43,6 +43,7 @@ test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
 
 [project.entry-points."neuros.sources"]
 mock = "neuros.drivers.mock_driver:MockDriver"
+synthetic_eeg = "neuros.drivers.synthetic_eeg_driver:SyntheticEEGDriver"
 brainflow = "neuros.drivers.brainflow_driver:BrainFlowDriver"
 lsl = "neuros.drivers.lsl_driver:LSLDriver"
 dataset = "neuros.drivers.dataset_driver:DatasetDriver"

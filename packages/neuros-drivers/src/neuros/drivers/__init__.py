@@ -7,6 +7,13 @@ from neuros.drivers.base_driver import BaseDriver  # noqa: F401
 from neuros.drivers.brainflow_driver import BrainFlowDriver  # noqa: F401
 from neuros.drivers.lsl_driver import LSLDriver  # noqa: F401
 from neuros.drivers.mock_driver import MockDriver  # noqa: F401
+from neuros.drivers.synthetic_eeg import (  # noqa: F401
+    ArtifactKind,
+    SyntheticEEGBlock,
+    SyntheticEEGConfig,
+    SyntheticEEGGenerator,
+)
+from neuros.drivers.synthetic_eeg_driver import SyntheticEEGDriver  # noqa: F401
 
 # additional drivers
 from neuros.drivers.dataset_driver import DatasetDriver  # noqa: F401
