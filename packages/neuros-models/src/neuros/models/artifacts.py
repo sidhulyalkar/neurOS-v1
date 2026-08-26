@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ import numpy as np
 
 ARTIFACT_SCHEMA_VERSION = 1
 ARTIFACT_KIND = "neuros-torch-decoder-state"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 _CONFIG_FIELDS = (
     "n_channels",
@@ -117,6 +119,12 @@ def _canonical_sha256(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _sha256_string(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+        raise ValueError(f"{name} must be a 64-character lowercase SHA-256 hex digest")
+    return value
+
+
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -133,7 +141,10 @@ def _readonly_array(name: str, value: Any, *, require_uint8: bool = False) -> np
         raise TypeError(f"{name} must use a numeric or boolean dtype")
     if require_uint8 and array.dtype != np.uint8:
         raise TypeError(f"{name} must use uint8 dtype")
-    if np.issubdtype(array.dtype, np.floating) and not np.isfinite(array).all():
+    if (
+        np.issubdtype(array.dtype, np.floating)
+        or np.issubdtype(array.dtype, np.complexfloating)
+    ) and not np.isfinite(array).all():
         raise ValueError(f"{name} contains NaN or infinity")
     result = np.ascontiguousarray(array).copy()
     result.setflags(write=False)
@@ -156,9 +167,15 @@ def _tensor_content_sha256(name: str, array: np.ndarray) -> str:
 def parameter_state_sha256_from_tensors(tensors: Mapping[str, np.ndarray]) -> str:
     """Hash tensors with the exact legacy longitudinal state-hash semantics."""
 
+    if not isinstance(tensors, Mapping) or not tensors:
+        raise ValueError("tensors must be a non-empty mapping")
     digest = hashlib.sha256()
     for name in sorted(tensors):
+        if not isinstance(name, str) or not name:
+            raise ValueError("tensor names must be non-empty strings")
         array = np.ascontiguousarray(np.asarray(tensors[name]))
+        if array.dtype.hasobject:
+            raise TypeError(f"tensor {name!r} cannot use object dtype")
         digest.update(name.encode("utf-8"))
         digest.update(str(array.dtype).encode("ascii"))
         digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
@@ -173,22 +190,29 @@ def learning_state_sha256(
     cuda_rng_states: Sequence[np.ndarray],
     is_trained: bool,
 ) -> str:
+    parameter_hash = _sha256_string("parameter_state_sha256", parameter_state_sha256)
+    if not isinstance(is_trained, bool):
+        raise ValueError("is_trained must be a boolean")
+    cpu = _readonly_array("cpu_rng_state", cpu_rng_state, require_uint8=True)
+    cuda = tuple(
+        _readonly_array(f"cuda_rng_states[{index}]", value, require_uint8=True)
+        for index, value in enumerate(cuda_rng_states)
+    )
     digest = hashlib.sha256()
     digest.update(b"neuros.torch-learning-state.v1\0")
-    digest.update(parameter_state_sha256.encode("ascii"))
+    digest.update(parameter_hash.encode("ascii"))
     digest.update(b"\0cpu\0")
-    cpu = np.ascontiguousarray(cpu_rng_state)
     digest.update(cpu.tobytes(order="C"))
-    for index, state in enumerate(cuda_rng_states):
+    for index, state in enumerate(cuda):
         digest.update(f"\0cuda:{index}\0".encode("ascii"))
-        digest.update(np.ascontiguousarray(state).tobytes(order="C"))
+        digest.update(state.tobytes(order="C"))
     digest.update(b"\0trained\0")
     digest.update(b"1" if is_trained else b"0")
     return digest.hexdigest()
 
 
 def resolved_torch_decoder_config(model: Any) -> dict[str, Any]:
-    """Return the explicit constructor-relevant configuration we can validate."""
+    """Return explicit constructor/training configuration used for restore checks."""
 
     result: dict[str, Any] = {}
     for name in _CONFIG_FIELDS:
@@ -200,6 +224,24 @@ def resolved_torch_decoder_config(model: Any) -> dict[str, Any]:
         if isinstance(value, (str, bool, int, float)) or value is None:
             result[name] = _jsonable(value)
     return result
+
+
+def torch_decoder_input_schema(model: Any) -> dict[str, Any]:
+    """Describe the maintained input contract without serializing executable code."""
+
+    manifest = model.analysis_manifest()
+    axes = tuple(str(value) for value in manifest.input_axes)
+    schema: dict[str, Any] = {
+        "axes": list(axes),
+        "rank": len(axes),
+        "dtype": "float32",
+    }
+    if hasattr(model, "n_channels"):
+        schema["channel_count"] = int(model.n_channels)
+    if "time" in axes:
+        schema["time_samples"] = None
+        schema["time_axis_variable"] = True
+    return schema
 
 
 def _state_arrays(model: Any) -> dict[str, np.ndarray]:
@@ -227,12 +269,14 @@ class TorchDecoderStateSnapshot:
     model_type: str
     model_version: str
     resolved_config: Mapping[str, Any]
+    input_schema: Mapping[str, Any]
     analysis_manifest_fingerprint: str
     tensors: Mapping[str, np.ndarray]
     cpu_rng_state: np.ndarray
     cuda_rng_states: tuple[np.ndarray, ...] = ()
     is_trained: bool = False
     training_history: tuple[Mapping[str, float], ...] = ()
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     parameter_state_sha256: str | None = None
     learning_state_sha256: str | None = None
@@ -252,13 +296,22 @@ class TorchDecoderStateSnapshot:
             or not self.analysis_manifest_fingerprint.strip()
         ):
             raise ValueError("analysis_manifest_fingerprint must be a non-empty string")
+        if not isinstance(self.is_trained, bool):
+            raise ValueError("is_trained must be a boolean")
         if not isinstance(self.tensors, Mapping) or not self.tensors:
             raise ValueError("tensors must be a non-empty mapping")
 
         config = _freeze_json(self.resolved_config)
+        input_schema = _freeze_json(self.input_schema)
+        provenance = _freeze_json(self.provenance)
         metadata = _freeze_json(self.metadata)
-        if not isinstance(config, Mapping) or not isinstance(metadata, Mapping):
-            raise TypeError("resolved_config and metadata must be mappings")
+        if not all(
+            isinstance(value, Mapping)
+            for value in (config, input_schema, provenance, metadata)
+        ):
+            raise TypeError(
+                "resolved_config, input_schema, provenance, and metadata must be mappings"
+            )
 
         normalized_tensors: dict[str, np.ndarray] = {}
         for raw_name, value in self.tensors.items():
@@ -292,26 +345,35 @@ class TorchDecoderStateSnapshot:
             history.append(MappingProxyType(normalized_row))
 
         parameter_hash = parameter_state_sha256_from_tensors(normalized_tensors)
-        if self.parameter_state_sha256 is not None and self.parameter_state_sha256 != parameter_hash:
-            raise ValueError("parameter_state_sha256 does not match snapshot tensors")
+        if self.parameter_state_sha256 is not None:
+            expected_parameter_hash = _sha256_string(
+                "parameter_state_sha256", self.parameter_state_sha256
+            )
+            if expected_parameter_hash != parameter_hash:
+                raise ValueError("parameter_state_sha256 does not match snapshot tensors")
         learning_hash = learning_state_sha256(
             parameter_state_sha256=parameter_hash,
             cpu_rng_state=cpu,
             cuda_rng_states=cuda,
-            is_trained=bool(self.is_trained),
+            is_trained=self.is_trained,
         )
-        if self.learning_state_sha256 is not None and self.learning_state_sha256 != learning_hash:
-            raise ValueError("learning_state_sha256 does not match snapshot learning state")
+        if self.learning_state_sha256 is not None:
+            expected_learning_hash = _sha256_string(
+                "learning_state_sha256", self.learning_state_sha256
+            )
+            if expected_learning_hash != learning_hash:
+                raise ValueError("learning_state_sha256 does not match snapshot learning state")
 
         object.__setattr__(self, "model_type", self.model_type.strip())
         object.__setattr__(self, "model_version", self.model_version.strip())
         object.__setattr__(self, "resolved_config", config)
+        object.__setattr__(self, "input_schema", input_schema)
+        object.__setattr__(self, "provenance", provenance)
         object.__setattr__(self, "metadata", metadata)
         object.__setattr__(self, "tensors", MappingProxyType(normalized_tensors))
         object.__setattr__(self, "cpu_rng_state", cpu)
         object.__setattr__(self, "cuda_rng_states", cuda)
         object.__setattr__(self, "training_history", tuple(history))
-        object.__setattr__(self, "is_trained", bool(self.is_trained))
         object.__setattr__(self, "parameter_state_sha256", parameter_hash)
         object.__setattr__(self, "learning_state_sha256", learning_hash)
 
@@ -326,6 +388,7 @@ class TorchDecoderStateSnapshot:
             "model_type": self.model_type,
             "model_version": self.model_version,
             "resolved_config": _thaw_json(self.resolved_config),
+            "input_schema": _thaw_json(self.input_schema),
             "analysis_manifest_fingerprint": self.analysis_manifest_fingerprint,
             "is_trained": self.is_trained,
             "parameter_state_sha256": self.parameter_state_sha256,
@@ -355,6 +418,7 @@ class TorchDecoderStateSnapshot:
                 for index, array in enumerate(self.cuda_rng_states)
             ],
             "training_history": [dict(row) for row in self.training_history],
+            "provenance": _thaw_json(self.provenance),
             "metadata": _thaw_json(self.metadata),
         }
         if include_fingerprint:
@@ -365,6 +429,7 @@ class TorchDecoderStateSnapshot:
 def snapshot_torch_decoder_state(
     model: Any,
     *,
+    provenance: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> TorchDecoderStateSnapshot:
     torch, _ = model._torch()
@@ -380,12 +445,14 @@ def snapshot_torch_decoder_state(
         model_type=type(model).__name__,
         model_version=str(model.model_version),
         resolved_config=resolved_torch_decoder_config(model),
+        input_schema=torch_decoder_input_schema(model),
         analysis_manifest_fingerprint=model.analysis_manifest().fingerprint(),
         tensors=arrays,
         cpu_rng_state=cpu_rng,
         cuda_rng_states=cuda_rng,
         is_trained=bool(model.is_trained),
         training_history=history,
+        provenance={} if provenance is None else provenance,
         metadata={} if metadata is None else metadata,
     )
 
@@ -399,6 +466,8 @@ def _validate_restore_target(model: Any, snapshot: TorchDecoderStateSnapshot) ->
         raise ValueError("model version differs from snapshot")
     if resolved_torch_decoder_config(model) != _thaw_json(snapshot.resolved_config):
         raise ValueError("decoder configuration differs from snapshot")
+    if torch_decoder_input_schema(model) != _thaw_json(snapshot.input_schema):
+        raise ValueError("decoder input schema differs from snapshot")
     if model.analysis_manifest().fingerprint() != snapshot.analysis_manifest_fingerprint:
         raise ValueError("analysis-manifest identity differs from snapshot")
 
@@ -455,7 +524,11 @@ def restore_torch_decoder_state(model: Any, snapshot: TorchDecoderStateSnapshot)
     model.is_trained = snapshot.is_trained
     model.training_history = [dict(row) for row in snapshot.training_history]
 
-    restored = snapshot_torch_decoder_state(model, metadata=_thaw_json(snapshot.metadata))
+    restored = snapshot_torch_decoder_state(
+        model,
+        provenance=_thaw_json(snapshot.provenance),
+        metadata=_thaw_json(snapshot.metadata),
+    )
     if restored.parameter_state_sha256 != snapshot.parameter_state_sha256:
         raise RuntimeError("restored parameter state does not match snapshot SHA-256")
     if restored.learning_state_sha256 != snapshot.learning_state_sha256:
@@ -471,17 +544,27 @@ def write_torch_decoder_artifact(
     model_or_snapshot: Any,
     output: str | Path,
     *,
+    provenance: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Write a deterministic data-only decoder artifact directory."""
 
-    snapshot = (
-        model_or_snapshot
-        if isinstance(model_or_snapshot, TorchDecoderStateSnapshot)
-        else snapshot_torch_decoder_state(model_or_snapshot, metadata=metadata)
-    )
+    if isinstance(model_or_snapshot, TorchDecoderStateSnapshot):
+        if provenance is not None or metadata is not None:
+            raise ValueError(
+                "provenance/metadata cannot override an already-frozen snapshot"
+            )
+        snapshot = model_or_snapshot
+    else:
+        snapshot = snapshot_torch_decoder_state(
+            model_or_snapshot,
+            provenance=provenance,
+            metadata=metadata,
+        )
     root = Path(output)
+    if root.exists() and not root.is_dir():
+        raise FileExistsError(f"artifact output exists and is not a directory: {root}")
     if root.exists():
         if not overwrite and any(root.iterdir()):
             raise FileExistsError(f"refusing to overwrite non-empty artifact directory {root}")
@@ -564,7 +647,10 @@ def read_torch_decoder_artifact(path: str | Path) -> TorchDecoderStateSnapshot:
     expected_manifest_sha = manifest.get("artifact_manifest_sha256")
     without_hash = dict(manifest)
     without_hash.pop("artifact_manifest_sha256", None)
-    if not isinstance(expected_manifest_sha, str) or _canonical_sha256(without_hash) != expected_manifest_sha:
+    if (
+        not isinstance(expected_manifest_sha, str)
+        or _canonical_sha256(without_hash) != expected_manifest_sha
+    ):
         raise ValueError("artifact_manifest_sha256 does not match manifest content")
 
     specs = manifest.get("tensors")
@@ -611,7 +697,10 @@ def read_torch_decoder_artifact(path: str | Path) -> TorchDecoderStateSnapshot:
         array = _load_npy_checked(root, entry, name=f"CUDA RNG {index}")
         if str(array.dtype) != spec.get("dtype") or list(array.shape) != spec.get("shape"):
             raise ValueError(f"artifact CUDA RNG {index} dtype/shape mismatch")
-        if _tensor_content_sha256(f"cuda_rng_states[{index}]", array) != spec.get("content_sha256"):
+        if (
+            _tensor_content_sha256(f"cuda_rng_states[{index}]", array)
+            != spec.get("content_sha256")
+        ):
             raise ValueError(f"artifact CUDA RNG {index} content SHA-256 mismatch")
         cuda.append(array)
 
@@ -619,12 +708,14 @@ def read_torch_decoder_artifact(path: str | Path) -> TorchDecoderStateSnapshot:
         model_type=manifest.get("model_type"),
         model_version=manifest.get("model_version"),
         resolved_config=manifest.get("resolved_config"),
+        input_schema=manifest.get("input_schema"),
         analysis_manifest_fingerprint=manifest.get("analysis_manifest_fingerprint"),
         tensors=tensors,
         cpu_rng_state=cpu,
         cuda_rng_states=tuple(cuda),
         is_trained=manifest.get("is_trained"),
         training_history=tuple(manifest.get("training_history", ())),
+        provenance=manifest.get("provenance", {}),
         metadata=manifest.get("metadata", {}),
         parameter_state_sha256=manifest.get("parameter_state_sha256"),
         learning_state_sha256=manifest.get("learning_state_sha256"),
