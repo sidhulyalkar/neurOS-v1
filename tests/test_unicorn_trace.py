@@ -7,6 +7,7 @@ import pytest
 from neuros.drivers.unicorn_network_sim import decode_unicorn_udp_scan
 from neuros.drivers.unicorn_receiver_guard import FLOAT32_EXACT_INTEGER_MAX
 from neuros.drivers.unicorn_trace import (
+    UnicornRawUdpTraceSummary,
     analyze_unicorn_raw_udp_trace,
     compare_unicorn_trace_summaries,
     compare_unicorn_trace_to_nominal_contract,
@@ -29,6 +30,29 @@ def _set_counter(payload: bytes, counter: float) -> bytes:
     values = decode_unicorn_udp_scan(payload).astype(float)
     values[15] = counter
     return struct.pack("<17f", *values.tolist())
+
+
+def _summary(**overrides) -> UnicornRawUdpTraceSummary:
+    values = dict(
+        packet_count=10,
+        decoded_packet_count=10,
+        malformed_packet_count=0,
+        duration_s=0.036,
+        estimated_arrival_rate_hz=250.0,
+        mean_interarrival_ms=4.0,
+        p95_interarrival_ms=4.0,
+        first_counter=0,
+        last_counter=9,
+        counter_gap_events=0,
+        inferred_missing_packets=0,
+        duplicate_packets=0,
+        out_of_order_packets=0,
+        validation_zero_packets=0,
+        battery_min=90.0,
+        battery_max=90.0,
+    )
+    values.update(overrides)
+    return UnicornRawUdpTraceSummary(**values)
 
 
 def test_pristine_trace_reduces_to_shareable_metadata_without_raw_eeg():
@@ -91,7 +115,6 @@ def test_reordered_packet_repairs_transient_gap_instead_of_becoming_false_loss()
     assert summary.recovered_reordered_packets == summary.out_of_order_packets
     assert summary.inferred_missing_packets == 0
     assert summary.counter_epoch_ambiguous is False
-    # The strict nominal comparison still reports reordering rather than hiding it.
     assert compare_unicorn_trace_to_nominal_contract(summary).passed_diagnostic_checks is False
 
 
@@ -155,6 +178,21 @@ def test_trace_delta_report_is_descriptive_and_has_no_default_equivalence_thresh
     assert report["reference"]["source_kind"] == "synthetic"
     assert report["candidate"]["source_kind"] == "user_declared_physical"
     assert "No default tolerance" in report["evidence_boundary"]
+
+
+def test_trace_missing_fraction_uses_unique_packet_opportunities_not_duplicate_datagrams():
+    reference = _summary()
+    candidate = _summary(
+        packet_count=10,
+        decoded_packet_count=10,
+        duplicate_packets=2,
+        inferred_missing_packets=2,
+        counter_gap_events=1,
+    )
+    report = compare_unicorn_trace_summaries(reference, candidate).to_dict()
+    # 10 decoded datagrams - 2 duplicates + 2 unresolved counters = 10 unique
+    # packet opportunities, so unresolved loss is 2 / 10 rather than 2 / 12.
+    assert report["metrics"]["unresolved_missing_fraction_delta"] == pytest.approx(0.2)
 
 
 def test_malformed_payload_is_counted_but_never_persisted():
