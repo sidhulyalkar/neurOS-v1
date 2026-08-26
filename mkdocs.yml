@@ -68,6 +68,8 @@ nav:
       - Four Public Surfaces: PLATFORM.md
       - Synthetic BCI Arena: SYNTHETIC_BCI_ARENA.md
       - EEG World Models: EEG_WORLD_MODELS.md
+      - Unicorn Hardware Substitution: UNICORN_HYBRID_BLACK_SIMULATION_SUITE.md
+      - Unicorn Game Development: UNICORN_GAME_DEVELOPMENT.md
       - Ecosystem Compatibility: COMPATIBILITY.md
       - NeuroAI Ecosystem: NEUROAI_ECOSYSTEM.md
       - Qualification Bundles: QUALIFICATION.md
@@ -92,6 +94,7 @@ nav:
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
   - SDK:
+      - Plugin Authoring: PLUGIN_AUTHORING.md
       - Neural Windows: NEURAL_WINDOWS.md
       - Braindecode: BRAINDECODE.md
       - API Surface: API_REFERENCE.md
