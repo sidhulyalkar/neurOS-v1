@@ -213,6 +213,10 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
             "rate-cell-transform",
             "predictive-reconstruction",
             "iterative-error-feedback",
+            "hebbian-predictive-adaptation",
+            "adaptation-authority-binding",
+            "exact-learning-state-rollback",
+            "canonical-adaptation-input-identity",
             "jax-identity",
             "biological-dynamics-bridge",
         ),
@@ -220,18 +224,23 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         evidence_paths=(
             "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py",
             "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_predictive_coding.py",
+            "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_hebbian.py",
             "packages/neuros-foundation/tests/test_ngclearn_bridge.py",
             "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py",
-            ".github/workflows/neuroai-ecosystem-ci.yml",
+            "packages/neuros-foundation/tests/test_ngclearn_hebbian.py",
+            "scripts/evidence/run_ngclearn_hebbian_authority.py",
+            "tests/test_ngclearn_hebbian_authority.py",
+            ".github/workflows/ngclearn-hebbian-ci.yml",
         ),
         notes=(
-            "Qualified upstream ngc-learn 3.2.x surfaces include RateCell execution and a "
-            "fixed-weight predictive reconstruction circuit using real RateCell, "
-            "GaussianErrorCell, and StaticSynapse residual-feedback dynamics. The circuit "
-            "resets per observation, ties feedback to the generative-weight transpose, and "
-            "records reconstruction-error trajectories and artifact identities. Hebbian/STDP "
-            "learning, online adaptation, spiking networks, real-data utility, hardware, and "
-            "closed-loop behavior remain unqualified until separate evidence lands."
+            "Qualified upstream ngc-learn 3.2.x surfaces include RateCell execution, fixed-weight "
+            "predictive reconstruction, and a governed predictive-reconstruction M-step through "
+            "the real HebbianSynapse. Adaptive evidence binds exact canonical calibration rows to "
+            "ORION AdaptationAuthority, records weight plus optimizer-state identity, keeps held-out "
+            "qualification inference read-only, and supports exact retain-or-rollback state. The "
+            "qualification partition may influence retention and is therefore not an untouched final "
+            "assessment set. STDP, spiking-network adaptation, real-neural-data efficacy, calibration "
+            "reduction, online/closed-loop adaptation, hardware, and clinical behavior remain unqualified."
         ),
         install_hint='pip install "neuros-foundation[ngclearn]"',
     ),
