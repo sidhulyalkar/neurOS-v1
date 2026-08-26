@@ -205,7 +205,11 @@ class ThreeWayLongitudinalCaseAuthority:
         if unit == "sample":
             raise ValueError("three-way longitudinal authority requires a deployment-unit split")
         group = np.asarray(data.groups[unit]).astype(str)
-        observed = observed_group_order or ordered_group_values(data, split_unit=unit)
+        observed = (
+            ordered_group_values(data, split_unit=unit)
+            if observed_group_order is None
+            else observed_group_order
+        )
         source_values = _ordered_values(group[split.source_train_indices])
         return cls(
             dataset_id=data.dataset_id,
@@ -279,15 +283,19 @@ class ThreeWayLongitudinalCaseAuthority:
         return tuple(sorted(selected))
 
     def calibration_budget_sha256(self, per_class: int) -> str:
+        indices = self.calibration_indices(per_class)
+        budget = int(per_class)
         return _index_set_sha256(
-            f"calibration-budget-{int(per_class)}",
+            f"calibration-budget-{budget}",
             self.processed_data_sha256,
-            self.calibration_indices(per_class),
+            indices,
         )
 
     def require_calibration_indices(self, per_class: int, values: Any) -> tuple[int, ...]:
-        actual = _indices_tuple("calibration indices", values, allow_empty=per_class == 0)
         expected = self.calibration_indices(per_class)
+        actual = _indices_tuple(
+            "calibration indices", values, allow_empty=len(expected) == 0
+        )
         if actual != expected:
             raise ValueError(
                 "calibration must use the exact frozen budget indices in canonical order"
