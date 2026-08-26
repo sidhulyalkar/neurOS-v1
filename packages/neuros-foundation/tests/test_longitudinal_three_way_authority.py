@@ -171,6 +171,34 @@ def test_pairwise_overlap_fails_before_dataset_restore():
         ThreeWayLongitudinalCaseAuthority.from_dict(payload)
 
 
+def test_serialized_numeric_fields_are_validated_not_coerced():
+    _, _, authority = _authority()
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["qualification_indices"][0] = 3.5
+    with pytest.raises(ValueError, match="integer sample indices"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["n_samples"] = float(payload["n_samples"])
+    with pytest.raises(ValueError, match="n_samples must be an integer"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["seed"] = True
+    with pytest.raises(ValueError, match="seed must be an integer"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["input_shape"][1] = 4.5
+    with pytest.raises(ValueError, match="integer dimensions"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+
 def test_processed_data_change_fails_before_reconstructed_split_is_trusted():
     data, _, authority = _authority()
     changed_x = np.array(data.X, copy=True)
