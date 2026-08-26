@@ -365,6 +365,18 @@ def _safe_fraction(numerator: int, denominator: int) -> float | None:
     return None if denominator <= 0 else float(numerator) / float(denominator)
 
 
+def _missing_fraction(summary: UnicornRawUdpTraceSummary) -> float | None:
+    """Fraction of unique packet opportunities that remain unresolved missing."""
+
+    if summary.inferred_missing_packets is None:
+        return None
+    unique_decoded = max(0, summary.decoded_packet_count - summary.duplicate_packets)
+    return _safe_fraction(
+        summary.inferred_missing_packets,
+        unique_decoded + summary.inferred_missing_packets,
+    )
+
+
 def _delta(candidate: float | None, reference: float | None) -> float | None:
     if candidate is None or reference is None:
         return None
@@ -383,28 +395,32 @@ def compare_unicorn_trace_summaries(
     hardware defect.
     """
 
-    reference_missing_fraction = (
-        None
-        if reference.inferred_missing_packets is None
-        else _safe_fraction(
-            reference.inferred_missing_packets,
-            reference.decoded_packet_count + reference.inferred_missing_packets,
-        )
+    reference_missing_fraction = _missing_fraction(reference)
+    candidate_missing_fraction = _missing_fraction(candidate)
+    reference_malformed = _safe_fraction(
+        reference.malformed_packet_count,
+        reference.packet_count,
     )
-    candidate_missing_fraction = (
-        None
-        if candidate.inferred_missing_packets is None
-        else _safe_fraction(
-            candidate.inferred_missing_packets,
-            candidate.decoded_packet_count + candidate.inferred_missing_packets,
-        )
+    candidate_malformed = _safe_fraction(
+        candidate.malformed_packet_count,
+        candidate.packet_count,
     )
-    reference_malformed = _safe_fraction(reference.malformed_packet_count, reference.packet_count)
-    candidate_malformed = _safe_fraction(candidate.malformed_packet_count, candidate.packet_count)
-    reference_invalid = _safe_fraction(reference.validation_zero_packets, reference.decoded_packet_count)
-    candidate_invalid = _safe_fraction(candidate.validation_zero_packets, candidate.decoded_packet_count)
-    reference_reorder = _safe_fraction(reference.out_of_order_packets, reference.decoded_packet_count)
-    candidate_reorder = _safe_fraction(candidate.out_of_order_packets, candidate.decoded_packet_count)
+    reference_invalid = _safe_fraction(
+        reference.validation_zero_packets,
+        reference.decoded_packet_count,
+    )
+    candidate_invalid = _safe_fraction(
+        candidate.validation_zero_packets,
+        candidate.decoded_packet_count,
+    )
+    reference_reorder = _safe_fraction(
+        reference.out_of_order_packets,
+        reference.decoded_packet_count,
+    )
+    candidate_reorder = _safe_fraction(
+        candidate.out_of_order_packets,
+        candidate.decoded_packet_count,
+    )
 
     return UnicornTraceDeltaReport(
         reference_source_kind=reference.source_kind,
@@ -424,9 +440,18 @@ def compare_unicorn_trace_summaries(
                 candidate.p95_interarrival_ms,
                 reference.p95_interarrival_ms,
             ),
-            "malformed_fraction_delta": _delta(candidate_malformed, reference_malformed),
-            "validation_zero_fraction_delta": _delta(candidate_invalid, reference_invalid),
-            "reorder_fraction_delta": _delta(candidate_reorder, reference_reorder),
+            "malformed_fraction_delta": _delta(
+                candidate_malformed,
+                reference_malformed,
+            ),
+            "validation_zero_fraction_delta": _delta(
+                candidate_invalid,
+                reference_invalid,
+            ),
+            "reorder_fraction_delta": _delta(
+                candidate_reorder,
+                reference_reorder,
+            ),
             "unresolved_missing_fraction_delta": _delta(
                 candidate_missing_fraction,
                 reference_missing_fraction,
