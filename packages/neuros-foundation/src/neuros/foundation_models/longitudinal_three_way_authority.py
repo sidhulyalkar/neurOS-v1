@@ -42,10 +42,16 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return _jsonable(value.tolist())
     if isinstance(value, Mapping):
-        return {
-            str(key): _jsonable(item)
-            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
-        }
+        normalized: dict[str, Any] = {}
+        for key, item in sorted(value.items(), key=lambda pair: str(pair[0])):
+            normalized_key = str(key)
+            if normalized_key in normalized:
+                raise ValueError(
+                    "authority metadata contains keys that collide after string normalization: "
+                    f"{normalized_key!r}"
+                )
+            normalized[normalized_key] = _jsonable(item)
+        return normalized
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     raise TypeError(
@@ -162,6 +168,22 @@ def _index_set_sha256(kind: str, processed_sha256: str, indices: tuple[int, ...]
             "indices": list(indices),
         }
     )
+
+
+def _serialized_string(name: str, value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"serialized {name} must be a string")
+    if not value.strip():
+        raise ValueError(f"serialized {name} must be non-empty")
+    return value
+
+
+def _serialized_string_sequence(name: str, value: Any) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise TypeError(f"serialized {name} must be an array of strings")
+    if any(not isinstance(item, str) for item in value):
+        raise ValueError(f"serialized {name} must contain only strings")
+    return tuple(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -489,6 +511,21 @@ class ThreeWayLongitudinalCaseAuthority:
         )
         if schema_version != 2:
             raise ValueError("three-way longitudinal authority requires schema_version=2")
+
+        dataset_id = _serialized_string("dataset_id", payload["dataset_id"])
+        case_id = _serialized_string("case_id", payload["case_id"])
+        split_unit = _serialized_string("split_unit", payload["split_unit"])
+        history_policy = _serialized_string("history_policy", payload["history_policy"])
+        held_out_values = _serialized_string_sequence(
+            "held_out_values", payload["held_out_values"]
+        )
+        observed_group_order = _serialized_string_sequence(
+            "observed_group_order", payload["observed_group_order"]
+        )
+        source_group_values = _serialized_string_sequence(
+            "source_group_values", payload["source_group_values"]
+        )
+
         source_indices = _indices_tuple(
             "source_train_indices", payload["source_train_indices"]
         )
@@ -501,9 +538,11 @@ class ThreeWayLongitudinalCaseAuthority:
         raw_calibration = payload["calibration_order_by_class"]
         if not isinstance(raw_calibration, Mapping):
             raise TypeError("calibration_order_by_class must be a mapping")
+        if any(not isinstance(key, str) for key in raw_calibration):
+            raise ValueError("serialized calibration class labels must be strings")
         calibration = {
-            str(key): _indices_tuple(
-                f"calibration_order_by_class[{str(key)!r}]", values, allow_empty=True
+            key: _indices_tuple(
+                f"calibration_order_by_class[{key!r}]", values, allow_empty=True
             )
             for key, values in raw_calibration.items()
         }
@@ -515,13 +554,13 @@ class ThreeWayLongitudinalCaseAuthority:
             raise TypeError("case_metadata must be a mapping")
 
         value = cls(
-            dataset_id=payload["dataset_id"],
-            case_id=payload["case_id"],
-            split_unit=payload["split_unit"],  # type: ignore[arg-type]
-            held_out_values=tuple(payload["held_out_values"]),
-            history_policy=payload["history_policy"],  # type: ignore[arg-type]
-            observed_group_order=tuple(payload["observed_group_order"]),
-            source_group_values=tuple(payload["source_group_values"]),
+            dataset_id=dataset_id,
+            case_id=case_id,
+            split_unit=split_unit,  # type: ignore[arg-type]
+            held_out_values=held_out_values,
+            history_policy=history_policy,  # type: ignore[arg-type]
+            observed_group_order=observed_group_order,
+            source_group_values=source_group_values,
             source_train_indices=source_indices,
             qualification_indices=qualification_indices,
             final_assessment_indices=final_assessment_indices,
