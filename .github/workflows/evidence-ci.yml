@@ -55,7 +55,35 @@ jobs:
           pytest -q \
             packages/neuros-foundation/tests/test_real_world.py \
             packages/neuros-foundation/tests/test_longitudinal.py \
-            packages/neuros-foundation/tests/test_longitudinal_authority.py
+            packages/neuros-foundation/tests/test_longitudinal_authority.py \
+            packages/neuros-foundation/tests/test_longitudinal_three_way.py \
+            packages/neuros-foundation/tests/test_longitudinal_three_way_authority.py
+      - name: Replay three-way authority evidence twice
+        run: |
+          python scripts/evidence/verify_longitudinal_three_way_authority.py > "${RUNNER_TEMP}/three-way-first.json"
+          python scripts/evidence/verify_longitudinal_three_way_authority.py > "${RUNNER_TEMP}/three-way-second.json"
+          diff -u "${RUNNER_TEMP}/three-way-first.json" "${RUNNER_TEMP}/three-way-second.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "three-way-first.json").read_text())
+          boundary = payload["claim_boundary"]
+          assert boundary["chronological_source_history_enforced"] is True
+          assert boundary["nested_balanced_calibration_enforced"] is True
+          assert boundary["final_assessment_separate_from_state_selection"] is True
+          assert boundary["real_dataset_qualified"] is False
+          assert boundary["calibration_reduction_qualified"] is False
+
+          budgets = payload["calibration_budgets"]
+          assert budgets
+          assert len({item["calibration_budget_sha256"] for item in budgets}) == len(budgets)
+          assert len({item["qualification_set_sha256"] for item in budgets}) == 1
+          assert len({item["final_assessment_set_sha256"] for item in budgets}) == 1
+          assert payload["authority"]["qualification_set_sha256"] == budgets[0]["qualification_set_sha256"]
+          assert payload["authority"]["final_assessment_set_sha256"] == budgets[0]["final_assessment_set_sha256"]
+          PY
       - name: Exercise evidence discovery and runner CLIs
         run: |
           neuros-foundation evidence
@@ -64,6 +92,12 @@ jobs:
           python packages/neuros-foundation/examples/05_real_world_evidence.py
           python scripts/evidence/run_moabb_longitudinal.py --help
           python scripts/evidence/run_moabb_model_ladder.py --help
+      - name: Compile three-way authority modules
+        run: |
+          python -m compileall -q \
+            packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way.py \
+            packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way_authority.py \
+            scripts/evidence/verify_longitudinal_three_way_authority.py
 
   moabb-profile:
     name: MOABB evidence profile
@@ -108,6 +142,7 @@ jobs:
           pytest -q \
             packages/neuros-foundation/tests/test_real_world.py \
             packages/neuros-foundation/tests/test_longitudinal.py \
+            packages/neuros-foundation/tests/test_longitudinal_three_way.py \
             packages/neuros-foundation/tests/test_longitudinal_runner.py
           python scripts/evidence/run_moabb_longitudinal.py --help
 
@@ -131,6 +166,7 @@ jobs:
         run: |
           pytest -q \
             packages/neuros-foundation/tests/test_longitudinal_authority.py \
+            packages/neuros-foundation/tests/test_longitudinal_three_way_authority.py \
             packages/neuros-foundation/tests/test_longitudinal_methods.py \
             packages/neuros-foundation/tests/test_longitudinal_transfer.py \
             packages/neuros-foundation/tests/test_longitudinal_zero_calibration.py \
