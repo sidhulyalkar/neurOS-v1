@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from neuros.drivers.synthetic_eeg import SyntheticEEGConfig, SyntheticEEGGenerator
@@ -7,6 +10,7 @@ from neuros.drivers.synthetic_eeg_driver import (
     SYNTHETIC_EEG_GENERATOR_CONTRACT,
     SyntheticEEGDriver,
 )
+from neuros.recording.archive import SessionArchiveWriter
 
 
 def spectral_amplitude(signal: np.ndarray, sampling_rate_hz: float, frequency_hz: float) -> float:
@@ -18,6 +22,32 @@ def spectral_amplitude(signal: np.ndarray, sampling_rate_hz: float, frequency_hz
 
 def _render_partitioned(generator: SyntheticEEGGenerator, chunks: tuple[int, ...]) -> np.ndarray:
     return np.concatenate([generator.render(samples).data_uv for samples in chunks], axis=1)
+
+
+def _provenance_config() -> SyntheticEEGConfig:
+    return SyntheticEEGConfig(
+        seed=41,
+        colored_noise_uv=3.25,
+        white_noise_uv=0.75,
+        alpha_frequency_hz=10.2,
+        alpha_amplitude_uv=1.8,
+        ssvep_amplitude_uv=7.2,
+        first_harmonic_ratio=0.42,
+    )
+
+
+def _expected_generator_config() -> dict[str, object]:
+    return {
+        "sampling_rate_hz": 250.0,
+        "channel_names": ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"],
+        "colored_noise_uv": 3.25,
+        "white_noise_uv": 0.75,
+        "alpha_frequency_hz": 10.2,
+        "alpha_amplitude_uv": 1.8,
+        "ssvep_amplitude_uv": 7.2,
+        "first_harmonic_ratio": 0.42,
+        "seed": 41,
+    }
 
 
 def test_ssvep_strength_is_controllable_and_posterior():
@@ -105,16 +135,7 @@ def test_artifacts_and_channel_contact_are_explicit():
 
 
 def test_driver_exposes_versioned_replay_configuration():
-    config = SyntheticEEGConfig(
-        seed=41,
-        colored_noise_uv=3.25,
-        white_noise_uv=0.75,
-        alpha_frequency_hz=10.2,
-        alpha_amplitude_uv=1.8,
-        ssvep_amplitude_uv=7.2,
-        first_harmonic_ratio=0.42,
-    )
-    driver = SyntheticEEGDriver(config, realtime=False, stream_id="phantom")
+    driver = SyntheticEEGDriver(_provenance_config(), realtime=False, stream_id="phantom")
     descriptor = driver.descriptor
     assert descriptor.stream_id == "phantom"
     assert descriptor.modality == "eeg"
@@ -122,14 +143,15 @@ def test_driver_exposes_versioned_replay_configuration():
     assert descriptor.channel_names == ("Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8")
     assert descriptor.metadata["synthetic"] is True
     assert descriptor.metadata["generator"] == SYNTHETIC_EEG_GENERATOR_CONTRACT
-    assert descriptor.metadata["generator_config"] == {
-        "sampling_rate_hz": 250.0,
-        "channel_names": ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"],
-        "colored_noise_uv": 3.25,
-        "white_noise_uv": 0.75,
-        "alpha_frequency_hz": 10.2,
-        "alpha_amplitude_uv": 1.8,
-        "ssvep_amplitude_uv": 7.2,
-        "first_harmonic_ratio": 0.42,
-        "seed": 41,
-    }
+    assert descriptor.metadata["generator_config"] == _expected_generator_config()
+
+
+def test_generator_contract_and_seed_survive_session_archive_serialization(tmp_path: Path):
+    driver = SyntheticEEGDriver(_provenance_config(), realtime=False, stream_id="phantom")
+    archive = SessionArchiveWriter(tmp_path / "session", session_id="synthetic-provenance")
+    archive.register_stream(driver.descriptor)
+
+    manifest = json.loads((tmp_path / "session" / "manifest.json").read_text(encoding="utf-8"))
+    metadata = manifest["streams"]["phantom"]["descriptor"]["metadata"]
+    assert metadata["generator"] == SYNTHETIC_EEG_GENERATOR_CONTRACT
+    assert metadata["generator_config"] == _expected_generator_config()
