@@ -81,6 +81,7 @@ nav:
       - Longitudinal EEG Showcase: LONGITUDINAL_EEG_SHOWCASE.md
       - Longitudinal Model Ladder: LONGITUDINAL_MODEL_LADDER.md
   - ORION / Neurotokenization:
+      - Adaptation Authority: ADAPTATION_AUTHORITY.md
       - Master Plan: neurotokenization/00_MASTER_PLAN.md
       - Tokenizer Specs: neurotokenization/01_TOKENIZER_SPECS.md
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
