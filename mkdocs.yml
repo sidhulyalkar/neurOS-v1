@@ -59,6 +59,9 @@ nav:
       - Hardware Qualification: HARDWARE_QUALIFICATION.md
       - Architecture: ARCHITECTURE.md
       - Project Status: PROJECT_STATUS.md
+  - Scientific Trust:
+      - Scientific Claims: SCIENTIFIC_CLAIMS.md
+      - Release Policy: RELEASE_POLICY.md
   - Real-World Evidence:
       - Evidence Program: REAL_WORLD_EVIDENCE.md
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md

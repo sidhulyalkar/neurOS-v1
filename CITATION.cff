@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use neurOS or ORION in research, cite the exact release tag or commit used so the software and evidence boundary are reproducible."
+title: "neurOS: neural execution, interoperability, and evidence infrastructure"
+type: software
+authors:
+  - family-names: Hulyalkar
+    given-names: Sidharth
+repository-code: "https://github.com/sidhulyalkar/neurOS-v1"
+url: "https://github.com/sidhulyalkar/neurOS-v1"
+license: MIT
+keywords:
+  - brain-computer interface
+  - neuroscience
+  - neural decoding
+  - neural interfaces
+  - neuroai
+  - reproducibility
+  - mechanistic interpretability
+  - neural representation
+abstract: >-
+  neurOS is an open execution and evidence platform for neural interfaces.
+  It provides explicit neural data, timing, runtime, recording/replay,
+  interoperability, qualification, and provenance contracts. ORION is the
+  complementary neural-intelligence plane for tokenization, learned
+  representations, transfer, personalization, and auditable adaptation.
+notes: >-
+  No archival DOI is declared until a release-specific deposit exists.
+  Publications should record the neurOS release tag or Git commit together
+  with the dataset, protocol, model, and qualification/evidence identifiers
+  used for the reported result.

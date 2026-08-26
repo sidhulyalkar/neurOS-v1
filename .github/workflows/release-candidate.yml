@@ -1,0 +1,122 @@
+name: Release Candidate Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-verify:
+    name: Build, validate, checksum, and smoke-install release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install release tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine pyyaml mkdocs-material cffconvert
+      - name: Validate public contracts and documentation
+        run: |
+          python scripts/check_public_contracts.py
+          cffconvert --validate
+          mkdocs build --strict --site-dir "${RUNNER_TEMP}/neuros-docs"
+      - name: Build all workspace wheels
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-release"
+          mkdir -p "${DIST}"
+          for package in \
+            packages/neuros-core \
+            packages/neuros-drivers \
+            packages/neuros-models \
+            packages/neuros-foundation \
+            packages/neuros-ui \
+            packages/neuros-cloud \
+            packages/neuros \
+            packages/neuros-mechint \
+            packages/neuros-neurofm \
+            packages/neuros-sourceweigher \
+            packages/orion
+          do
+            python -m build --wheel --outdir "${DIST}" "${package}"
+          done
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq 11
+          python -m twine check "${DIST}"/*.whl
+      - name: Generate component and checksum manifests
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-release"
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          dist = Path(os.environ["RUNNER_TEMP"]) / "neuros-release"
+          artifacts = []
+          for wheel in sorted(dist.glob("*.whl")):
+              digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+              metadata_name = next(name for name in ZipFile(wheel).namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = ZipFile(wheel).read(metadata_name).decode("utf-8", errors="strict")
+              fields = {}
+              for line in metadata.splitlines():
+                  if line.startswith("Name: "):
+                      fields["name"] = line[6:]
+                  elif line.startswith("Version: "):
+                      fields["version"] = line[9:]
+                  if len(fields) == 2:
+                      break
+              artifacts.append({"file": wheel.name, "sha256": digest, **fields})
+          if len(artifacts) != 11:
+              raise SystemExit(f"expected 11 wheels, found {len(artifacts)}")
+          manifest = {
+              "git_sha": os.environ["GITHUB_SHA"],
+              "git_ref": os.environ["GITHUB_REF"],
+              "artifact_count": len(artifacts),
+              "artifacts": artifacts,
+          }
+          (dist / "release-manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          (dist / "SHA256SUMS").write_text("".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts))
+          PY
+      - name: Smoke-install the public SDK from built wheels
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-release"
+          python -m venv "${RUNNER_TEMP}/release-smoke"
+          "${RUNNER_TEMP}/release-smoke/bin/python" -m pip install --upgrade pip
+          NEUROS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
+          test -n "${NEUROS_WHEEL}"
+          "${RUNNER_TEMP}/release-smoke/bin/python" -m pip install --find-links "${DIST}" "${NEUROS_WHEEL}"
+          "${RUNNER_TEMP}/release-smoke/bin/neuros" doctor --json
+          "${RUNNER_TEMP}/release-smoke/bin/neuros" compatibility --json
+      - name: Upload immutable release-candidate bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurOS-release-candidate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/neuros-release/*.whl
+            ${{ runner.temp }}/neuros-release/SHA256SUMS
+            ${{ runner.temp }}/neuros-release/release-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publishing-disabled:
+    name: Publishing authority remains intentionally disabled
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain publication boundary
+        run: |
+          echo "Release artifacts are validated but not published."
+          echo "Enable PyPI trusted publishing/OIDC in a separate reviewed change only after repository and PyPI configuration exists."

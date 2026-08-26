@@ -1,0 +1,72 @@
+name: Public Trust Contracts
+
+on:
+  pull_request:
+    paths:
+      - "CITATION.cff"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
+      - "GOVERNANCE.md"
+      - "CHANGELOG.md"
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/check_public_contracts.py"
+      - ".github/workflows/public-trust-ci.yml"
+      - ".github/workflows/release-candidate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "CITATION.cff"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - "SUPPORT.md"
+      - "GOVERNANCE.md"
+      - "CHANGELOG.md"
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/check_public_contracts.py"
+      - ".github/workflows/public-trust-ci.yml"
+      - ".github/workflows/release-candidate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-trust-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-contracts:
+    name: Citation, claims, governance, and release contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyyaml cffconvert
+      - name: Validate repository public contracts
+        run: python scripts/check_public_contracts.py
+      - name: Validate citation metadata against CFF schema
+        run: cffconvert --validate
+
+  docs-strict:
+    name: Strict documentation build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install docs dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install mkdocs-material
+      - name: Build public documentation with warnings as failures
+        run: mkdocs build --strict --site-dir "${RUNNER_TEMP}/neuros-docs"
