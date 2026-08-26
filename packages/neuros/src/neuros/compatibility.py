@@ -209,19 +209,29 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         name="ngc-learn",
         category="computational neuroscience / NeuroAI",
         status=IntegrationStatus.EXPERIMENTAL,
-        capabilities=("rate-cell-transform", "jax-identity", "biological-dynamics-bridge"),
+        capabilities=(
+            "rate-cell-transform",
+            "predictive-reconstruction",
+            "iterative-error-feedback",
+            "jax-identity",
+            "biological-dynamics-bridge",
+        ),
         evidence_tier=EvidenceTier.INTEGRATION,
         evidence_paths=(
             "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py",
+            "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_predictive_coding.py",
             "packages/neuros-foundation/tests/test_ngclearn_bridge.py",
+            "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py",
             ".github/workflows/neuroai-ecosystem-ci.yml",
         ),
         notes=(
-            "The first qualified upstream surface is deliberately narrow: ngc-learn 3.2.x "
-            "RateCell execution with exact JAX/upstream identity, explicit time-by-channel "
-            "geometry, and no hidden preprocessing. Predictive-coding circuits, spiking "
-            "networks, Hebbian/STDP learning, real-data utility, and closed-loop behavior "
-            "remain unqualified until separate evidence lands."
+            "Qualified upstream ngc-learn 3.2.x surfaces include RateCell execution and a "
+            "fixed-weight predictive reconstruction circuit using real RateCell, "
+            "GaussianErrorCell, and StaticSynapse residual-feedback dynamics. The circuit "
+            "resets per observation, ties feedback to the generative-weight transpose, and "
+            "records reconstruction-error trajectories and artifact identities. Hebbian/STDP "
+            "learning, online adaptation, spiking networks, real-data utility, hardware, and "
+            "closed-loop behavior remain unqualified until separate evidence lands."
         ),
         install_hint='pip install "neuros-foundation[ngclearn]"',
     ),

@@ -12,7 +12,7 @@ neuros compatibility snap --json
 neuros compatibility --status supported --json
 ```
 
-The registry lives in `neuros.compatibility` and is covered by contract tests. Documentation should summarize that registry rather than invent a second support matrix with different semantics.
+The registry lives in `neuros.compatibility` and is covered by contract tests. Documentation summarizes that registry rather than inventing a second support matrix with different semantics.
 
 ## Current matrix
 
@@ -25,8 +25,8 @@ The registry lives in `neuros.compatibility` and is covered by contract tests. D
 | Zarr | supported | export, session provenance | integration | export interoperability, not a replacement runtime format |
 | MOABB | experimental | dataset adapter, longitudinal split authority, model ladder | real dataset | benchmark surface is still evolving; result claims remain protocol-specific |
 | Braindecode | experimental | neural-window model adapter, upstream training bridge, decoder bridge | integration | qualified 1.7 whitelist only; stable mech-int, hardware, and closed-loop claims remain separate |
-| SNAP spectral alignment | experimental | positive-rank spectrum, task power, residual target power | software contract | invariant numerical-method contract only; no paper-reproduction or biological-alignment claim |
-| ngc-learn | experimental | RateCell transform, upstream/JAX identity, biological-dynamics bridge | integration | real ngc-learn 3.2.x RateCell only; predictive coding, spiking, plasticity, real-data and closed-loop claims remain unqualified |
+| SNAP spectral alignment | experimental | positive-rank spectrum, task power, residual target power | software contract + upstream conformance | no published-experiment reproduction or biological-alignment claim |
+| ngc-learn | experimental | RateCell transform, fixed-weight predictive reconstruction, iterative residual feedback, upstream/JAX identity | integration | real ngc-learn 3.2.x inference dynamics only; Hebbian/STDP learning, spiking, real-data, hardware, and closed-loop claims remain unqualified |
 | OpenBCI | indirect | reachable through BrainFlow | none | no named OpenBCI configuration is hardware-qualified |
 | Meta NeuralBench | planned | isolated benchmark worker, evidence extension | none | upstream runtime requirements must stay outside the kernel |
 | IBM NeuroAIKit | planned | isolated SNU reference worker | none | legacy TensorFlow-era environment is intentionally isolated |
@@ -54,7 +54,7 @@ These tiers are monotonic in responsibility, not automatic badges. A software-co
 
 ## MNE interoperability
 
-MNE is the first direct scientific object bridge added under the convergence architecture.
+MNE is a direct scientific object bridge under the convergence architecture.
 
 Install:
 
@@ -119,7 +119,7 @@ The adapter never silently resamples, pads, crops, filters, changes channel orde
 
 ### SNAP-derived spectral evidence
 
-neurOS now exposes SNAP-derived representation evidence without adding Torch/CUDA to the foundation package's required dependencies.
+neurOS exposes SNAP-derived representation evidence without adding Torch/CUDA to the foundation package's required dependencies.
 
 ```python
 from neuros.foundation_models import spectral_alignment_evidence
@@ -127,9 +127,9 @@ from neuros.foundation_models import spectral_alignment_evidence
 evidence = spectral_alignment_evidence(embeddings, neural_targets)
 ```
 
-The implementation deliberately reports only positive-rank spectral modes individually. Target power outside that span is aggregated into one residual term because individual zero-eigenvalue eigenvectors are not uniquely defined. This removes a backend-dependent ambiguity while preserving the scientifically meaningful SNAP quantities.
+The implementation reports positive-rank spectral modes individually and aggregates target power outside that span into one invariant residual term because individual zero-eigenvalue eigenvectors are not uniquely defined. A dedicated CI lane also executes a pinned copy of the authors' real SNAP metric code and compares invariant quantities.
 
-The current evidence tier is **software-contract**, not a claim that the SNAP paper was reproduced or that a representation is biologically aligned.
+This is not a claim that the paper's experiments were reproduced or that a representation is biologically aligned.
 
 See [NeuroAI Ecosystem Evidence](NEUROAI_ECOSYSTEM.md).
 
@@ -141,9 +141,34 @@ Install the isolated research integration with:
 pip install "neuros-foundation[ngclearn]"
 ```
 
-The first qualified surface executes the real ngc-learn 3.2.x `RateCell` and records exact upstream/JAX identity, sample-rate-derived integration step, input/output geometry, configuration, and hashes.
+Two real upstream ngc-learn 3.2.x surfaces are now qualified at the **integration** tier.
 
-It does not silently resample, filter, normalize, pad, reorder channels, or fit. Successful RateCell integration does **not** promote predictive-coding circuits, spiking networks, Hebbian/STDP learning, real-data performance, or closed-loop behavior.
+#### RateCell transform
+
+The basic transform records exact upstream/JAX identity, sample-rate-derived integration step, time-by-channel geometry, configuration, and hashes. It does not silently resample, filter, normalize, pad, reorder channels, or fit.
+
+#### Fixed-weight predictive reconstruction
+
+```python
+from neuros.foundation_models import NgcLearnPredictiveCodingTransform
+
+pc = NgcLearnPredictiveCodingTransform(
+    latent_dim=4,
+    settling_steps=30,
+    seed=7,
+)
+result = pc.transform(samples, sample_rate_hz=250.0)
+```
+
+The circuit uses a real upstream `RateCell` latent, `GaussianErrorCell` reconstruction residual, and `StaticSynapse` generative/feedback connections. It resets per observation, clamps the input as the prediction-error target, ties feedback to the transpose of the fixed generative weights, and iteratively settles the latent.
+
+Evidence includes latent/reconstruction shapes, exact component/runtime identity, settling parameters, weight/input/latent/reconstruction/trajectory hashes, and reconstruction-error reduction.
+
+The known-ground-truth upstream test uses an identity generative dictionary and requires the real circuit to reduce reconstruction error by more than 90% on Python 3.10 and 3.11. This is evidence that the residual-feedback computation actually works, not merely that its objects instantiate.
+
+The weights are deliberately fixed. **Hebbian learning, STDP, online adaptation, spiking networks, real-dataset utility, hardware behavior, and closed-loop behavior are not qualified by this circuit.**
+
+See [NeuroAI Ecosystem Evidence](NEUROAI_ECOSYSTEM.md) for the scientific rationale and ORION comparison path.
 
 ### NeuralBench
 

@@ -72,6 +72,12 @@ from neuros.foundation_models.ngclearn_bridge import (
     NgcLearnVersionError,
     ngclearn_runtime_identity,
 )
+from neuros.foundation_models.ngclearn_predictive_coding import (
+    PC_METHOD_ID,
+    NgcLearnPredictiveCodingEvidence,
+    NgcLearnPredictiveCodingResult,
+    NgcLearnPredictiveCodingTransform,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -194,6 +200,10 @@ __all__ = [
     "NgcLearnRateCellResult",
     "NgcLearnRateCellTransform",
     "ngclearn_runtime_identity",
+    "PC_METHOD_ID",
+    "NgcLearnPredictiveCodingEvidence",
+    "NgcLearnPredictiveCodingResult",
+    "NgcLearnPredictiveCodingTransform",
     "EvaluationProtocol",
     "BenchmarkReport",
     "benchmark_embeddings",

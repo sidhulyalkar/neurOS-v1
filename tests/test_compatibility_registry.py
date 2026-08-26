@@ -98,16 +98,26 @@ def test_snap_is_a_numerical_evidence_contract_not_a_biological_claim():
     assert "spectral_alignment.py" in " ".join(record.evidence_paths)
 
 
-def test_ngclearn_is_real_upstream_integration_but_only_for_narrow_surface():
+def test_ngclearn_predictive_coding_is_integration_qualified_but_learning_is_not():
     record = get_integration("ngclearn")
 
     assert record.status is IntegrationStatus.EXPERIMENTAL
     assert record.evidence_tier is EvidenceTier.INTEGRATION
     assert "rate-cell-transform" in record.capabilities
+    assert "predictive-reconstruction" in record.capabilities
+    assert "iterative-error-feedback" in record.capabilities
     assert "spiking-network" not in record.capabilities
-    assert "predictive-coding" not in record.capabilities
+    assert "hebbian-learning" not in record.capabilities
+    assert "stdp-learning" not in record.capabilities
+    assert "online-adaptation" not in record.capabilities
     assert record.install_hint == 'pip install "neuros-foundation[ngclearn]"'
+    evidence = " ".join(record.evidence_paths)
+    assert "ngclearn_predictive_coding.py" in evidence
+    assert "test_ngclearn_predictive_coding.py" in evidence
     assert "3.2.x" in record.notes
+    assert "fixed-weight predictive reconstruction" in record.notes
+    assert "Hebbian/STDP" in record.notes
+    assert "remain unqualified" in record.notes
 
 
 def test_research_organizations_are_not_promoted_as_monolithic_integrations():
