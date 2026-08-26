@@ -33,6 +33,8 @@ on:
 permissions:
   contents: read
 
+# Matrix values only exist inside jobs. Keep workflow-level cancellation scoped
+# to the PR/ref so a new revision cancels all stale Python-version jobs together.
 concurrency:
   group: external-plugin-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
