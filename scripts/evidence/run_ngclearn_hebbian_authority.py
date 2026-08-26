@@ -286,7 +286,10 @@ def _fixture() -> tuple[np.ndarray, AdaptationAuthority, NgcLearnHebbianPredicti
         split_unit="session",
         adaptation_indices=(0, 1, 2),
         evaluation_indices=(3, 4, 5),
-        processed_data_sha256=_array_sha256(samples),
+        # The fixture treats the canonical float64 bridge matrix as its processed
+        # data authority. Real longitudinal studies may carry a richer hash that
+        # also includes labels/group identities and pass that verified identity in.
+        processed_data_sha256=_array_sha256(_matrix(samples)),
         n_samples=len(samples),
         protocol_fingerprint="fixture-protocol-v1",
         source_authority_fingerprint="fixture-longitudinal-authority-v1",
