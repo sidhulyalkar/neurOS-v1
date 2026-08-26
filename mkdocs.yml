@@ -54,6 +54,7 @@ nav:
   - Platform:
       - Four Public Surfaces: PLATFORM.md
       - Ecosystem Compatibility: COMPATIBILITY.md
+      - NeuroAI Ecosystem: NEUROAI_ECOSYSTEM.md
       - Qualification Bundles: QUALIFICATION.md
       - Hardware Qualification: HARDWARE_QUALIFICATION.md
       - Architecture: ARCHITECTURE.md

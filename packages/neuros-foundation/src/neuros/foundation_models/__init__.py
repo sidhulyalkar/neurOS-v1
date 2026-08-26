@@ -64,6 +64,14 @@ from neuros.foundation_models.moabb_longitudinal import (
     get_moabb_longitudinal_spec,
     validate_observed_sessions,
 )
+from neuros.foundation_models.ngclearn_bridge import (
+    NgcLearnRateCellEvidence,
+    NgcLearnRateCellResult,
+    NgcLearnRateCellTransform,
+    NgcLearnUnavailableError,
+    NgcLearnVersionError,
+    ngclearn_runtime_identity,
+)
 from neuros.foundation_models.probes import (
     domain_leakage_probe,
     effective_rank,
@@ -104,6 +112,12 @@ from neuros.foundation_models.schema import (
     ModelStatus,
     ModelTask,
     NeuralModality,
+)
+from neuros.foundation_models.spectral_alignment import (
+    SPECTRAL_METHOD_ID,
+    SpectralAlignmentEvidence,
+    spectral_alignment_evidence,
+    verify_snap_invariant_reference,
 )
 
 try:
@@ -170,6 +184,16 @@ __all__ = [
     "linear_probe",
     "domain_leakage_probe",
     "pairwise_cka",
+    "SPECTRAL_METHOD_ID",
+    "SpectralAlignmentEvidence",
+    "spectral_alignment_evidence",
+    "verify_snap_invariant_reference",
+    "NgcLearnUnavailableError",
+    "NgcLearnVersionError",
+    "NgcLearnRateCellEvidence",
+    "NgcLearnRateCellResult",
+    "NgcLearnRateCellTransform",
+    "ngclearn_runtime_identity",
     "EvaluationProtocol",
     "BenchmarkReport",
     "benchmark_embeddings",
