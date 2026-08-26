@@ -60,6 +60,7 @@ from neuros.drivers.unicorn_network_sim import (  # noqa: F401
     raw_udp_scan_to_api17_order,
 )
 from neuros.drivers.unicorn_receiver_guard import (  # noqa: F401
+    FLOAT32_EXACT_INTEGER_MAX,
     UnicornRawUdpGuard,
     UnicornRawUdpGuardConfig,
     UnicornRawUdpGuardState,
@@ -68,7 +69,9 @@ from neuros.drivers.unicorn_receiver_guard import (  # noqa: F401
 from neuros.drivers.unicorn_trace import (  # noqa: F401
     UnicornRawUdpTraceSummary,
     UnicornTraceContractComparison,
+    UnicornTraceDeltaReport,
     analyze_unicorn_raw_udp_trace,
+    compare_unicorn_trace_summaries,
     compare_unicorn_trace_to_nominal_contract,
 )
 from neuros.drivers.unicorn_transport_sim import (  # noqa: F401

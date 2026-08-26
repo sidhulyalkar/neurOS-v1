@@ -11,7 +11,8 @@ Examples:
     # Raw 17-float / 68-byte Unicorn-compatible packets at nominal 250 Hz.
     python examples/unicorn_udp_simulator.py --mode raw --port 19745
 
-    # Bandpower 70-value ASCII reference payloads at nominal 25 Hz.
+    # Bandpower 70-value ASCII reference payloads at nominal 25 Hz after its
+    # analysis-window warm-up.
     python examples/unicorn_udp_simulator.py --mode bandpower --port 19746
 
     # Exercise deterministic failures without opening a socket.
@@ -50,10 +51,13 @@ def _dry_run(stream, mode: str, packets: int, byte_order: str) -> dict:
     reordered = 0
     delayed = 0
     counters: list[int] = []
+    first_nominal_time_s: float | None = None
     while source_updates < packets:
         datagrams = stream.next_datagrams()
         source_updates += 1
         for datagram in datagrams:
+            if first_nominal_time_s is None:
+                first_nominal_time_s = datagram.nominal_time_s
             emitted += 1
             duplicates += int(datagram.duplicate_ordinal > 0)
             reordered += int(any(fault.startswith("reordered") for fault in datagram.faults))
@@ -68,15 +72,19 @@ def _dry_run(stream, mode: str, packets: int, byte_order: str) -> dict:
                 if values.shape != (70,):
                     raise AssertionError("Bandpower UDP payload did not decode to 70 values")
     for datagram in stream.flush():
+        if first_nominal_time_s is None:
+            first_nominal_time_s = datagram.nominal_time_s
         emitted += 1
         if mode == "raw":
             values = decode_unicorn_udp_scan(datagram.payload, byte_order=byte_order)
             counters.append(int(round(float(values[15]))))
     return {
-        "schema": "neuros.unicorn_udp_simulator.dry_run.v1",
+        "schema": "neuros.unicorn_udp_simulator.dry_run.v2",
         "mode": mode,
         "source_updates": source_updates,
         "emitted_datagrams": emitted,
+        "initial_delay_s": stream.initial_delay_s,
+        "first_nominal_time_s": first_nominal_time_s,
         "dropped_or_held_updates": source_updates - len(set(counters)) if mode == "raw" else None,
         "duplicates": duplicates,
         "reordered_datagrams": reordered,
@@ -92,7 +100,7 @@ def _run_live(stream, *, host: str, port: int, duration_s: float) -> None:
     destination = (host, port)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     start = time.perf_counter()
-    next_source_deadline = start
+    next_source_deadline = start + stream.initial_delay_s
     pending: list[tuple[float, int, bytes]] = []
     insertion_order = 0
     sent = 0
@@ -109,7 +117,9 @@ def _run_live(stream, *, host: str, port: int, duration_s: float) -> None:
                     heapq.heappush(pending, (release_abs, insertion_order, datagram.payload))
                     insertion_order += 1
                 source_updates += 1
-                next_source_deadline = start + source_updates * stream.interval_s
+                next_source_deadline = (
+                    start + stream.initial_delay_s + source_updates * stream.interval_s
+                )
 
             now = time.perf_counter()
             while pending and pending[0][0] <= now:
@@ -126,7 +136,8 @@ def _run_live(stream, *, host: str, port: int, duration_s: float) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        # Flush a packet held only because the process stopped between a reorder pair.
+        # Flush is a shutdown cleanup operation, not timing evidence. A packet
+        # held solely for a synthetic reorder pair is emitted immediately here.
         for datagram in stream.flush():
             sock.sendto(datagram.payload, destination)
             sent += 1
@@ -135,6 +146,7 @@ def _run_live(stream, *, host: str, port: int, duration_s: float) -> None:
             "source_updates": source_updates,
             "sent_datagrams": sent,
             "destination": f"{host}:{port}",
+            "initial_delay_s": stream.initial_delay_s,
             "synthetic": True,
         }, sort_keys=True))
 
@@ -163,6 +175,7 @@ def main() -> None:
     print(json.dumps({
         "mode": args.mode,
         "nominal_cadence_hz": cadence_hz,
+        "initial_delay_s": stream.initial_delay_s,
         "fault_profile": args.fault_profile,
         "synthetic": True,
         "transport_evidence_class": "synthetic_assumption",

@@ -1,39 +1,41 @@
-# Developing EEG games against the neurOS Unicorn Hybrid Black suite
+# Developing EEG games with the neurOS Unicorn suite
 
-This guide is the shortest path from a game prototype with no headset attached to a game that can be exercised against the neurOS Unicorn Hybrid Black device/interface twin and later compared with a physical device.
+This guide is the shortest path from a game prototype with no headset attached to a game that can be stressed against the neurOS Unicorn Hybrid Black substitution stack and later compared with a physical device.
 
-The simulator is designed to reduce **software and integration risk**. It cannot establish that a real participant will produce a decodable neural response.
+The simulator reduces **software and integration risk**. It does not prove that a participant will produce a decodable EEG response.
 
-## The contract stack
+## Keep the layers separate
 
 ```text
-Arena neural world
-participant + display + artifacts + evoked response
+participant / neural world
         ↓
 Unicorn device twin
-250 Hz + 24-bit + channel schemas + counter + IMU + validation
+250 Hz, quantization, schemas, CNT, BAT, VALID, IMU
         ↓
 interface
-Python API / raw UDP / Recorder19 / LSL / Bandpower70
+Python API | raw UDP | Recorder19 | LSL | Bandpower70
         ↓
-receiver health + authority guard
+transport faults
+loss | duplicate | delay | reorder | stale
+        ↓
+receiver diagnostics + authority guard
         ↓
 decoder
         ↓
 gameplay
 ```
 
-Do not collapse these layers. A packet-loss test should not silently change the simulated participant. A weak SSVEP responder should not silently change UDP ordering. A receiver fault should revoke BCI authority without pausing the whole game.
+A packet-loss test should not silently change physiology. A weak responder should not silently change UDP ordering. A bad neural stream should revoke BCI authority without freezing the rest of the game.
 
 ---
 
-## 1. Choose the interface your game will actually use
+## 1. Pick the interface your application will actually ship
 
 ### Raw UDP
 
-Best when the game owns the real-time signal-processing pipeline.
+Use raw UDP when the application owns real-time signal processing.
 
-Contract:
+Documented compatibility target:
 
 ```text
 250 source packets/s
@@ -42,39 +44,38 @@ Contract:
 EEG1..8 | ACC X/Y/Z | GYR X/Y/Z | BAT | CNT | VALID
 ```
 
-Important: standalone raw UDP uses `BAT, CNT, VALID` at the tail. The direct API/Recorder ordering uses `CNT, BAT, VALID`.
-
-### LSL
-
-Best when acquisition/decoding lives in Python and the game consumes a derived event stream, or when a research stack already uses Lab Streaming Layer.
-
-The neurOS LSL endpoint marks itself as synthetic in stream metadata. It does not claim byte-for-byte metadata parity with every Unicorn Suite release.
+The standalone raw-UDP tail is `BAT, CNT, VALID`. The direct API / Recorder ordering uses `CNT, BAT, VALID`.
 
 ### Bandpower UDP
 
-Best for prototypes that intentionally use the public Unicorn Bandpower-style feature interface.
-
-Contract:
+Use this only when the application intentionally consumes the public Bandpower-style feature interface.
 
 ```text
 70 ASCII values/update
-25 Hz default update cadence
-56 channel-band values
-7 channel averages
-7 bipolar averages
+250-sample analysis window
+10-sample hop
+25 Hz steady-state update cadence
 ```
 
-The payload layout/cadence are compatibility targets. Numerical spectral values come from a transparent neurOS reference estimator because the proprietary estimator is not sufficiently documented for bit-for-bit claims.
+A stream beginning with no history cannot produce its first complete feature window at `t=0`. The neurOS reference stream therefore emits its first nominal Bandpower update at **1.0 s**, then every **40 ms**.
+
+The payload layout and cadence are compatibility targets. Numerical spectral values are a transparent neurOS reference estimator, not a claim of bit-for-bit proprietary estimator equivalence.
+
+### LSL
+
+Use LSL when acquisition and decoding live outside the game process or when a research stack already uses Lab Streaming Layer.
+
+The synthetic source identifies itself as synthetic in metadata. neurOS does not claim metadata parity with every Unicorn Suite release.
 
 ### Direct Python API twin
 
-Best for application code written around device enumeration, configuration, channel enabling/disabling, acquisition start/stop and failure handling.
+Use the Python twin to exercise enumeration, configuration, channel enable/disable, acquisition lifecycle and failures.
 
-This is a conceptual API twin, not a replacement for the licensed vendor binary package.
+It is an application-facing conceptual twin, not a replacement for vendor binaries.
 
 ---
 
-## 2. Start a pristine raw UDP source
+## 2. Start a synthetic raw-UDP source
 
 ```bash
 python examples/unicorn_udp_simulator.py \
@@ -84,45 +85,74 @@ python examples/unicorn_udp_simulator.py \
   --fault-profile pristine
 ```
 
-The source targets the documented 250 Hz raw-UDP cadence. Python/OS scheduling is not presented as a calibrated Bluetooth timing measurement.
-
-Before launching the game, you can verify the exact encoder and fault engine without opening a socket:
+For deterministic CI without sockets:
 
 ```bash
 python examples/unicorn_udp_simulator.py \
   --mode raw \
-  --fault-profile pristine \
+  --fault-profile mixed-torture \
   --dry-run-packets 500
 ```
 
+The source clock targets the documented nominal 250 Hz interface. Python and operating-system scheduling are not presented as calibrated Bluetooth timing measurements.
+
 ---
 
-## 3. Put a receiver guard in front of game authority
+## 3. Do not equate traffic with neural authority
 
-A receiver should not translate “I received some bytes” into “the brain may control gameplay.”
+`UnicornRawUdpGuard` keeps four questions separate:
 
-`UnicornRawUdpGuard` implements a reference fail-closed policy:
+1. **packet status**: can the 68-byte datagram be decoded safely?
+2. **sequence status**: is `CNT` first, sequential, gapped, duplicated, reordered or precision-ambiguous?
+3. **validation**: is `VALID` asserted?
+4. **authority**: may the neural stream currently change gameplay?
 
-- malformed 68-byte payload → revoke authority;
-- non-finite values → revoke authority;
-- `VALID=0` → stream can still be alive, but revoke authority;
-- repeated counter → duplicate → revoke authority;
-- counter moves backwards → out of order → revoke authority;
-- counter skips forward → gap → revoke authority;
-- no decodable packet for the configured stale interval → revoke authority;
-- require N healthy sequential validated packets before authority returns.
+`health` remains a compact compatibility summary for simple clients, but advanced telemetry should log the orthogonal fields.
 
-Default consumer policy:
+A single packet can therefore be both:
 
 ```text
-stale threshold   100 ms
-recovery streak   3 packets
-validation        required
+VALID = 0
+sequence_status = gap
 ```
 
-Those values are neurOS application defaults, **not manufacturer specifications**.
+without one condition erasing the other.
 
-A game can keep rendering, moving the player and accepting controller input while BCI authority is false. The neural subsystem simply stops changing gameplay state.
+Default fail-closed policy:
+
+```text
+stale threshold     100 ms
+recovery streak     3 healthy packets
+VALID required      yes
+```
+
+These are neurOS application defaults, not manufacturer specifications.
+
+Authority is revoked on malformed packets, `VALID=0`, counter gaps, duplicates, out-of-order delivery, stale traffic and counter-step ambiguity. Recovery requires a fresh healthy streak.
+
+### CNT precision boundary
+
+The public raw-UDP interface transports `CNT` as float32. IEEE-754 float32 guarantees unit-step integer representation only through `2^24`.
+
+At 250 samples/s, that arithmetic corresponds to roughly 18.64 hours of uninterrupted counting. This **does not** establish physical device reset or wrap behavior. Because the public source does not document those semantics, the reference guard fails closed once exact step inference is no longer justified.
+
+### Explicit acquisition epochs
+
+The guard also does **not** infer a counter reset from a backward CNT value. That could be a late packet, a transport reorder, a device restart, or undocumented wrap behavior. Guessing would turn ambiguity into false authority.
+
+When the application itself knows that a new acquisition session has begun, explicitly start a new receiver epoch:
+
+```python
+guard.begin_new_epoch()
+```
+
+or in the dependency-free C# client:
+
+```csharp
+unicorn.BeginNewEpoch();
+```
+
+This clears the counter high-water and any precision-ambiguity state, revokes stream liveness and BCI authority, and requires the configured healthy recovery streak again. Stale traffic alone never triggers this reset automatically.
 
 ---
 
@@ -130,9 +160,7 @@ A game can keep rendering, moving the player and accepting controller input whil
 
 `examples/game_engines/csharp/UnicornRawUdpClient.cs` is dependency-free C# targeting `netstandard2.0`.
 
-Copy it into the engine project, then wrap it with an engine lifecycle component.
-
-Conceptual Unity usage:
+Conceptual usage:
 
 ```csharp
 private UnicornRawUdpClient unicorn;
@@ -147,13 +175,13 @@ void Update()
 {
     if (!unicorn.AuthorityAllowed)
     {
-        // Keep the game alive, but do not apply new BCI-derived authority.
+        // Controller/game authority remains live.
         return;
     }
 
     if (unicorn.TryGetLatest(out var sample))
     {
-        // Feed sample.Values[0..7] into the decoder or signal bridge.
+        // Decode or bridge sample.Values[0..7].
     }
 }
 
@@ -163,35 +191,35 @@ void OnDestroy()
 }
 ```
 
-Raw UDP deliberately carries no “simulated vs physical” provenance field. The application must log the selected source separately, for example:
+Raw UDP intentionally carries no synthetic/physical provenance bit. Log source provenance separately:
 
 ```text
-bci_source_kind = synthetic
-bci_source_label = neuros-unicorn-pristine-seed-7
+bci_source_kind  = synthetic
+bci_source_label = neuros-unicorn-seed-7
 ```
 
 or:
 
 ```text
-bci_source_kind = user_declared_physical
-bci_source_label = hackathon-headset-a
+bci_source_kind  = user_declared_physical
+bci_source_label = lab-headset-a
 ```
 
-Do not infer provenance from raw packet bytes.
+Do not infer provenance from packet bytes.
 
 ---
 
-## 5. Turn on deterministic transport failures
+## 5. Torture the transport deliberately
 
-Named profiles:
+Named deterministic profiles:
 
 | profile | purpose |
 |---|---|
-| `pristine` | no synthetic transport faults |
-| `periodic-loss` | deterministic packet-loss probe |
-| `duplicate-probe` | repeated-packet handling |
-| `reorder-probe` | adjacent packet inversion |
-| `delay-probe` | periodic delivery delay |
+| `pristine` | no synthetic transport fault |
+| `periodic-loss` | missing-packet handling |
+| `duplicate-probe` | duplicate handling |
+| `reorder-probe` | adjacent inversion |
+| `delay-probe` | delayed delivery |
 | `mixed-torture` | loss + duplicate + delay + reorder |
 
 Example:
@@ -203,73 +231,37 @@ python examples/unicorn_udp_simulator.py \
   --fault-profile mixed-torture
 ```
 
-These cadences are deliberately synthetic test patterns. They are **not measured Unicorn Bluetooth statistics**.
+These cadences are synthetic test choices, not measured Unicorn Bluetooth statistics.
 
-A correct game should remain playable through every fault profile. BCI authority may disappear temporarily; controller/game authority should not become corrupted.
-
----
-
-## 6. Exercise Bandpower consumers
-
-```bash
-python examples/unicorn_udp_simulator.py \
-  --mode bandpower \
-  --port 19746 \
-  --fault-profile pristine
-```
-
-Or run a deterministic feature-stream check:
-
-```bash
-python examples/unicorn_udp_simulator.py \
-  --mode bandpower \
-  --fault-profile delay-probe \
-  --dry-run-packets 100
-```
-
-The first update internally requires the configured 250-sample analysis buffer. Later updates use the documented 10-sample hop.
+A robust game stays playable while BCI authority disappears and recovers. Controller authority, simulation state and save state should remain coherent throughout.
 
 ---
 
-## 7. Use Arena for neural/game worlds
+## 6. Use neural worlds for physiology, not the packet layer
 
-The device twin should not be asked to invent participant physiology.
+The low-level device twin should not invent participant physiology.
 
-Use `neuros-arena` for worlds such as:
+Use `neuros-arena` or an explicit EEG source for worlds such as:
 
-- strong SSVEP responder;
-- weak responder;
-- endogenous alpha collision near a stimulus frequency;
-- blink contamination;
-- jaw/EMG contamination;
-- head/controller movement;
+- strong and weak SSVEP responders;
+- no-response / abstention cases;
+- endogenous alpha near a stimulus frequency;
+- blink, jaw and controller contamination;
+- head motion;
 - posterior contact degradation;
-- display frame drops;
-- participant fatigue/response attenuation;
-- source-space or recorded-background worlds.
+- display-frame perturbations;
+- fatigue / response attenuation;
+- recorded-background or source-space models.
 
-Then wrap the resulting sensor-space EEG in the Unicorn device/interface contract.
+Then wrap that EEG in the same Unicorn device/interface contract.
 
-For Unicorn EEG-only Arena scenarios:
-
-```python
-from neuros.arena import unicorn_hybrid_black_eeg_profile
-
-profile = unicorn_hybrid_black_eeg_profile(
-    sensor_noise_uv=0.5,
-    line_frequency_hz=60.0,
-    line_noise_uv=1.0,
-    chunk_samples=5,
-)
-```
-
-Environmental parameters remain explicit and should not be described as published headset behavior.
+Built-in neural worlds are phenomenological software-test models unless separately reality-anchored. They are not human digital twins.
 
 ---
 
-## 8. Capture a real-device interface trace without saving EEG
+## 7. Capture physical interface diagnostics without persisting EEG
 
-When a physical Unicorn becomes available, run the game-facing raw UDP path and capture only interface diagnostics:
+When a physical Unicorn is available:
 
 ```bash
 python examples/unicorn_raw_udp_trace_capture.py \
@@ -277,109 +269,117 @@ python examples/unicorn_raw_udp_trace_capture.py \
   --port 19745 \
   --seconds 30 \
   --source-kind user_declared_physical \
-  --source-label hackathon-headset-a \
+  --source-label lab-headset-a \
   --output headset-a-trace.json
 ```
 
-The output contains:
+The v2 capture receipt stores reduced diagnostics such as:
 
-- packet count;
-- decoded/malformed count;
-- observed arrival cadence;
-- mean/p95 inter-arrival time;
-- first/last counter;
+- packet and decode counts;
+- arrival rate and inter-arrival summaries;
 - counter-gap events;
-- inferred missing packets at gap time;
-- duplicates;
-- out-of-order packets;
+- **unresolved** missing counters after late-packet reconciliation;
+- recovered reordered packets;
+- duplicates and out-of-order packets;
 - `VALID=0` count;
-- observed battery range;
-- nominal-contract diagnostics.
+- counter precision / epoch ambiguity;
+- observed battery range.
 
-It explicitly records:
+It records:
 
 ```text
-contains_raw_eeg = false
+contains_raw_eeg      = false
 raw_packets_persisted = false
 ```
 
-`user_declared_physical` means exactly that. It is an operator statement, not cryptographic proof of device provenance.
+Raw datagrams exist transiently in process memory while the summary is computed. This tool does not persist their EEG samples or packet bytes.
+
+`user_declared_physical` is an operator statement, not cryptographic device provenance.
 
 ---
 
-## 9. Convert discrepancies into simulator corrections
+## 8. Compare synthetic and physical traces descriptively
 
-The desired hardware-validation loop is:
-
-```text
-same receiver/game
-      ↑           ↑
-neurOS twin    physical Unicorn
-      ↓           ↓
-trace summary  trace summary
-      └──── compare ────┘
+```bash
+python examples/unicorn_trace_compare.py \
+  synthetic-trace.json \
+  headset-a-trace.json \
+  --output comparison.json
 ```
 
-If a physical capture disagrees with the simulator, do not tune the game around the simulator. Correct the relevant simulator layer and version the change.
+The comparison reports deltas for cadence, inter-arrival timing, malformed fraction, validation-zero fraction, reorder fraction and unresolved-missing fraction.
 
-Examples:
+It intentionally returns:
 
-- raw field ordering mismatch → interface contract correction;
-- counter semantics mismatch → device-twin correction;
-- LSL metadata mismatch → LSL substitution correction;
-- physical arrival jitter differs → measured transport profile, clearly labeled as observed data;
-- EEG amplitude/covariance mismatch → Arena/reality-anchoring work, not UDP code;
-- participant cannot select the target → neural paradigm/decoder problem, not packet serialization.
+```text
+passed = null
+```
+
+neurOS does not invent a default “close enough to hardware” threshold. Tolerances should come from measured conditions and a declared validation objective.
+
+If physical behavior disagrees with the simulator, correct the lowest layer that is actually wrong:
+
+| discrepancy | correct layer |
+|---|---|
+| field ordering | interface contract |
+| CNT semantics | device / receiver contract |
+| LSL metadata | LSL substitution |
+| measured arrival jitter | transport model |
+| EEG covariance/amplitude | neural-world model |
+| participant cannot select a target | paradigm / decoder |
+
+Do not tune game logic around a simulator defect.
 
 ---
 
-# Recommended pre-hardware game qualification
+## 9. Recommended pre-hardware qualification
 
-For an EEG action game, a useful minimum matrix is:
+At minimum, exercise:
 
 1. pristine strong-responder world;
-2. weak-responder world;
-3. no-response/abstention world;
+2. weak responder;
+3. no-response / abstention;
 4. alpha-frequency collision;
-5. blink/jaw/controller artifact sequence;
+5. blink, jaw and controller artifacts;
 6. posterior-channel degradation;
-7. `VALID=0` period and recovery;
-8. periodic packet loss;
-9. duplicate packets;
+7. `VALID=0` and recovery;
+8. packet loss;
+9. duplicates;
 10. reordering;
-11. delayed packets;
-12. source stale interval;
+11. delay;
+12. stale source;
 13. mixed transport torture;
-14. game remains controllable without BCI authority;
-15. replay produces the same synthetic world and decisions.
+14. controller-only continuity while BCI authority is false;
+15. deterministic replay across different acquisition chunk sizes;
+16. explicit receiver epoch restart after a known acquisition reconnect.
 
-Passing all fifteen means the **software is much harder to surprise** when real hardware arrives. It does not mean the human BCI has been validated.
+Passing this matrix means the software is harder to surprise. It does not validate human BCI performance.
 
 ---
 
-# Evidence vocabulary
+## Evidence vocabulary
 
-Use these phrases deliberately:
-
-### Safe before physical hardware
+Safe before hardware:
 
 - “tested against the neurOS Unicorn Hybrid Black simulator”
-- “hardware-free device/interface conformance”
+- “hardware-free interface conformance”
 - “synthetic transport torture tested”
-- “Arena synthetic-population robustness”
+- “synthetic neural-world robustness”
 
-### Requires actual device observation
+Requires physical observation:
 
 - “observed on Unicorn Hybrid Black hardware”
 - “measured physical arrival cadence”
 - “observed physical validation behavior”
 
-### Requires human closed-loop data
+Requires human closed-loop data:
 
-- “participant SSVEP accuracy”
-- “human false-switch rate”
-- “calibration time”
-- “comfort/usability”
-- “real gameplay performance with EEG”
+- participant SSVEP accuracy;
+- accepted precision / abstention;
+- false-switch rate;
+- decision-time decomposition;
+- calibration time;
+- comfort and usability;
+- real gameplay performance with EEG.
 
-The simulator exists to make the transition between those evidence levels clean rather than blurry.
+For the adversarial evidence ledger and current known limitations, see `docs/UNICORN_SIMULATOR_RIGOR.md`.

@@ -22,14 +22,18 @@ def _counter(datagram) -> int:
     return int(round(float(decode_unicorn_udp_scan(datagram.payload)[15])))
 
 
-def test_pristine_raw_stream_preserves_68_byte_packets_and_counter_continuity():
+def test_pristine_raw_stream_preserves_68_byte_packets_counter_and_clock():
     stream = UnicornRawUdpStreamSimulator(seed=3)
     packets = [stream.next_datagrams() for _ in range(4)]
     assert all(len(item) == 1 for item in packets)
     flattened = [item[0] for item in packets]
+    assert stream.initial_delay_s == 0.0
     assert all(len(packet.payload) == RAW_UDP_PAYLOAD_BYTES for packet in flattened)
     assert [_counter(packet) for packet in flattened] == [0, 1, 2, 3]
     assert [packet.source_sequence for packet in flattened] == [0, 1, 2, 3]
+    assert [packet.nominal_time_s for packet in flattened] == pytest.approx(
+        [0.0, 0.004, 0.008, 0.012]
+    )
 
 
 def test_transport_drop_does_not_rewind_device_counter():
@@ -92,13 +96,14 @@ def test_named_fault_profiles_are_explicit_synthetic_assumptions():
         get_unicorn_udp_fault_profile("real-bluetooth-statistics")
 
 
-def test_bandpower_udp_stream_emits_one_70_value_frame_per_25hz_update():
+def test_bandpower_udp_stream_waits_for_analysis_window_then_updates_at_25hz():
     stream = UnicornBandpowerUdpStreamSimulator(seed=13)
     first = stream.next_datagrams()
     second = stream.next_datagrams()
     assert len(first) == len(second) == 1
-    assert first[0].nominal_time_s == pytest.approx(0.0)
-    assert second[0].nominal_time_s == pytest.approx(1.0 / 25.0)
+    assert stream.initial_delay_s == pytest.approx(1.0)
+    assert first[0].nominal_time_s == pytest.approx(1.0)
+    assert second[0].nominal_time_s == pytest.approx(1.0 + 1.0 / 25.0)
     values = decode_unicorn_bandpower_ascii(first[0].payload)
     assert values.shape == (70,)
     assert np.all(np.isfinite(values))
