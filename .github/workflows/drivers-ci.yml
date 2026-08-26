@@ -75,20 +75,32 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/neuros-drivers[test]"
-      - name: Verify device, API, raw UDP, Bandpower, and compatibility contracts
+      - name: Verify device, API, UDP, Bandpower, transport, and compatibility contracts
         run: |
           pytest -q \
             tests/test_unicorn_hybrid_black_sim.py \
             tests/test_unicorn_api_sim.py \
             tests/test_unicorn_network_sim.py \
+            tests/test_unicorn_transport_sim.py \
             tests/test_unicorn_compatibility_suite.py
       - name: Execute machine-readable compatibility receipt
         run: |
           OUT="${RUNNER_TEMP}/unicorn-compatibility.json"
           python examples/unicorn_sim_conformance.py --seed 41 --output "${OUT}"
           test -s "${OUT}"
-      - name: Syntax-check real-time substitution endpoint
+      - name: Exercise deterministic UDP dry runs
+        run: |
+          python examples/unicorn_udp_simulator.py \
+            --mode raw \
+            --fault-profile mixed-torture \
+            --dry-run-packets 200
+          python examples/unicorn_udp_simulator.py \
+            --mode bandpower \
+            --fault-profile delay-probe \
+            --dry-run-packets 20
+      - name: Syntax-check real-time substitution endpoints
         run: |
           python -m py_compile \
             examples/unicorn_hybrid_black_simulator.py \
+            examples/unicorn_udp_simulator.py \
             examples/unicorn_sim_conformance.py
