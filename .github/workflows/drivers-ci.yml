@@ -75,13 +75,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/neuros-drivers[test]"
-      - name: Verify device, API, UDP, Bandpower, transport, and compatibility contracts
+      - name: Verify device, API, UDP, Bandpower, transport, receiver, and compatibility contracts
         run: |
           pytest -q \
             tests/test_unicorn_hybrid_black_sim.py \
             tests/test_unicorn_api_sim.py \
             tests/test_unicorn_network_sim.py \
             tests/test_unicorn_transport_sim.py \
+            tests/test_unicorn_receiver_guard.py \
             tests/test_unicorn_compatibility_suite.py
       - name: Execute machine-readable compatibility receipt
         run: |
