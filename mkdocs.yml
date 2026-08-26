@@ -61,6 +61,9 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting Started:
+      - First 10 Minutes: getting-started/first-10-minutes.md
+      - Installation: getting-started/installation.md
   - Platform:
       - Four Public Surfaces: PLATFORM.md
       - Ecosystem Compatibility: COMPATIBILITY.md
@@ -83,7 +86,6 @@ nav:
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
   - SDK:
-      - Installation: getting-started/installation.md
       - Neural Windows: NEURAL_WINDOWS.md
       - Braindecode: BRAINDECODE.md
       - API Surface: API_REFERENCE.md
