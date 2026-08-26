@@ -47,7 +47,7 @@ neurOS keeps it optional:
 pip install "neuros-foundation[ngclearn]"
 ```
 
-The qualified upstream surface is deliberately narrower than the upstream library.
+The qualified upstream surface remains deliberately narrower than the upstream library.
 
 ### RateCell execution
 
@@ -64,9 +64,9 @@ result = transform.transform(samples, sample_rate_hz=250.0)
 
 This surface records exact ngc-learn/JAX identity, explicit time-by-channel geometry, integration step, parameters, and deterministic input/output/evidence hashes. It performs no hidden resampling, filtering, normalization, padding, fitting, or channel reordering.
 
-### Predictive reconstruction
+### Fixed-weight predictive reconstruction
 
-neurOS now also qualifies an **inference-only fixed-weight predictive-coding circuit** using real ngc-learn 3.2 components:
+neurOS qualifies an inference-only predictive-coding circuit using real ngc-learn 3.2 components:
 
 ```text
 input target x -> GaussianErrorCell e0 -> transpose feedback E -> latent RateCell z
@@ -84,59 +84,167 @@ pc = NgcLearnPredictiveCodingTransform(
     seed=7,
 )
 result = pc.transform(samples, sample_rate_hz=250.0)
-
-latents = result.values
-reconstruction = result.reconstruction
-print(result.evidence.error_reduction_fraction)
 ```
 
-Each observation begins from a reset circuit. The observation is clamped as the `GaussianErrorCell` target; the latent `RateCell` iteratively changes under residual feedback; a fixed generative `StaticSynapse` reconstructs the input; and the feedback matrix is explicitly tied to the transpose of that fixed generative matrix.
+Each observation begins from a reset circuit. The observation is clamped as the `GaussianErrorCell` target; the latent `RateCell` iteratively changes under residual feedback; a fixed generative `StaticSynapse` reconstructs the input; and the feedback matrix is explicitly tied to the transpose of the fixed generative matrix.
 
-The result records:
+The result records exact runtime/component identity, latent/reconstruction geometry, settling semantics, input/weight/output hashes, and reconstruction-error trajectories. The real-upstream identity-dictionary test requires the installed ngc-learn 3.2 circuit to reduce reconstruction error by more than 90%. That behavior is qualified on Python 3.10 and 3.11.
 
-- exact ngc-learn and JAX runtime identity;
-- actual `RateCell`, `GaussianErrorCell`, and `StaticSynapse` class identities;
-- latent and reconstruction geometry;
-- settling count, settling timestep, membrane constant, prior, activation, and integration method;
-- reset-per-observation and tied-transpose-feedback semantics;
-- input, weight, latent, reconstruction, and error-trajectory SHA-256 identities;
-- initial/final reconstruction MSE and reduction fraction;
-- fraction of observations that improve during settling.
+The fixed circuit intentionally does not learn. It establishes inference and reset semantics independently before mutable state is introduced.
 
-The real-upstream CI contract goes beyond object construction. With an identity generative dictionary, the installed ngc-learn 3.2 circuit must reduce known reconstruction error by more than 90%, and repeated executions must be bit-identical after reset. That behavior passed on the qualified Python 3.10 and 3.11 lanes.
+### Governed Hebbian predictive adaptation
 
-The circuit does **not** learn its weights. That is intentional. Fixed weights make inference dynamics, state reset, geometry, and provenance independently testable before introducing another source of state mutation.
+The next evidence rung adds a real ngc-learn `HebbianSynapse` M-step while preserving the same predictive-inference structure:
+
+```text
+observation
+    |
+    v
+predictive E-step / settling
+    |
+    +--> latent zF -------------------+
+    |                                 |
+    +--> Gaussian residual dmu        |
+                                      v
+                         upstream HebbianSynapse.evolve()
+                                      |
+                                      v
+                              generative weights
+```
+
+The public learner is available from the dependency-light foundation namespace:
+
+```python
+from neuros.foundation_models import NgcLearnHebbianPredictiveCoding
+
+learner = NgcLearnHebbianPredictiveCoding(
+    latent_dim=8,
+    settling_steps=20,
+    learning_rate=1e-3,
+    optimizer="adam",
+    seed=7,
+)
+
+before = learner.infer(calibration_samples, sample_rate_hz=250.0)
+adaptation = learner.adapt(calibration_samples, sample_rate_hz=250.0, epochs=2)
+after = learner.infer(qualification_samples, sample_rate_hz=250.0)
+```
+
+The integration executes the real upstream two-factor learning rule after each predictive E-step:
+
+- `latent.zF` is the Hebbian **pre** statistic;
+- `GaussianErrorCell.dmu` is the Hebbian **post** residual statistic;
+- `sign_value=-1` gives the reconstruction-minimization direction used by the qualified fixture;
+- feedback is retied to the current generative transpose before each inference;
+- no hidden post-update row normalization is performed;
+- inference is required to preserve the complete learning-state identity.
+
+#### Complete mutable-state identity
+
+A learned model is not just its visible weight matrix. Adam, for example, contains first/second moments and an update counter that change future learning even when weights are restored separately.
+
+neurOS therefore defines the adaptive state as:
+
+```text
+Hebbian learning state
+    |
+    +--> exact upstream weight array identity
+    |
+    +--> exact optimizer pytree identity
+    |
+    +--> combined state SHA-256
+```
+
+Snapshots preserve the upstream weight dtype and include the optimizer state. Rollback validation checks checkpoint content before mutating the learner, restores both weight and optimizer state, reties feedback, resets transient neural activity, and then verifies the exact combined state again.
+
+The real-upstream tests exercise both SGD and Adam. They require deterministic independent learners, read-only inference after learning, exact Adam rollback, replay of the same future learning trajectory after rollback, and failure of corrupt checkpoints before the live learner is changed.
+
+#### ORION adaptation authority binding
+
+The learning mechanism stays in `neuros-foundation`. ORION stays independent. Their composition occurs in the evidence layer:
+
+```text
+AdaptationAuthority
+  | exact ordered calibration rows
+  | exact ordered qualification rows
+  | processed-data identity
+  v
+scripts/evidence/run_ngclearn_hebbian_authority.py
+  |
+  +--> calibration-only proposal evidence
+  +--> governed approval
+  +--> ngc-learn adapt(exact calibration rows)
+  +--> learner input SHA == authority-selected input SHA
+  +--> read-only qualification before/after
+  +--> retain OR exact full-state rollback
+  v
+deterministic evidence JSON
+```
+
+The worker verifies that the canonical time-by-channel matrix selected by the authority is exactly the matrix whose SHA-256 is recorded by the learner. The public worker is run twice in CI and the complete JSON output must be byte-identical.
+
+This is an **integration/process-integrity qualification**, not an efficacy result. The current deterministic fixture proves that real upstream learning obeys the authority and rollback contract. It does not prove the learned representation helps real neural decoding.
+
+#### Qualification data is not final-assessment data
+
+The authority used by the worker has adaptation rows and held-out qualification rows. The qualification rows are read-only with respect to learning, but their metric may decide whether the update is retained or rolled back. Therefore they are part of **model-state selection**.
+
+They must not later be described as an untouched final test set.
+
+A real efficacy experiment should use three authorities:
+
+```text
+historical/source data
+        |
+target calibration partition
+        |
+        v
+state-changing adaptation
+        |
+retention / rollback qualification partition
+        |
+        v
+selected frozen state
+        |
+independent final-assessment partition
+        |
+        v
+scientific efficacy claim
+```
+
+This distinction is required before neurOS can make claims about calibration reduction, transfer, or superiority over ORION/frozen baselines.
 
 ### Current ngc-learn evidence ladder
 
 1. **Qualified:** RateCell upstream execution and geometry.
 2. **Qualified:** fixed-weight predictive reconstruction with iterative Gaussian residual feedback.
-3. **Not yet qualified:** Hebbian/STDP synaptic adaptation and explicit adaptation/evaluation authority.
-4. **Not yet qualified:** spiking-network representation contracts.
-5. **Not yet qualified:** real neural-data utility under deployment-unit-disjoint evaluation.
-6. **Not yet qualified:** comparison against ORION under matched downstream capacity and calibration budgets.
-7. **Not yet qualified:** hardware or closed-loop behavior.
+3. **Qualified at integration tier:** real `HebbianSynapse` predictive adaptation with exact weight + optimizer-state identity, deterministic replay, ORION adaptation-authority binding, and exact retain-or-rollback semantics.
+4. **Not yet qualified:** STDP or spiking-network adaptation contracts.
+5. **Not yet qualified:** real neural-data adaptation utility under a three-way calibration/qualification/final-assessment protocol.
+6. **Not yet qualified:** calibration-reduction or transfer superiority versus ORION under matched downstream capacity and budgets.
+7. **Not yet qualified:** hardware or closed-loop adaptive behavior.
 
-This ordering matters. A working predictive-coding circuit is not evidence that biologically local learning improves a BCI, and neither is evidence of a biological mechanism.
+This ordering matters. A working local-learning circuit is not evidence that local learning improves a BCI, and neither is evidence that the circuit is a biological mechanism.
 
-## Why predictive coding matters to ORION
+## Why predictive/local learning matters to ORION
 
-The value of the ngc-learn bridge is not merely adding another model family. It gives ORION a scientifically different representation baseline.
+The value of the ngc-learn bridge is not merely adding another model family. It gives ORION scientifically different representation and adaptation baselines.
 
-A conventional frozen encoder, an ORION tokenizer/encoder, and a predictive-coding latent can eventually be compared under the same evaluation authority for:
+A conventional frozen encoder, fixed predictive-coding latent, locally adapted predictive-coding latent, and ORION representation can eventually be compared under the same independent evidence authority for:
 
 - held-out task utility;
 - user-specific calibration examples/minutes;
 - cross-session and cross-subject transfer;
 - representation effective dimension and task-aligned spectral power;
 - residual target power;
+- domain leakage;
 - artifact, channel, montage, and jitter sensitivity;
 - uncertainty calibration;
 - latency and memory;
 - intervention/adaptation stability;
 - immutable data/model/evidence identity.
 
-That allows a useful question: **does iterative error-correcting inference provide transferable neural structure, and if so, does it reduce calibration cost compared with simpler or learned alternatives?**
+That makes the commercially meaningful ORION question falsifiable: **can ORION preserve or improve neural utility with materially less user-specific calibration than frozen or locally adapted alternatives, and can neurOS show exactly where that advantage survives?**
 
 ## Other evaluated NeuroAI projects
 
