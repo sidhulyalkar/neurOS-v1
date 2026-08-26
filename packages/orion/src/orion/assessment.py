@@ -93,14 +93,18 @@ def _canonical_sha256(payload: Mapping[str, Any]) -> str:
 
 
 def _sha256(name: str, value: str) -> str:
-    normalized = str(value).strip().lower()
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a lowercase SHA-256 string")
+    normalized = value.strip().lower()
     if not _SHA256_RE.fullmatch(normalized):
         raise ValueError(f"{name} must be a 64-character lowercase SHA-256 hex digest")
     return normalized
 
 
 def _nonempty(name: str, value: str) -> str:
-    normalized = str(value).strip()
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    normalized = value.strip()
     if not normalized:
         raise ValueError(f"{name} must be non-empty")
     return normalized
@@ -130,28 +134,35 @@ def _indices(name: str, values: Any) -> tuple[int, ...]:
 
 def _metric_names(values: Any) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
-        raise ValueError("metric_names must be a sequence of names, not one string")
+        raise ValueError("metric_names must be a sequence of strings, not one string")
     try:
-        names = tuple(str(value).strip() for value in values)
+        raw = tuple(values)
     except TypeError as exc:
         raise ValueError("metric_names must be an iterable of strings") from exc
-    if not names or any(not value for value in names):
-        raise ValueError("metric_names must contain at least one non-empty metric name")
+    if not raw:
+        raise ValueError("metric_names must contain at least one metric name")
+    if any(not isinstance(value, str) for value in raw):
+        raise ValueError("metric_names must contain strings only")
+    names = tuple(value.strip() for value in raw)
+    if any(not value for value in names):
+        raise ValueError("metric_names cannot contain empty names")
     if len(set(names)) != len(names):
         raise ValueError("metric_names cannot contain duplicates")
     return names
 
 
 def _metrics(values: Mapping[str, Any]) -> Mapping[str, float]:
+    if not isinstance(values, Mapping):
+        raise ValueError("final-assessment metrics must be a mapping")
     normalized: dict[str, float] = {}
     for key, value in values.items():
-        name = str(key).strip()
+        if not isinstance(key, str):
+            raise ValueError("final-assessment metric names must be strings")
+        name = key.strip()
         if not name:
             raise ValueError("final-assessment metric names must be non-empty")
         if name in normalized:
-            raise ValueError(
-                "final-assessment metric names collide after string normalization"
-            )
+            raise ValueError("final-assessment metric names cannot contain duplicates")
         if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
             raise ValueError(f"final-assessment metric {name!r} must be numeric")
         number = float(value)
@@ -188,12 +199,16 @@ class FinalAssessmentAuthority:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("FinalAssessmentAuthority schema_version must be 1")
         authority_id = _nonempty("authority_id", self.authority_id)
         dataset_id = _nonempty("dataset_id", self.dataset_id)
         split_unit = _nonempty("split_unit", self.split_unit)
         source = _nonempty(
             "source_authority_fingerprint", self.source_authority_fingerprint
         )
+        if self.protocol_fingerprint is not None:
+            _nonempty("protocol_fingerprint", self.protocol_fingerprint)
         if (
             isinstance(self.n_samples, bool)
             or not isinstance(self.n_samples, int)
@@ -278,6 +293,10 @@ class SelectedState:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("SelectedState schema_version must be 1")
+        if not isinstance(self.kind, SelectionKind):
+            raise ValueError("kind must be a SelectionKind")
         selection_id = _nonempty("selection_id", self.selection_id)
         source = _nonempty(
             "source_authority_fingerprint", self.source_authority_fingerprint
@@ -295,7 +314,7 @@ class SelectedState:
                 "selection_evidence_fingerprint",
                 self.selection_evidence_fingerprint or "",
             )
-        elif self.kind is SelectionKind.FROZEN:
+        else:
             if self.adaptation_authority_fingerprint is not None:
                 raise ValueError(
                     "frozen selected states cannot claim an adaptation authority"
@@ -304,8 +323,6 @@ class SelectedState:
                 raise ValueError(
                     "frozen selected states cannot claim adaptation selection evidence"
                 )
-        else:
-            raise ValueError(f"unsupported selection kind {self.kind!r}")
 
         object.__setattr__(self, "selection_id", selection_id)
         object.__setattr__(self, "source_authority_fingerprint", source)
@@ -382,6 +399,8 @@ class AdaptiveStudyAuthority:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("AdaptiveStudyAuthority schema_version must be 1")
         study_id = _nonempty("study_id", self.study_id)
         source = _nonempty(
             "source_authority_fingerprint", self.source_authority_fingerprint
@@ -407,11 +426,7 @@ class AdaptiveStudyAuthority:
             raise ValueError("adaptation and final-assessment sample counts differ")
         if adaptation.seed != final.seed:
             raise ValueError("adaptation and final-assessment seeds differ")
-        if (
-            adaptation.protocol_fingerprint is not None
-            and final.protocol_fingerprint is not None
-            and adaptation.protocol_fingerprint != final.protocol_fingerprint
-        ):
+        if adaptation.protocol_fingerprint != final.protocol_fingerprint:
             raise ValueError("adaptation and final-assessment protocol fingerprints differ")
 
         adaptation_set = set(adaptation.adaptation_indices)
@@ -471,6 +486,8 @@ class FinalAssessmentRecord:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("FinalAssessmentRecord schema_version must be 1")
         _nonempty("authority_fingerprint", self.authority_fingerprint)
         _nonempty(
             "source_authority_fingerprint", self.source_authority_fingerprint
