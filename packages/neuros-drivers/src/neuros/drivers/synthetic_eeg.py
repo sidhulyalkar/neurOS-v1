@@ -1,9 +1,14 @@
 """Protocol-grade synthetic EEG generator for acquisition and BCI stress tests.
 
 The generator is deliberately not a physiological digital twin. It creates a
-controlled signal with realistic nuisance structure so downstream systems can
-be tested against weak SSVEPs, endogenous alpha, contact loss, movement and EMG
+controlled signal with useful nuisance structure so downstream systems can be
+tested against weak SSVEPs, endogenous alpha, contact loss, movement and EMG
 without requiring physical hardware for every iteration.
+
+Determinism is a contract: for a fixed seed and unchanged controls, the generated
+sample sequence must not depend on how callers partition the same duration across
+``render()`` calls. Independent random streams and time-major draws enforce that
+property for background, white-noise and artifact processes.
 """
 from __future__ import annotations
 
@@ -61,14 +66,21 @@ class SyntheticEEGGenerator:
     def __init__(self, config: SyntheticEEGConfig | None = None) -> None:
         self.config = config or SyntheticEEGConfig()
         self.config.validate()
-        self.rng = np.random.default_rng(self.config.seed)
+        seed_sequence = np.random.SeedSequence(self.config.seed)
+        phase_seed, colored_seed, white_seed, artifact_seed = seed_sequence.spawn(4)
+        self._phase_rng = np.random.default_rng(phase_seed)
+        self._colored_rng = np.random.default_rng(colored_seed)
+        self._white_rng = np.random.default_rng(white_seed)
+        self._artifact_rng = np.random.default_rng(artifact_seed)
         self.sample_index = 0
         self.target_frequency_hz: float | None = None
         self.attention_gain = 0.0
         self.channel_gain = np.ones(8, dtype=float)
-        self._colored_state = np.zeros((8, 4), dtype=float)
-        self._phase = self.rng.uniform(0, 2 * np.pi, 8)
-        self._alpha_phase = self.rng.uniform(0, 2 * np.pi, 8)
+        # Start the AR components in their stationary N(0,1) marginal rather
+        # than introducing a seed-dependent warm-up transient from zero.
+        self._colored_state = self._colored_rng.normal(size=(8, 4))
+        self._phase = self._phase_rng.uniform(0, 2 * np.pi, 8)
+        self._alpha_phase = self._phase_rng.uniform(0, 2 * np.pi, 8)
         self._artifact_kind: str | None = None
         self._artifact_remaining = 0
         self._artifact_total = 0
@@ -99,13 +111,26 @@ class SyntheticEEGGenerator:
     def _colored_noise(self, samples: int) -> np.ndarray:
         alphas = np.asarray([0.70, 0.90, 0.975, 0.995])
         weights = np.asarray([0.55, 0.42, 0.30, 0.20])
+        # Each AR component has stationary unit variance, so this fixed scale is
+        # the theoretical marginal SD of their weighted sum. Unlike per-block
+        # normalization it does not make the signal depend on render boundaries.
+        normalizer = float(np.sqrt(np.sum(weights**2)))
         out = np.empty((8, samples), dtype=float)
+        innovation_scale = np.sqrt(1.0 - alphas**2)
         for index in range(samples):
-            innovation = self.rng.normal(size=(8, 4))
-            self._colored_state = alphas * self._colored_state + np.sqrt(1.0 - alphas**2) * innovation
+            innovation = self._colored_rng.normal(size=(8, 4))
+            self._colored_state = alphas * self._colored_state + innovation_scale * innovation
             out[:, index] = (self._colored_state * weights).sum(axis=1)
-        out /= max(float(np.std(out)), 1e-8)
-        return out * self.config.colored_noise_uv
+        return out * (self.config.colored_noise_uv / normalizer)
+
+    def _white_noise(self, samples: int) -> np.ndarray:
+        # Draw time-major so one render of N samples and multiple renders whose
+        # lengths sum to N assign the same random values to channel/time pairs.
+        return self._white_rng.normal(
+            0.0,
+            self.config.white_noise_uv,
+            size=(samples, 8),
+        ).T
 
     def _render_artifact(self, samples: int, time_s: np.ndarray) -> np.ndarray:
         if self._artifact_kind is None or self._artifact_remaining <= 0:
@@ -121,17 +146,36 @@ class SyntheticEEGGenerator:
             output[:, :count] += self.frontal_weights[:, None] * (120 * severity * pulse)
         elif kind == "jaw":
             t = time_s[:count]
-            high_frequency = np.sin(2 * np.pi * 38 * t) + 0.8 * np.sin(2 * np.pi * 53 * t + 0.7) + 0.55 * np.sin(2 * np.pi * 71 * t + 1.1)
-            output[:, :count] += (0.55 * self.central_weights + 0.35)[:, None] * (48 * severity * high_frequency)
+            high_frequency = (
+                np.sin(2 * np.pi * 38 * t)
+                + 0.8 * np.sin(2 * np.pi * 53 * t + 0.7)
+                + 0.55 * np.sin(2 * np.pi * 71 * t + 1.1)
+            )
+            output[:, :count] += (
+                (0.55 * self.central_weights + 0.35)[:, None]
+                * (48 * severity * high_frequency)
+            )
         elif kind == "controller":
             t = time_s[:count]
-            controller_emg = np.sin(2 * np.pi * 31 * t) + 0.55 * np.sin(2 * np.pi * 46 * t + 0.4) + 0.30 * self.rng.normal(size=count)
+            controller_emg = (
+                np.sin(2 * np.pi * 31 * t)
+                + 0.55 * np.sin(2 * np.pi * 46 * t + 0.4)
+                + 0.30 * self._artifact_rng.normal(size=count)
+            )
             output[:, :count] += self.central_weights[:, None] * (24 * severity * controller_emg)
         elif kind == "motion":
-            drift = np.sin(np.pi * np.clip(phase, 0, 1)) * np.sign(np.sin(2 * np.pi * 2.2 * time_s[:count]))
-            output[:, :count] += (0.60 + 0.40 * self.frontal_weights)[:, None] * (55 * severity * drift)
+            drift = np.sin(np.pi * np.clip(phase, 0, 1)) * np.sign(
+                np.sin(2 * np.pi * 2.2 * time_s[:count])
+            )
+            output[:, :count] += (
+                (0.60 + 0.40 * self.frontal_weights)[:, None]
+                * (55 * severity * drift)
+            )
         elif kind == "saturation":
             output[6, :count] += 480 * severity
+        elif kind == "dropout":
+            # Dropout is multiplicative and is applied after channel gain below.
+            pass
         self._artifact_remaining -= count
         if self._artifact_remaining <= 0:
             self._artifact_kind = None
@@ -144,19 +188,45 @@ class SyntheticEEGGenerator:
         sample_index = self.sample_index + np.arange(samples)
         time_s = sample_index / fs
         data = self._colored_noise(samples)
-        data += self.rng.normal(0, self.config.white_noise_uv, size=(8, samples))
-        alpha = np.sin(2 * np.pi * self.config.alpha_frequency_hz * time_s[None, :] + self._alpha_phase[:, None])
+        data += self._white_noise(samples)
+        alpha = np.sin(
+            2 * np.pi * self.config.alpha_frequency_hz * time_s[None, :]
+            + self._alpha_phase[:, None]
+        )
         data += self.posterior_weights[:, None] * self.config.alpha_amplitude_uv * alpha
         if self.target_frequency_hz is not None and self.attention_gain > 0:
             frequency = self.target_frequency_hz
-            fundamental = np.sin(2 * np.pi * frequency * time_s[None, :] + self._phase[:, None])
-            harmonic = np.sin(2 * np.pi * 2 * frequency * time_s[None, :] + 0.5 * self._phase[:, None])
+            fundamental = np.sin(
+                2 * np.pi * frequency * time_s[None, :] + self._phase[:, None]
+            )
+            harmonic = np.sin(
+                2 * np.pi * 2 * frequency * time_s[None, :]
+                + 0.5 * self._phase[:, None]
+            )
             ssvep = fundamental + self.config.first_harmonic_ratio * harmonic
-            data += self.posterior_weights[:, None] * self.config.ssvep_amplitude_uv * self.attention_gain * ssvep
+            data += (
+                self.posterior_weights[:, None]
+                * self.config.ssvep_amplitude_uv
+                * self.attention_gain
+                * ssvep
+            )
+
         active_artifact = self._artifact_kind
+        dropout_samples = (
+            min(samples, self._artifact_remaining)
+            if active_artifact == "dropout" and self._artifact_remaining > 0
+            else 0
+        )
         data += self._render_artifact(samples, time_s)
         data *= self.channel_gain[:, None]
-        if active_artifact == "dropout":
-            data[6, :] = 0.0
+        if dropout_samples:
+            data[6, :dropout_samples] = 0.0
+
         self.sample_index += samples
-        return SyntheticEEGBlock(data.astype(np.float32), time_s.astype(float), self.target_frequency_hz, self.attention_gain, active_artifact)
+        return SyntheticEEGBlock(
+            data.astype(np.float32),
+            time_s.astype(float),
+            self.target_frequency_hz,
+            self.attention_gain,
+            active_artifact,
+        )
