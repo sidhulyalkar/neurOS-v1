@@ -113,6 +113,25 @@ def _parse_args() -> argparse.Namespace:
     )
     _add_json_flag(reproduce_parser)
 
+    hardware_parser = subparsers.add_parser(
+        "hardware-evidence",
+        help="Evaluate measured hardware evidence against explicit qualification gates",
+    )
+    hardware_parser.add_argument("evidence", type=str, help="Hardware evidence JSON file")
+    hardware_parser.add_argument(
+        "--qualification-bundle",
+        type=str,
+        default=None,
+        help="Optional neurOS qualification bundle to verify and bind before promotion",
+    )
+    hardware_parser.add_argument(
+        "--thresholds",
+        type=str,
+        default=None,
+        help="Optional hardware threshold JSON; defaults to the v1 reference profile",
+    )
+    _add_json_flag(hardware_parser)
+
     inspect_parser = subparsers.add_parser("inspect", help="Inspect a neurOS session archive")
     inspect_parser.add_argument("archive", type=str)
     inspect_parser.add_argument("--verify", action="store_true", help="Verify every frame SHA-256")
@@ -323,6 +342,27 @@ def main() -> None:
                 )
             )
             _emit(result, machine=args.json)
+            return
+
+        if args.command == "hardware-evidence":
+            from neuros.hardware_qualification import (
+                evaluate_hardware_evidence_bundle,
+                evaluate_hardware_qualification,
+                load_hardware_evidence,
+                load_thresholds,
+            )
+
+            manifest = load_hardware_evidence(args.evidence)
+            thresholds = load_thresholds(args.thresholds) if args.thresholds else None
+            if args.qualification_bundle:
+                result = evaluate_hardware_evidence_bundle(
+                    manifest,
+                    args.qualification_bundle,
+                    thresholds,
+                )
+            else:
+                result = evaluate_hardware_qualification(manifest, thresholds)
+            _emit(result.to_dict(), machine=args.json)
             return
 
         if args.command == "inspect":
