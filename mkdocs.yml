@@ -5,6 +5,16 @@ repo_name: sidhulyalkar/neurOS-v1
 repo_url: https://github.com/sidhulyalkar/neurOS-v1
 edit_uri: edit/main/docs/
 
+# Historical documents remain in the repository for provenance but are not part
+# of the maintained public documentation contract. Strict builds therefore
+# validate active docs without forcing obsolete pre-kernel/session links to
+# masquerade as supported navigation.
+exclude_docs: |
+  archive/development/**
+  archive/migrations/**
+  archive/research/**
+  archive/session-notes/**
+
 theme:
   name: material
   palette:
@@ -51,6 +61,9 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting Started:
+      - First 10 Minutes: getting-started/first-10-minutes.md
+      - Installation: getting-started/installation.md
   - Platform:
       - Four Public Surfaces: PLATFORM.md
       - Ecosystem Compatibility: COMPATIBILITY.md
@@ -59,6 +72,9 @@ nav:
       - Hardware Qualification: HARDWARE_QUALIFICATION.md
       - Architecture: ARCHITECTURE.md
       - Project Status: PROJECT_STATUS.md
+  - Scientific Trust:
+      - Scientific Claims: SCIENTIFIC_CLAIMS.md
+      - Release Policy: RELEASE_POLICY.md
   - Real-World Evidence:
       - Evidence Program: REAL_WORLD_EVIDENCE.md
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
@@ -70,7 +86,6 @@ nav:
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
   - SDK:
-      - Installation: getting-started/installation.md
       - Neural Windows: NEURAL_WINDOWS.md
       - Braindecode: BRAINDECODE.md
       - API Surface: API_REFERENCE.md

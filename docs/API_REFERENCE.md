@@ -447,4 +447,4 @@ contracts
 
 Kernel packages must not import research implementations. New capabilities should enter through contracts and plugin/adapter interfaces rather than new cross-package coupling.
 
-For the current maturity of each package, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md). For the next qualification sequence, see [`../ROADMAP.md`](../ROADMAP.md).
+For the current maturity of each package, see [`PROJECT_STATUS.md`](PROJECT_STATUS.md). For the next qualification sequence, see the repository [`ROADMAP.md`](https://github.com/sidhulyalkar/neurOS-v1/blob/main/ROADMAP.md).
