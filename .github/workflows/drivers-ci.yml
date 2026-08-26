@@ -9,6 +9,7 @@ on:
       - "tests/test_lsl_driver.py"
       - "tests/test_unicorn_*.py"
       - "examples/unicorn_*.py"
+      - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
   push:
     branches:
@@ -21,6 +22,7 @@ on:
       - "tests/test_lsl_driver.py"
       - "tests/test_unicorn_*.py"
       - "examples/unicorn_*.py"
+      - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
 
 permissions:
@@ -70,6 +72,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
       - name: Install driver test profile
         run: |
           python -m pip install --upgrade pip
@@ -99,6 +104,8 @@ jobs:
             --mode bandpower \
             --fault-profile delay-probe \
             --dry-run-packets 20
+      - name: Compile engine-facing C# receiver
+        run: dotnet build examples/game_engines/csharp/Neuros.Unicorn.Examples.csproj --configuration Release
       - name: Syntax-check real-time substitution endpoints
         run: |
           python -m py_compile \
