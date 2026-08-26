@@ -40,7 +40,7 @@ GovernedAdaptationProposal
 
 The evidence records are immutable and deterministically fingerprinted. They do not contain wall-clock time in their semantic identity, so replaying the same authority, proposal, decision, application, and evaluation yields the same fingerprints.
 
-The API field remains named `evaluation_indices` for compatibility, but when those rows are used to choose `RETAINED` versus `ROLLED_BACK`, they are scientifically a **qualification/state-selection partition**. They are not an untouched final test set.
+The ORION API field remains named `evaluation_indices` for compatibility, but when those rows are used to choose `RETAINED` versus `ROLLED_BACK`, they are scientifically a **qualification/state-selection partition**. They are not an untouched final test set.
 
 ## Why this exists
 
@@ -58,7 +58,7 @@ Adaptive neural systems can accidentally produce optimistic results when:
 
 The authority contract makes these failure modes explicit and testable.
 
-## Core types
+## Core ORION types
 
 ### `ArtifactIdentity`
 
@@ -131,7 +131,7 @@ Finalizes the evidence as either:
 
 This record says what happened. It does not prescribe a universal policy for whether accuracy, calibration, latency, reconstruction error, or another metric should dominate the retain/rollback decision.
 
-## Example
+## ORION example
 
 ```python
 from orion import (
@@ -211,30 +211,132 @@ The worker runs against installed ngc-learn 3.2 on Python 3.10 and 3.11 and its 
 
 This qualifies **process integrity** for that integration. It does not establish real neural-data efficacy.
 
-## Relationship to longitudinal evidence
+## Longitudinal authority versions
 
-The foundation evidence layer already owns stronger dataset-specific authorities such as `LongitudinalCaseAuthority`. ORION does **not** import `neuros-foundation` to reuse them, because that would reverse the stable dependency direction.
+neurOS now has two complementary longitudinal evidence contracts.
 
-Instead, a real experiment should derive adaptation authority from an already-frozen case and carry identity forward:
+### v1: `LongitudinalCaseAuthority`
+
+The v1 authority freezes source history, nested target calibration, and one immutable evaluation set. Existing v1 artifacts remain valid and replayable.
+
+V1 is appropriate when the held-out evaluation set is never used to select model state, hyperparameters, thresholds, metrics, or policy. For example, a predetermined model may be fit at a declared calibration budget and scored once on the same frozen evaluation set across methods.
+
+V1 must **not** be reinterpreted as untouched final-assessment evidence if its evaluation rows were used to choose retain versus rollback or otherwise select the reported model state.
+
+### v2: `ThreeWayLongitudinalCaseAuthority`
+
+Adaptive efficacy studies should use the additive v2 contract:
+
+```python
+from neuros.foundation_models import (
+    ThreeWayLongitudinalCaseAuthority,
+    make_three_way_calibration_split,
+)
+
+split = make_three_way_calibration_split(
+    prospective_partition,
+    qualification_fraction=0.25,
+    final_assessment_fraction=0.25,
+    seed=23,
+)
+
+authority = ThreeWayLongitudinalCaseAuthority.from_split(
+    split,
+    case_id="subject-07/session-02/three-way-v2",
+    history_policy="prior",
+)
+```
+
+The v2 authority freezes four roles:
 
 ```text
-LongitudinalCaseAuthority
+historical/source rows
+        |
+        v
+CALIBRATION
+state may change
+        |
+        v
+QUALIFICATION
+read-only; may choose retain/rollback
+        |
+        v
+frozen selected state + frozen policy
+        |
+        v
+FINAL ASSESSMENT
+read-only; cannot select state or policy
+        |
+        v
+scientific result
+```
+
+The contract enforces:
+
+- source history remains separate from the held-out deployment unit;
+- calibration, qualification, and final-assessment rows are pairwise disjoint;
+- those three target roles cover the held-out partition exactly;
+- qualification and final assessment preserve complete held-out class support;
+- calibration membership is balanced and nested per class;
+- selected calibration rows are returned in canonical source-row order so order-sensitive adaptive methods receive the same execution order;
+- qualification and final-assessment identities remain invariant across every calibration budget;
+- exact SHA-256 identities bind qualification, final assessment, and each calibration budget to the processed-data identity;
+- serialization rejects malformed numeric fields rather than truncating/coercing them;
+- non-finite or opaque semantic metadata is rejected;
+- declared chronology is checked when the authority is constructed;
+- `restore(processed_data)` independently verifies processed neural bytes, labels/groups, chronology, partition identity, class support, and split identity.
+
+The returned qualification/final arrays and calibration-order arrays are read-only. Exact-set guards reject subsets, supersets, or reordered qualification/final-assessment rows.
+
+### Construction is not dataset qualification
+
+A serialized v2 authority is an **identity declaration** until it has successfully restored against the processed dataset.
+
+A SHA-256 over declared indices does not prove that those rows truly belong to the claimed subject/session/classes. `restore(data)` is the operation that reconnects the declaration to processed neural bytes and re-runs dataset-dependent invariants.
+
+The deterministic software evidence worker therefore serializes the authority and restores it against the processed fixture before emitting evidence:
+
+```bash
+python scripts/evidence/verify_longitudinal_three_way_authority.py
+```
+
+CI executes that worker twice and requires byte-identical JSON.
+
+## Relationship between v2 and ORION authority
+
+The foundation evidence layer owns dataset-specific chronology and three-way partitioning. ORION does **not** import `neuros-foundation`, because that would reverse the stable dependency direction.
+
+Instead, each positive calibration budget derives a method-specific `AdaptationAuthority` from the already-restored v2 longitudinal authority:
+
+```text
+ThreeWayLongitudinalCaseAuthority
   processed data SHA-256
-  calibration ordering
-  qualification ordering
-  source authority fingerprint
+  source chronology
+  exact calibration budget SHA-256
+  immutable qualification SHA-256
+  immutable final-assessment SHA-256
+  authority fingerprint
             |
             v
 AdaptationAuthority
-  exact selected calibration budget
+  exact selected calibration indices
   exact qualification indices
   source_authority_fingerprint
             |
             v
 state-changing algorithm
+            |
+            v
+retain / exact rollback
+            |
+            v
+frozen state
+            |
+            v
+ThreeWayLongitudinalCaseAuthority.final_assessment_indices
 ```
 
-The selected state must then be frozen before an independent final assessment.
+Budget 0 is a **frozen no-update baseline**. The current ORION `AdaptationAuthority` requires non-empty adaptation indices, so a zero-calibration point must not fabricate an empty adaptation event merely to fit the state-changing API.
 
 ## Three-way authority for efficacy studies
 
@@ -245,45 +347,24 @@ Two partitions are sufficient to qualify **adaptation process integrity**:
 
 They are not sufficient for an unbiased final efficacy claim if the second partition influences model-state selection.
 
-Real adaptation studies should therefore use:
-
-```text
-source / historical data
-        |
-        v
-CALIBRATION AUTHORITY
-state may change
-        |
-        v
-QUALIFICATION AUTHORITY
-state is read-only; may choose retain/rollback
-        |
-        v
-frozen selected state
-        |
-        v
-FINAL-ASSESSMENT AUTHORITY
-state and policy are immutable
-        |
-        v
-scientific result
-```
-
 The final-assessment partition must not influence:
 
 - whether adaptation occurs;
 - learning rate, epoch count, calibration budget, or other hyperparameters;
 - retain/rollback decisions;
 - metric selection;
-- threshold selection.
+- threshold selection;
+- early stopping;
+- architecture/model selection;
+- the definition of the reported operating point.
 
 This is the authority neurOS should use for claims such as “X requires fewer calibration examples than Y” or “X transfers better across sessions.”
 
 ## What this does not claim
 
-A valid adaptation ledger proves **process integrity**, not adaptation benefit.
+A valid adaptation ledger and v2 longitudinal authority prove **process/evaluation integrity**, not adaptation benefit.
 
-It does not prove that:
+They do not prove that:
 
 - the update improves real neural decoding;
 - personalization reduces calibration cost;
@@ -295,16 +376,16 @@ Those require their own evidence under the project-wide scientific claim ladder.
 
 ## Next qualification rung
 
-The next use should be a real longitudinal governed-adaptation study in which:
+After this software authority is qualified, the next study should use one restored v2 longitudinal case for all competing methods:
 
-1. a real `LongitudinalCaseAuthority` freezes target-session chronology and processed-data identity;
-2. one explicit calibration budget becomes the adaptation partition;
-3. a second held-out target partition becomes the retention/rollback qualification partition;
-4. real upstream Hebbian synapses update only calibration rows;
-5. before/after complete learning states receive immutable identities;
-6. the state is retained or exactly rolled back under a predeclared policy;
-7. the selected state is frozen;
-8. a third independent final-assessment partition is scored once;
-9. the identical three-way authority is given to ORION and frozen baselines for matched comparison.
+1. freeze source chronology and processed-data identity;
+2. freeze calibration membership, qualification rows, and final-assessment rows once;
+3. instantiate one explicit positive calibration budget per experiment;
+4. adapt only on those calibration rows;
+5. use qualification rows only under a predeclared state-selection policy;
+6. retain or exactly roll back complete mutable state;
+7. freeze the selected state and every policy/hyperparameter;
+8. score the final-assessment set once;
+9. give the same v2 authority to frozen baselines, governed Hebbian predictive coding, and ORION adaptation.
 
 That sequence lets neurOS compare biologically local learning and ORION personalization without allowing either method to move the goalposts.

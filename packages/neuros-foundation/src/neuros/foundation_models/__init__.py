@@ -26,6 +26,13 @@ from neuros.foundation_models.longitudinal_authority import (
     LongitudinalCaseAuthority,
     processed_data_sha256,
 )
+from neuros.foundation_models.longitudinal_three_way import (
+    ThreeWayCalibrationSplit,
+    make_three_way_calibration_split,
+)
+from neuros.foundation_models.longitudinal_three_way_authority import (
+    ThreeWayLongitudinalCaseAuthority,
+)
 from neuros.foundation_models.longitudinal_baseline import CSPCaseResult, run_csp_case
 from neuros.foundation_models.longitudinal_external import (
     ExternalTaskDecoderCaseResult,
@@ -235,6 +242,9 @@ __all__ = [
     "NestedCalibrationSplit",
     "make_nested_calibration_split",
     "LongitudinalCaseAuthority",
+    "ThreeWayCalibrationSplit",
+    "make_three_way_calibration_split",
+    "ThreeWayLongitudinalCaseAuthority",
     "processed_data_sha256",
     "CSPCaseResult",
     "run_csp_case",
