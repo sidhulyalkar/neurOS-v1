@@ -8,6 +8,8 @@ from neuros.foundation_models.ngclearn_hebbian import (
     HEBBIAN_PC_METHOD_ID,
     NgcLearnHebbianPredictiveCoding,
     NgcLearnHebbianState,
+    _state_sha256,
+    _tree_sha256,
 )
 
 
@@ -64,7 +66,6 @@ def test_real_upstream_hebbian_adaptation_changes_complete_state():
     model = _model(optimizer="sgd")
     samples = _samples()
 
-    # Initializes the runtime while proving the first held-out-style inference is read-only.
     inference = model.infer(samples[:2], sample_rate_hz=250.0)
     before = model.snapshot_state()
     assert inference.state_sha256 == before.state_sha256
@@ -89,14 +90,13 @@ def test_real_upstream_hebbian_adaptation_changes_complete_state():
     assert before.weights_sha256 != after.weights_sha256
     assert before.optimizer_sha256 != after.optimizer_sha256
     assert result.evidence.weight_delta_l2 > 0.0
-    # Evidence identity is defined on the canonical float64 time x channel matrix
-    # that the ngc-learn bridge actually consumes, not the caller's source dtype.
     assert result.evidence.adaptation_input_sha256 == _array_sha256(_matrix(samples[2:]))
 
     boundary = result.evidence.to_dict()["claim_boundary"]
     assert boundary["hebbian_synapse_executed"] is True
     assert boundary["state_identity_includes_optimizer"] is True
     assert boundary["transactional_checkpoint_validation"] is True
+    assert boundary["optimizer_schema_validated_before_rollback"] is True
     assert boundary["orion_authority_applied_here"] is False
     assert boundary["real_dataset_qualified"] is False
     assert boundary["calibration_reduction_qualified"] is False
@@ -143,7 +143,6 @@ def test_adam_rollback_restores_weights_optimizer_and_future_trajectory():
     model = _model(optimizer="adam")
     reference = _model(optimizer="adam")
 
-    # Initialize both runtimes without changing learnable state.
     model.infer(samples[:1], sample_rate_hz=250.0)
     reference.infer(samples[:1], sample_rate_hz=250.0)
     checkpoint = model.snapshot_state()
@@ -187,6 +186,34 @@ def test_corrupt_checkpoint_fails_before_live_state_is_modified():
 
     with pytest.raises(ValueError, match="weight SHA-256"):
         model.restore_state(corrupted)
+
+    live_after = model.snapshot_state()
+    assert live_after.state_sha256 == live_before.state_sha256
+    assert np.array_equal(live_after.weights, live_before.weights)
+
+
+def test_self_consistent_incompatible_optimizer_checkpoint_fails_transactionally():
+    pytest.importorskip("ngclearn")
+    jax = pytest.importorskip("jax")
+    model = _model(optimizer="adam")
+    samples = _samples()
+    model.adapt(samples[:2], sample_rate_hz=250.0, epochs=1)
+    live_before = model.snapshot_state()
+
+    # Forge a self-consistent SGD-like scalar optimizer state. Its hashes all
+    # agree with its contents, but it is structurally invalid for this Adam learner.
+    forged_optimizer = np.asarray(1.0, dtype=np.float32)
+    forged_optimizer_sha = _tree_sha256(jax, forged_optimizer)
+    forged = NgcLearnHebbianState(
+        weights=live_before.weights,
+        optimizer_state=forged_optimizer,
+        weights_sha256=live_before.weights_sha256,
+        optimizer_sha256=forged_optimizer_sha,
+        state_sha256=_state_sha256(live_before.weights_sha256, forged_optimizer_sha),
+    )
+
+    with pytest.raises(ValueError, match="optimizer pytree structure"):
+        model.restore_state(forged)
 
     live_after = model.snapshot_state()
     assert live_after.state_sha256 == live_before.state_sha256
