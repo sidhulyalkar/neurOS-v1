@@ -51,7 +51,6 @@ API_FROM_RAW_UDP_INDICES = RAW_UDP_FROM_API_INDICES  # the swap is its own inver
 
 def api17_scan_to_raw_udp_order(values: np.ndarray) -> np.ndarray:
     """Reorder one API17 scan into the standalone raw-UDP field order."""
-
     scan = np.asarray(values, dtype=np.float32)
     if scan.shape != (RAW_UDP_CHANNEL_COUNT,):
         raise ValueError("API17 scan must contain exactly 17 values")
@@ -60,7 +59,6 @@ def api17_scan_to_raw_udp_order(values: np.ndarray) -> np.ndarray:
 
 def raw_udp_scan_to_api17_order(values: np.ndarray) -> np.ndarray:
     """Reorder one raw-UDP scan back into direct API17 acquisition order."""
-
     scan = np.asarray(values, dtype=np.float32)
     if scan.shape != (RAW_UDP_CHANNEL_COUNT,):
         raise ValueError("raw UDP scan must contain exactly 17 values")
@@ -80,7 +78,6 @@ def encode_unicorn_udp_scan(
     endian representation matches the Windows/x86 environment of Unicorn Suite;
     callers can override it when testing defensive receivers.
     """
-
     if block.schema != "device17_api":
         raise ValueError("raw Unicorn UDP requires a device17_api block")
     if block.data.shape[0] != RAW_UDP_CHANNEL_COUNT:
@@ -102,23 +99,36 @@ def decode_unicorn_udp_scan(payload: bytes, *, byte_order: str = "<") -> np.ndar
     Use :func:`raw_udp_scan_to_api17_order` if downstream code expects the
     direct API/Recorder auxiliary order.
     """
-
     if len(payload) != RAW_UDP_PAYLOAD_BYTES:
         raise ValueError(f"expected {RAW_UDP_PAYLOAD_BYTES} bytes, received {len(payload)}")
     return np.asarray(struct.unpack(byte_order + "17f", payload), dtype=np.float32)
 
 
+def _integrate_frequency_bins(values: np.ndarray, frequencies: np.ndarray) -> np.ndarray:
+    """Integrate PSD bins across NumPy 1.x/2.x without relying on removed APIs."""
+    trapezoid = getattr(np, "trapezoid", None)
+    if trapezoid is not None:
+        return np.asarray(trapezoid(values, frequencies, axis=1), dtype=float)
+    # NumPy <2.0 exposed trapz instead. Access it only on versions that do not
+    # provide trapezoid so import under NumPy 2.4+ remains safe.
+    trapz = getattr(np, "trapz", None)
+    if trapz is not None:
+        return np.asarray(trapz(values, frequencies, axis=1), dtype=float)
+    # Defensive final fallback for unusual NumPy builds. FFT frequencies are
+    # uniformly spaced, so a rectangle rule remains deterministic and explicit.
+    if frequencies.size < 2:
+        return np.zeros(values.shape[0], dtype=float)
+    return np.sum(values, axis=1) * float(np.mean(np.diff(frequencies)))
+
+
 def _band_power(window_uv: np.ndarray, sampling_rate_hz: float) -> np.ndarray:
     """Return transparent reference band power as channels × seven bands."""
-
     data = np.asarray(window_uv, dtype=float)
     if data.ndim != 2 or data.shape[1] < 16:
         raise ValueError("bandpower window must be channels x samples")
     centered = data - np.mean(data, axis=1, keepdims=True)
     taper = np.hanning(data.shape[1])
     spectrum = np.fft.rfft(centered * taper[None, :], axis=1)
-    # Window-energy normalization produces an ordinary one-sided power-density
-    # estimate adequate for deterministic compatibility testing.
     scale = sampling_rate_hz * max(float(np.sum(taper**2)), 1e-12)
     psd = np.abs(spectrum) ** 2 / scale
     if psd.shape[1] > 2:
@@ -130,7 +140,7 @@ def _band_power(window_uv: np.ndarray, sampling_rate_hz: float) -> np.ndarray:
         if not np.any(mask):
             output[:, band_i] = np.nan
         else:
-            output[:, band_i] = np.trapz(psd[:, mask], frequencies[mask], axis=1)
+            output[:, band_i] = _integrate_frequency_bins(psd[:, mask], frequencies[mask])
     return output
 
 
@@ -151,7 +161,6 @@ def compute_unicorn_bandpower_payload(
     behavior. Averages ignore disabled channels. If fewer than two channels are
     enabled, bipolar features are NaN.
     """
-
     eeg = np.asarray(eeg_window_uv, dtype=float)
     if eeg.ndim != 2 or eeg.shape[0] != 8:
         raise ValueError("Unicorn Bandpower requires 8 EEG channels")
@@ -161,7 +170,7 @@ def compute_unicorn_bandpower_payload(
     if enabled.shape != (8,):
         raise ValueError("enabled_channels must contain exactly 8 booleans")
 
-    per_channel = _band_power(eeg, sampling_rate_hz)  # 8 × 7
+    per_channel = _band_power(eeg, sampling_rate_hz)
     visible = per_channel.copy()
     visible[~enabled, :] = np.nan
     band_major = visible.T.reshape(-1)
@@ -188,7 +197,6 @@ def compute_unicorn_bandpower_payload(
 
 def encode_unicorn_bandpower_ascii(values: np.ndarray) -> bytes:
     """Encode a 70-value Bandpower payload as comma-separated ASCII."""
-
     array = np.asarray(values, dtype=float)
     if array.shape != (BANDPOWER_FEATURE_COUNT,):
         raise ValueError("Bandpower payload must contain exactly 70 values")
@@ -219,7 +227,6 @@ class UnicornBandpowerReferenceStream:
     250-sample buffer, 240-sample overlap, therefore 10-sample hop / 25 Hz
     feature update rate at 250 Hz EEG.
     """
-
     def __init__(
         self,
         *,
@@ -275,8 +282,6 @@ class UnicornBandpowerReferenceStream:
                 )
             )
             self._next_emit += self.hop_samples
-        # Retain only enough history for the next overlapping window plus a
-        # small hop margin. This keeps long game simulations bounded.
         keep = self.buffer_size + self.hop_samples
         if self._data.shape[1] > keep:
             self._data = self._data[:, -keep:]
