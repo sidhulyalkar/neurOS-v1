@@ -173,6 +173,24 @@ namespace Neuros.Unicorn
             }
         }
 
+        public void BeginNewEpoch()
+        {
+            // Counter wrap/reset behavior is not documented by the public wire
+            // contract. Never infer it from CNT. Call this only when the
+            // application/device lifecycle knows a new acquisition has begun.
+            // Authority and liveness are revoked until the normal recovery
+            // streak is rebuilt from fresh packets.
+            lock (_sync)
+            {
+                _counterHighWater = null;
+                _counterPrecisionAmbiguous = false;
+                _lastDecodableReceiveSeconds = null;
+                _healthyStreak = 0;
+                _lastHealth = UnicornStreamHealth.Stale;
+                _latest = null;
+            }
+        }
+
         public bool TryGetLatest(out UnicornRawUdpSample sample)
         {
             lock (_sync)
