@@ -173,6 +173,39 @@ def test_counter_above_float32_unit_step_exactness_fails_closed():
     assert observation.authority_allowed is False
 
 
+def test_counter_reset_requires_explicit_new_epoch_before_authority_can_recover():
+    stream = UnicornRawUdpStreamSimulator(seed=121)
+    guard = UnicornRawUdpGuard(UnicornRawUdpGuardConfig(recovery_packets=2))
+    packet = _packet(stream)
+
+    first = guard.ingest(_set_counter(packet, 100.0), received_monotonic_s=0.000)
+    second = guard.ingest(_set_counter(packet, 101.0), received_monotonic_s=0.004)
+    assert first.sequence_status == "first"
+    assert second.authority_allowed is True
+
+    reset_without_lifecycle = guard.ingest(
+        _set_counter(packet, 0.0),
+        received_monotonic_s=0.008,
+    )
+    assert reset_without_lifecycle.sequence_status == "out_of_order"
+    assert reset_without_lifecycle.authority_allowed is False
+    assert guard.last_counter == 101
+
+    guard.begin_new_epoch()
+    reset_state = guard.state(now_monotonic_s=0.009)
+    assert reset_state.health == "stale"
+    assert reset_state.stream_live is False
+    assert reset_state.authority_allowed is False
+    assert reset_state.last_counter is None
+
+    new_first = guard.ingest(_set_counter(packet, 0.0), received_monotonic_s=0.012)
+    new_second = guard.ingest(_set_counter(packet, 1.0), received_monotonic_s=0.016)
+    assert new_first.sequence_status == "first"
+    assert new_first.authority_allowed is False
+    assert new_second.sequence_status == "sequential"
+    assert new_second.authority_allowed is True
+
+
 def test_stale_interval_revokes_authority_and_fresh_packet_cannot_inherit_old_streak():
     stream = UnicornRawUdpStreamSimulator(seed=127)
     guard = UnicornRawUdpGuard(
