@@ -10,6 +10,7 @@ on:
       - "packages/neuros/src/neuros/compatibility.py"
       - "packages/neuros-foundation/tests/test_spectral_alignment.py"
       - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
+      - "scripts/evidence/verify_snap_upstream.py"
       - "docs/NEUROAI_ECOSYSTEM.md"
       - "docs/COMPATIBILITY.md"
       - "mkdocs.yml"
@@ -24,6 +25,7 @@ on:
       - "packages/neuros/src/neuros/compatibility.py"
       - "packages/neuros-foundation/tests/test_spectral_alignment.py"
       - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
+      - "scripts/evidence/verify_snap_upstream.py"
       - "docs/NEUROAI_ECOSYSTEM.md"
       - "docs/COMPATIBILITY.md"
       - "mkdocs.yml"
@@ -63,6 +65,36 @@ jobs:
           python -m compileall -q \
             packages/neuros-foundation/src/neuros/foundation_models/spectral_alignment.py \
             packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py
+
+  snap-upstream-conformance:
+    name: Pinned SNAP upstream invariant conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout exact SNAP reference revision
+        uses: actions/checkout@v4
+        with:
+          repository: chung-neuroai-lab/SNAP
+          ref: 76570574eab7b3115ed4503f8c4ecefaa2a7c5e6
+          path: upstream-snap
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install minimal conformance environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation
+          python -m pip install torch tqdm
+      - name: Execute authors' pinned spectral reference code
+        run: |
+          python scripts/evidence/verify_snap_upstream.py \
+            --snap-root upstream-snap \
+            --output "${RUNNER_TEMP}/snap-conformance.json"
+          test -s "${RUNNER_TEMP}/snap-conformance.json"
 
   ngclearn-integration:
     name: ngc-learn 3.2 integration / Python ${{ matrix.python-version }}
