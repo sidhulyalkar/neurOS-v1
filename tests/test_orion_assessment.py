@@ -60,6 +60,7 @@ def _final_authority(
     *,
     assessment_indices: tuple[int, ...] = (4, 5, 6, 7),
     source: str = "three-way-source",
+    protocol: str | None = "three-way-protocol",
 ) -> FinalAssessmentAuthority:
     return FinalAssessmentAuthority(
         authority_id="case/final-v1",
@@ -70,7 +71,7 @@ def _final_authority(
         n_samples=8,
         source_authority_fingerprint=source,
         metric_names=("balanced_accuracy", "ece"),
-        protocol_fingerprint="three-way-protocol",
+        protocol_fingerprint=protocol,
         seed=7,
         metadata={"scorecard": {"primary": "balanced_accuracy", "version": 1}},
     )
@@ -240,6 +241,14 @@ def test_study_authority_requires_same_source_dataset_protocol_and_disjoint_fina
             final_assessment_authority=qualification_overlap,
         )
 
+    with pytest.raises(ValueError, match="protocol fingerprints differ"):
+        AdaptiveStudyAuthority(
+            study_id="bad-protocol",
+            source_authority_fingerprint="three-way-source",
+            adaptation_authority=adaptation,
+            final_assessment_authority=_final_authority(protocol=None),
+        )
+
 
 def test_study_can_only_select_an_outcome_from_its_adaptation_authority():
     adaptation, outcome = _outcome()
@@ -376,6 +385,53 @@ def test_assessment_metadata_rejects_key_collisions_and_nonfinite_values():
             source_authority_fingerprint="three-way-source",
             metric_names=("balanced_accuracy",),
             metadata={"threshold": float("nan")},
+        )
+
+
+def test_schema_and_identifier_types_fail_closed():
+    with pytest.raises(ValueError, match="schema_version must be 1"):
+        FinalAssessmentAuthority(
+            authority_id="schema",
+            dataset_id="fixture-eeg",
+            split_unit="session",
+            assessment_indices=(4, 5),
+            processed_data_sha256=_sha("processed-data"),
+            n_samples=8,
+            source_authority_fingerprint="three-way-source",
+            metric_names=("balanced_accuracy",),
+            schema_version=2,
+        )
+
+    with pytest.raises(ValueError, match="authority_id must be a string"):
+        FinalAssessmentAuthority(
+            authority_id=7,  # type: ignore[arg-type]
+            dataset_id="fixture-eeg",
+            split_unit="session",
+            assessment_indices=(4, 5),
+            processed_data_sha256=_sha("processed-data"),
+            n_samples=8,
+            source_authority_fingerprint="three-way-source",
+            metric_names=("balanced_accuracy",),
+        )
+
+    with pytest.raises(ValueError, match="strings only"):
+        FinalAssessmentAuthority(
+            authority_id="metric-type",
+            dataset_id="fixture-eeg",
+            split_unit="session",
+            assessment_indices=(4, 5),
+            processed_data_sha256=_sha("processed-data"),
+            n_samples=8,
+            source_authority_fingerprint="three-way-source",
+            metric_names=("balanced_accuracy", 7),  # type: ignore[arg-type]
+        )
+
+    with pytest.raises(ValueError, match="kind must be a SelectionKind"):
+        SelectedState(
+            selection_id="bad-kind",
+            source_authority_fingerprint="three-way-source",
+            artifact=_artifact("frozen"),
+            kind="frozen",  # type: ignore[arg-type]
         )
 
 
