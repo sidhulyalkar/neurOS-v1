@@ -123,6 +123,24 @@ class UnicornRawUdpGuard:
     def healthy_streak(self) -> int:
         return self._healthy_streak
 
+    def begin_new_epoch(self) -> None:
+        """Explicitly start a new acquisition/counter epoch.
+
+        The public raw-UDP interface does not document counter wrap/reset
+        semantics, so the guard never infers an epoch transition from packet
+        values. Applications should call this only when their own transport or
+        device lifecycle knows that a new acquisition session has begun, for
+        example after an intentional reconnect/restart. The operation revokes
+        liveness and authority and requires the normal recovery streak again.
+        """
+
+        self._counter_high_water = None
+        self._last_decodable_receive_s = None
+        self._healthy_streak = 0
+        self._last_health = "stale"
+        self._last_sequence_status = "unknown"
+        self._last_validation_asserted = None
+
     def _malformed(self, received_s: float, *, reason: str) -> UnicornRawUdpObservation:
         self._healthy_streak = 0
         self._last_health = "malformed"
