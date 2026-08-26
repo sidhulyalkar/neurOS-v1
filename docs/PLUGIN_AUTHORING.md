@@ -2,7 +2,7 @@
 
 neurOS is designed to be extended **without editing the kernel**. A hardware vendor, lab, research group, or application team should be able to publish an ordinary Python distribution that contributes one or more entry points and exchanges only stable neurOS contracts.
 
-The maintained reference package is [`examples/plugins/neuros-example-plugin`](../examples/plugins/neuros-example-plugin/README.md). It is intentionally excluded from the root workspace so CI proves that discovery works across a real distribution boundary.
+The maintained reference package is [`examples/plugins/neuros-example-plugin`](https://github.com/sidhulyalkar/neurOS-v1/tree/main/examples/plugins/neuros-example-plugin). It is intentionally excluded from the root workspace so CI proves that discovery works across a real distribution boundary.
 
 ## Extension groups
 
