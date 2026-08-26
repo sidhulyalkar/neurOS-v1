@@ -50,7 +50,12 @@ def test_test_signal_mode_is_rectangular_and_explicitly_simulator_defined():
     data = api.get_data(100)
     eeg = data[:, :8]
     assert set(np.unique(eeg)).issubset({-80.0, 80.0})
-    assert np.allclose(eeg[:, 0], eeg[0, 0])
+    # get_data is scan-major (scans x channels): every EEG electrode sees the
+    # same simulator-defined rectangular calibration level within a scan, while
+    # the level is allowed to toggle over time.
+    assert np.allclose(eeg, eeg[:, :1])
+    assert np.any(eeg[:, 0] > 0.0)
+    assert np.any(eeg[:, 0] < 0.0)
 
 
 def test_digital_outputs_are_8_bit_state():
