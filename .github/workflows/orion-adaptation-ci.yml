@@ -8,6 +8,7 @@ on:
       - "packages/orion/src/orion/__init__.py"
       - "packages/orion/pyproject.toml"
       - "tests/test_orion_adaptation.py"
+      - "tests/test_orion_adaptation_integrity.py"
       - "tests/test_orion_contracts.py"
       - "examples/orion/adaptation_authority.py"
       - "docs/ADAPTATION_AUTHORITY.md"
@@ -22,6 +23,7 @@ on:
       - "packages/orion/src/orion/__init__.py"
       - "packages/orion/pyproject.toml"
       - "tests/test_orion_adaptation.py"
+      - "tests/test_orion_adaptation_integrity.py"
       - "tests/test_orion_contracts.py"
       - "examples/orion/adaptation_authority.py"
       - "docs/ADAPTATION_AUTHORITY.md"
@@ -59,6 +61,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_orion_adaptation.py \
+            tests/test_orion_adaptation_integrity.py \
             tests/test_orion_contracts.py
       - name: Exercise public authority example twice
         run: |
