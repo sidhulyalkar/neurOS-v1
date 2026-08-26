@@ -1,0 +1,129 @@
+name: ngc-learn Hebbian Adaptation
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/__init__.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_hebbian.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_predictive_coding.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py"
+      - "packages/orion/src/orion/adaptation.py"
+      - "packages/neuros/src/neuros/compatibility.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_hebbian.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
+      - "tests/test_ngclearn_hebbian_authority.py"
+      - "tests/test_compatibility_registry.py"
+      - "scripts/evidence/run_ngclearn_hebbian_authority.py"
+      - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/COMPATIBILITY.md"
+      - "docs/NEUROAI_ECOSYSTEM.md"
+      - ".github/workflows/ngclearn-hebbian-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/__init__.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_hebbian.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_predictive_coding.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py"
+      - "packages/orion/src/orion/adaptation.py"
+      - "packages/neuros/src/neuros/compatibility.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_hebbian.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py"
+      - "packages/neuros-foundation/tests/test_ngclearn_bridge.py"
+      - "tests/test_ngclearn_hebbian_authority.py"
+      - "tests/test_compatibility_registry.py"
+      - "scripts/evidence/run_ngclearn_hebbian_authority.py"
+      - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/COMPATIBILITY.md"
+      - "docs/NEUROAI_ECOSYSTEM.md"
+      - ".github/workflows/ngclearn-hebbian-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ngclearn-hebbian-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hebbian-adaptation:
+    name: ngc-learn 3.2 governed Hebbian adaptation / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install exact local governed ngc-learn evidence profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[ngclearn,dev]"
+          python -m pip install -e "packages/orion[test]"
+          python -m pip install -e packages/neuros
+          python -m pip check
+      - name: Exercise fixed, adaptive, authority, and public-claim contracts
+        run: |
+          pytest -q \
+            packages/neuros-foundation/tests/test_ngclearn_bridge.py \
+            packages/neuros-foundation/tests/test_ngclearn_predictive_coding.py \
+            packages/neuros-foundation/tests/test_ngclearn_hebbian.py \
+            tests/test_ngclearn_hebbian_authority.py \
+            tests/test_compatibility_registry.py
+      - name: Exercise governed public evidence worker twice
+        run: |
+          python scripts/evidence/run_ngclearn_hebbian_authority.py > "${RUNNER_TEMP}/hebbian-authority-first.json"
+          python scripts/evidence/run_ngclearn_hebbian_authority.py > "${RUNNER_TEMP}/hebbian-authority-second.json"
+          diff -u "${RUNNER_TEMP}/hebbian-authority-first.json" "${RUNNER_TEMP}/hebbian-authority-second.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "hebbian-authority-first.json").read_text())
+          assert payload["claim_boundary"]["orion_adaptation_authority_enforced"] is True
+          assert payload["claim_boundary"]["exact_adaptation_rows_verified"] is True
+          assert payload["claim_boundary"]["exact_evaluation_rows_verified"] is True
+          assert payload["learner_adaptation"]["adaptation_input_sha256"] == payload["inputs"]["adaptation_input_sha256"]
+          assert payload["outcome"]["phase"] in {"retained", "rolled-back"}
+          assert payload["evidence_sha256"]
+          PY
+      - name: Exercise installed compatibility claim
+        run: |
+          neuros compatibility ngclearn --json > "${RUNNER_TEMP}/ngclearn-compatibility.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "ngclearn-compatibility.json").read_text())
+          assert len(payload) == 1
+          record = payload[0]
+          assert record["integration_id"] == "ngclearn"
+          assert record["evidence_tier"] == "integration"
+          assert "hebbian-predictive-adaptation" in record["capabilities"]
+          assert "adaptation-authority-binding" in record["capabilities"]
+          assert "exact-learning-state-rollback" in record["capabilities"]
+          assert "real-dataset-utility" not in record["capabilities"]
+          assert "calibration-reduction" not in record["capabilities"]
+          PY
+      - name: Compile adaptive evidence modules
+        run: |
+          python -m compileall -q \
+            packages/neuros-foundation/src/neuros/foundation_models/ngclearn_hebbian.py \
+            scripts/evidence/run_ngclearn_hebbian_authority.py
+      - name: Report exact upstream identity
+        run: |
+          python - <<'PY'
+          import json
+          from neuros.foundation_models.ngclearn_bridge import ngclearn_runtime_identity
+          print(json.dumps(ngclearn_runtime_identity(), indent=2, sort_keys=True))
+          PY

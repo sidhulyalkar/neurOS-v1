@@ -72,6 +72,14 @@ from neuros.foundation_models.ngclearn_bridge import (
     NgcLearnVersionError,
     ngclearn_runtime_identity,
 )
+from neuros.foundation_models.ngclearn_hebbian import (
+    HEBBIAN_PC_METHOD_ID,
+    NgcLearnHebbianAdaptationEvidence,
+    NgcLearnHebbianAdaptationResult,
+    NgcLearnHebbianInferenceResult,
+    NgcLearnHebbianPredictiveCoding,
+    NgcLearnHebbianState,
+)
 from neuros.foundation_models.ngclearn_predictive_coding import (
     PC_METHOD_ID,
     NgcLearnPredictiveCodingEvidence,
@@ -204,6 +212,12 @@ __all__ = [
     "NgcLearnPredictiveCodingEvidence",
     "NgcLearnPredictiveCodingResult",
     "NgcLearnPredictiveCodingTransform",
+    "HEBBIAN_PC_METHOD_ID",
+    "NgcLearnHebbianAdaptationEvidence",
+    "NgcLearnHebbianAdaptationResult",
+    "NgcLearnHebbianInferenceResult",
+    "NgcLearnHebbianPredictiveCoding",
+    "NgcLearnHebbianState",
     "EvaluationProtocol",
     "BenchmarkReport",
     "benchmark_embeddings",

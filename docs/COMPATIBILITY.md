@@ -26,7 +26,7 @@ The registry lives in `neuros.compatibility` and is covered by contract tests. D
 | MOABB | experimental | dataset adapter, longitudinal split authority, model ladder | real dataset | benchmark surface is still evolving; result claims remain protocol-specific |
 | Braindecode | experimental | neural-window model adapter, upstream training bridge, decoder bridge | integration | qualified 1.7 whitelist only; stable mech-int, hardware, and closed-loop claims remain separate |
 | SNAP spectral alignment | experimental | positive-rank spectrum, task power, residual target power | software contract + upstream conformance | no published-experiment reproduction or biological-alignment claim |
-| ngc-learn | experimental | RateCell transform, fixed-weight predictive reconstruction, iterative residual feedback, upstream/JAX identity | integration | real ngc-learn 3.2.x inference dynamics only; Hebbian/STDP learning, spiking, real-data, hardware, and closed-loop claims remain unqualified |
+| ngc-learn | experimental | RateCell, fixed predictive reconstruction, governed Hebbian predictive adaptation, exact learning-state rollback | integration | deterministic upstream integration only; real-data efficacy, calibration reduction, STDP/spiking, online adaptation, hardware, and closed loop remain unqualified |
 | OpenBCI | indirect | reachable through BrainFlow | none | no named OpenBCI configuration is hardware-qualified |
 | Meta NeuralBench | planned | isolated benchmark worker, evidence extension | none | upstream runtime requirements must stay outside the kernel |
 | IBM NeuroAIKit | planned | isolated SNU reference worker | none | legacy TensorFlow-era environment is intentionally isolated |
@@ -141,7 +141,7 @@ Install the isolated research integration with:
 pip install "neuros-foundation[ngclearn]"
 ```
 
-Two real upstream ngc-learn 3.2.x surfaces are now qualified at the **integration** tier.
+Three real upstream ngc-learn 3.2.x surfaces are now qualified at the **integration** tier.
 
 #### RateCell transform
 
@@ -162,11 +162,42 @@ result = pc.transform(samples, sample_rate_hz=250.0)
 
 The circuit uses a real upstream `RateCell` latent, `GaussianErrorCell` reconstruction residual, and `StaticSynapse` generative/feedback connections. It resets per observation, clamps the input as the prediction-error target, ties feedback to the transpose of the fixed generative weights, and iteratively settles the latent.
 
-Evidence includes latent/reconstruction shapes, exact component/runtime identity, settling parameters, weight/input/latent/reconstruction/trajectory hashes, and reconstruction-error reduction.
+Evidence includes latent/reconstruction shapes, exact component/runtime identity, settling parameters, weight/input/latent/reconstruction/trajectory hashes, and reconstruction-error reduction. The known-ground-truth upstream test uses an identity generative dictionary and requires the real circuit to reduce reconstruction error by more than 90% on Python 3.10 and 3.11.
 
-The known-ground-truth upstream test uses an identity generative dictionary and requires the real circuit to reduce reconstruction error by more than 90% on Python 3.10 and 3.11. This is evidence that the residual-feedback computation actually works, not merely that its objects instantiate.
+#### Governed Hebbian predictive adaptation
 
-The weights are deliberately fixed. **Hebbian learning, STDP, online adaptation, spiking networks, real-dataset utility, hardware behavior, and closed-loop behavior are not qualified by this circuit.**
+```python
+from neuros.foundation_models import NgcLearnHebbianPredictiveCoding
+
+learner = NgcLearnHebbianPredictiveCoding(
+    latent_dim=8,
+    settling_steps=20,
+    learning_rate=1e-3,
+    optimizer="adam",
+    seed=7,
+)
+
+adaptation = learner.adapt(calibration_samples, sample_rate_hz=250.0, epochs=2)
+```
+
+The adaptive circuit performs iterative predictive inference before every real upstream `HebbianSynapse.evolve()` M-step. The final latent activity is the pre statistic and the `GaussianErrorCell.dmu` residual is the post statistic. Feedback is retied to the current generative transpose before inference. No hidden post-update row normalization is applied.
+
+A snapshot binds the exact upstream weight array and optimizer pytree into one combined state identity. This matters for Adam: restoring weights while leaving moments or the optimizer timestep changed is not a valid rollback. The integration tests require exact full-state restoration and the same future learning trajectory after rollback.
+
+The cross-package evidence worker in `scripts/evidence/run_ngclearn_hebbian_authority.py` composes this learner with ORION's `AdaptationAuthority` without creating a foundation-to-ORION package dependency. It proves:
+
+- adaptation receives exactly the complete authority-selected canonical calibration matrix;
+- the learner's own adaptation-input SHA-256 matches the authority worker's hash;
+- proposal/approval evidence is calibration-only;
+- qualification inference is read-only;
+- retain or exact full-state rollback follows a predeclared metric threshold;
+- repeated complete evidence runs are byte-identical.
+
+The dedicated real-upstream lane executes this on Python 3.10 and 3.11.
+
+**Important statistical boundary:** the held-out qualification partition may determine whether the adapted state is retained or rolled back. It is therefore a state-selection set, not an untouched final scientific assessment set. Real efficacy and calibration-reduction studies require a third independent final-assessment partition after state selection.
+
+The current integration does **not** qualify STDP, spiking-network adaptation, real-neural-data efficacy, calibration reduction, cross-subject/device transfer superiority, online adaptation, hardware behavior, closed-loop behavior, or clinical use.
 
 See [NeuroAI Ecosystem Evidence](NEUROAI_ECOSYSTEM.md) for the scientific rationale and ORION comparison path.
 

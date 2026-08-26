@@ -98,7 +98,7 @@ def test_snap_is_a_numerical_evidence_contract_not_a_biological_claim():
     assert "spectral_alignment.py" in " ".join(record.evidence_paths)
 
 
-def test_ngclearn_predictive_coding_is_integration_qualified_but_learning_is_not():
+def test_ngclearn_governed_hebbian_adaptation_is_integration_qualified_only():
     record = get_integration("ngclearn")
 
     assert record.status is IntegrationStatus.EXPERIMENTAL
@@ -106,17 +106,30 @@ def test_ngclearn_predictive_coding_is_integration_qualified_but_learning_is_not
     assert "rate-cell-transform" in record.capabilities
     assert "predictive-reconstruction" in record.capabilities
     assert "iterative-error-feedback" in record.capabilities
+    assert "hebbian-predictive-adaptation" in record.capabilities
+    assert "adaptation-authority-binding" in record.capabilities
+    assert "exact-learning-state-rollback" in record.capabilities
+    assert "canonical-adaptation-input-identity" in record.capabilities
     assert "spiking-network" not in record.capabilities
-    assert "hebbian-learning" not in record.capabilities
     assert "stdp-learning" not in record.capabilities
     assert "online-adaptation" not in record.capabilities
+    assert "real-dataset-utility" not in record.capabilities
+    assert "calibration-reduction" not in record.capabilities
     assert record.install_hint == 'pip install "neuros-foundation[ngclearn]"'
+
     evidence = " ".join(record.evidence_paths)
     assert "ngclearn_predictive_coding.py" in evidence
     assert "test_ngclearn_predictive_coding.py" in evidence
+    assert "ngclearn_hebbian.py" in evidence
+    assert "test_ngclearn_hebbian.py" in evidence
+    assert "run_ngclearn_hebbian_authority.py" in evidence
+    assert "test_ngclearn_hebbian_authority.py" in evidence
+    assert "ngclearn-hebbian-ci.yml" in evidence
+
     assert "3.2.x" in record.notes
-    assert "fixed-weight predictive reconstruction" in record.notes
-    assert "Hebbian/STDP" in record.notes
+    assert "HebbianSynapse" in record.notes
+    assert "optimizer-state" in record.notes
+    assert "not an untouched final assessment set" in record.notes
     assert "remain unqualified" in record.notes
 
 
