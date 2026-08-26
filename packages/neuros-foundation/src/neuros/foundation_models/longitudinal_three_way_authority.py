@@ -28,6 +28,32 @@ HistoryPolicy = Literal["prior", "all-other", "custom"]
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+def _jsonable(value: Any) -> Any:
+    """Normalize deterministic evidence metadata or fail closed."""
+
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("authority metadata cannot contain NaN or infinity")
+        return value
+    if isinstance(value, np.generic):
+        return _jsonable(value.item())
+    if isinstance(value, np.ndarray):
+        return _jsonable(value.tolist())
+    if isinstance(value, Mapping):
+        return {
+            str(key): _jsonable(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    raise TypeError(
+        "authority metadata must contain JSON-compatible primitives, NumPy scalars/arrays, "
+        f"mappings, lists, or tuples; got {type(value).__name__}"
+    )
+
+
 def _indices_tuple(name: str, values: Any, *, allow_empty: bool = False) -> tuple[int, ...]:
     array = np.asarray(values)
     if array.ndim != 1:
@@ -47,6 +73,17 @@ def _indices_tuple(name: str, values: Any, *, allow_empty: bool = False) -> tupl
         raise ValueError(f"{name} cannot contain negative indices")
     if len(set(result)) != len(result):
         raise ValueError(f"{name} cannot contain duplicate indices")
+    return result
+
+
+def _string_tuple(name: str, values: Any, *, allow_empty: bool = False) -> tuple[str, ...]:
+    result = tuple(str(value) for value in values)
+    if not allow_empty and not result:
+        raise ValueError(f"{name} must be non-empty")
+    if any(not value.strip() for value in result):
+        raise ValueError(f"{name} cannot contain empty values")
+    if len(set(result)) != len(result):
+        raise ValueError(f"{name} cannot contain duplicate values")
     return result
 
 
@@ -71,9 +108,12 @@ def _ordered_values(values: np.ndarray) -> tuple[str, ...]:
 
 
 def _canonical_sha256(payload: Mapping[str, Any]) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode(
-        "utf-8"
-    )
+    raw = json.dumps(
+        _jsonable(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -121,12 +161,15 @@ class ThreeWayLongitudinalCaseAuthority:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("ThreeWayLongitudinalCaseAuthority schema_version must be 2")
-        if not self.dataset_id.strip() or not self.case_id.strip():
+        dataset_id = str(self.dataset_id).strip()
+        case_id = str(self.case_id).strip()
+        split_unit = str(self.split_unit).strip()
+        if not dataset_id or not case_id:
             raise ValueError("dataset_id and case_id must be non-empty")
-        if self.split_unit == "sample":
+        if not split_unit:
+            raise ValueError("split_unit must be non-empty")
+        if split_unit == "sample":
             raise ValueError("three-way longitudinal authority requires a deployment-unit split")
-        if not self.held_out_values:
-            raise ValueError("held_out_values must be non-empty")
         if self.history_policy not in {"prior", "all-other", "custom"}:
             raise ValueError(f"unsupported history_policy={self.history_policy!r}")
         if isinstance(self.n_samples, bool) or not isinstance(self.n_samples, int) or self.n_samples <= 0:
@@ -135,8 +178,38 @@ class ThreeWayLongitudinalCaseAuthority:
             raise ValueError("input_shape must begin with n_samples")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
             raise ValueError("seed must be a non-negative integer")
+        if not str(self.partition_fingerprint).strip():
+            raise ValueError("partition_fingerprint must be non-empty")
+
+        held_out = _string_tuple("held_out_values", self.held_out_values)
+        observed = _string_tuple("observed_group_order", self.observed_group_order)
+        source_groups = _string_tuple("source_group_values", self.source_group_values)
+        observed_set = set(observed)
+        if not set(held_out).issubset(observed_set):
+            raise ValueError("held_out_values must be contained in observed_group_order")
+        if not set(source_groups).issubset(observed_set):
+            raise ValueError("source_group_values must be contained in observed_group_order")
+        if set(source_groups) & set(held_out):
+            raise ValueError("source_group_values and held_out_values must be disjoint")
+
+        if self.history_policy == "prior":
+            if len(held_out) != 1:
+                raise ValueError("prior authority requires exactly one held-out group")
+            held = held_out[0]
+            expected_source = observed[: observed.index(held)]
+            if source_groups != expected_source:
+                raise ValueError(
+                    "prior authority source groups are not the complete chronological prefix"
+                )
+        elif self.history_policy == "all-other":
+            expected_source = tuple(value for value in observed if value not in held_out)
+            if source_groups != expected_source:
+                raise ValueError("all-other authority does not contain every non-held-out group")
 
         processed_sha = _sha256("processed_data_sha256", self.processed_data_sha256)
+        split_fingerprint = _sha256(
+            "three_way_split_fingerprint", self.three_way_split_fingerprint
+        )
         qualification_fraction = _fraction(
             "qualification_fraction", self.qualification_fraction
         )
@@ -153,12 +226,16 @@ class ThreeWayLongitudinalCaseAuthority:
         final_assessment = _indices_tuple(
             "final_assessment_indices", self.final_assessment_indices
         )
-        calibration = {
-            str(label): _indices_tuple(
+        calibration: dict[str, tuple[int, ...]] = {}
+        for raw_label, values in self.calibration_order_by_class.items():
+            label = str(raw_label)
+            if not label.strip():
+                raise ValueError("calibration class labels must be non-empty")
+            if label in calibration:
+                raise ValueError(f"duplicate normalized calibration class label: {label!r}")
+            calibration[label] = _indices_tuple(
                 f"calibration_order_by_class[{label!r}]", values, allow_empty=True
             )
-            for label, values in self.calibration_order_by_class.items()
-        }
         if not calibration:
             raise ValueError("calibration_order_by_class must be non-empty")
 
@@ -181,14 +258,25 @@ class ThreeWayLongitudinalCaseAuthority:
                         f"{right_name}, overlap={sorted(overlap)[:8]}"
                     )
 
+        metadata = _jsonable(self.case_metadata)
+        if not isinstance(metadata, dict):
+            raise TypeError("case_metadata must be a mapping")
+
+        object.__setattr__(self, "dataset_id", dataset_id)
+        object.__setattr__(self, "case_id", case_id)
+        object.__setattr__(self, "split_unit", split_unit)
+        object.__setattr__(self, "held_out_values", held_out)
+        object.__setattr__(self, "observed_group_order", observed)
+        object.__setattr__(self, "source_group_values", source_groups)
         object.__setattr__(self, "source_train_indices", source)
         object.__setattr__(self, "qualification_indices", qualification)
         object.__setattr__(self, "final_assessment_indices", final_assessment)
         object.__setattr__(self, "calibration_order_by_class", MappingProxyType(calibration))
         object.__setattr__(self, "processed_data_sha256", processed_sha)
+        object.__setattr__(self, "three_way_split_fingerprint", split_fingerprint)
         object.__setattr__(self, "qualification_fraction", qualification_fraction)
         object.__setattr__(self, "final_assessment_fraction", final_fraction)
-        object.__setattr__(self, "case_metadata", MappingProxyType(dict(self.case_metadata)))
+        object.__setattr__(self, "case_metadata", MappingProxyType(metadata))
 
     @classmethod
     def from_split(
@@ -215,9 +303,9 @@ class ThreeWayLongitudinalCaseAuthority:
             dataset_id=data.dataset_id,
             case_id=case_id,
             split_unit=unit,
-            held_out_values=tuple(str(v) for v in split.partition.held_out_values),
+            held_out_values=tuple(str(value) for value in split.partition.held_out_values),
             history_policy=history_policy,
-            observed_group_order=tuple(str(v) for v in observed),
+            observed_group_order=tuple(str(value) for value in observed),
             source_group_values=source_values,
             source_train_indices=_indices_tuple(
                 "source_train_indices", split.source_train_indices
@@ -241,7 +329,7 @@ class ThreeWayLongitudinalCaseAuthority:
             three_way_split_fingerprint=split.fingerprint,
             processed_data_sha256=processed_data_sha256(data),
             n_samples=int(len(data.X)),
-            input_shape=tuple(int(v) for v in np.asarray(data.X).shape),
+            input_shape=tuple(int(value) for value in np.asarray(data.X).shape),
             case_metadata={} if case_metadata is None else case_metadata,
         )
 
@@ -360,17 +448,17 @@ class ThreeWayLongitudinalCaseAuthority:
             dataset_id=str(payload["dataset_id"]),
             case_id=str(payload["case_id"]),
             split_unit=str(payload["split_unit"]),  # type: ignore[arg-type]
-            held_out_values=tuple(str(v) for v in payload["held_out_values"]),
+            held_out_values=tuple(str(item) for item in payload["held_out_values"]),
             history_policy=str(payload["history_policy"]),  # type: ignore[arg-type]
-            observed_group_order=tuple(str(v) for v in payload["observed_group_order"]),
-            source_group_values=tuple(str(v) for v in payload["source_group_values"]),
-            source_train_indices=tuple(int(v) for v in payload["source_train_indices"]),
-            qualification_indices=tuple(int(v) for v in payload["qualification_indices"]),
+            observed_group_order=tuple(str(item) for item in payload["observed_group_order"]),
+            source_group_values=tuple(str(item) for item in payload["source_group_values"]),
+            source_train_indices=tuple(int(item) for item in payload["source_train_indices"]),
+            qualification_indices=tuple(int(item) for item in payload["qualification_indices"]),
             final_assessment_indices=tuple(
-                int(v) for v in payload["final_assessment_indices"]
+                int(item) for item in payload["final_assessment_indices"]
             ),
             calibration_order_by_class={
-                str(key): tuple(int(v) for v in values)
+                str(key): tuple(int(item) for item in values)
                 for key, values in dict(payload["calibration_order_by_class"]).items()
             },
             qualification_fraction=float(payload["qualification_fraction"]),
@@ -380,7 +468,7 @@ class ThreeWayLongitudinalCaseAuthority:
             three_way_split_fingerprint=str(payload["three_way_split_fingerprint"]),
             processed_data_sha256=str(payload["processed_data_sha256"]),
             n_samples=int(payload["n_samples"]),
-            input_shape=tuple(int(v) for v in payload["input_shape"]),
+            input_shape=tuple(int(item) for item in payload["input_shape"]),
             case_metadata=dict(payload.get("case_metadata", {})),
             schema_version=2,
         )
@@ -473,19 +561,17 @@ class ThreeWayLongitudinalCaseAuthority:
         if source_set != expected_source:
             raise ValueError("authority source indices do not cover source groups exactly")
 
+        # Construction already validates policy against the declared chronology.
+        # This second check validates that declaration against the loaded dataset.
         if self.history_policy == "prior":
-            if len(self.held_out_values) != 1:
-                raise ValueError("prior authority requires exactly one held-out group")
             held = self.held_out_values[0]
-            if held not in observed:
-                raise ValueError("held-out group missing from observed chronology")
             expected_values = observed[: observed.index(held)]
             if self.source_group_values != expected_values:
                 raise ValueError(
                     "prior authority source groups are not the complete chronological prefix"
                 )
         elif self.history_policy == "all-other":
-            expected_values = tuple(v for v in observed if v not in self.held_out_values)
+            expected_values = tuple(value for value in observed if value not in self.held_out_values)
             if self.source_group_values != expected_values:
                 raise ValueError("all-other authority does not contain every non-held-out group")
 
