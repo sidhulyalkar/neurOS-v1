@@ -42,7 +42,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return _jsonable(value.tolist())
     if isinstance(value, Mapping):
-        return {str(key): _jsonable(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
+        return {
+            str(key): _jsonable(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     raise TypeError(
@@ -177,7 +180,11 @@ class AdaptationAuthority:
             raise ValueError("authority_id and dataset_id must be non-empty")
         if not self.split_unit.strip():
             raise ValueError("split_unit must be non-empty")
-        if isinstance(self.n_samples, bool) or not isinstance(self.n_samples, int) or self.n_samples < 1:
+        if (
+            isinstance(self.n_samples, bool)
+            or not isinstance(self.n_samples, int)
+            or self.n_samples < 1
+        ):
             raise ValueError("n_samples must be a positive integer")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
             raise ValueError("seed must be a non-negative integer")
@@ -253,7 +260,11 @@ class GovernedAdaptationProposal:
     def __post_init__(self) -> None:
         if not self.authority_fingerprint.strip():
             raise ValueError("authority_fingerprint must be non-empty")
-        object.__setattr__(self, "adaptation_indices", _indices("adaptation_indices", self.adaptation_indices))
+        object.__setattr__(
+            self,
+            "adaptation_indices",
+            _indices("adaptation_indices", self.adaptation_indices),
+        )
         # Force deterministic serializability at the governance boundary. The
         # lightweight AdaptationProposal remains backward-compatible.
         _jsonable(dict(self.proposal.changes))
@@ -380,8 +391,16 @@ class AdaptationApplication:
     def __post_init__(self) -> None:
         if self.before_artifact.sha256 == self.after_artifact.sha256:
             raise ValueError("an applied adaptation must change the artifact SHA-256 identity")
-        object.__setattr__(self, "adaptation_indices", _indices("adaptation_indices", self.adaptation_indices))
-        object.__setattr__(self, "update_evidence", _numeric_evidence("update_evidence", self.update_evidence))
+        object.__setattr__(
+            self,
+            "adaptation_indices",
+            _indices("adaptation_indices", self.adaptation_indices),
+        )
+        object.__setattr__(
+            self,
+            "update_evidence",
+            _numeric_evidence("update_evidence", self.update_evidence),
+        )
 
     @classmethod
     def record(
@@ -396,8 +415,14 @@ class AdaptationApplication:
     ) -> "AdaptationApplication":
         if decision.phase is not AdaptationPhase.APPROVED:
             raise ValueError("a rejected adaptation cannot be applied")
+        if governed.authority_fingerprint != authority.authority_fingerprint:
+            raise ValueError("governed proposal authority does not match adaptation authority")
+        if governed.adaptation_indices != authority.adaptation_indices:
+            raise ValueError("governed proposal adaptation indices differ from frozen authority")
         if decision.proposal_fingerprint != governed.proposal_fingerprint:
             raise ValueError("decision does not belong to governed proposal")
+        if decision.authority_fingerprint != governed.authority_fingerprint:
+            raise ValueError("decision authority does not match governed proposal authority")
         if decision.authority_fingerprint != authority.authority_fingerprint:
             raise ValueError("decision authority does not match adaptation authority")
         indices = authority.require_adaptation_indices(adaptation_indices)
@@ -442,9 +467,21 @@ class AdaptationEvaluation:
     metrics_after: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "evaluation_indices", _indices("evaluation_indices", self.evaluation_indices))
-        object.__setattr__(self, "metrics_before", _numeric_evidence("metrics_before", self.metrics_before))
-        object.__setattr__(self, "metrics_after", _numeric_evidence("metrics_after", self.metrics_after))
+        object.__setattr__(
+            self,
+            "evaluation_indices",
+            _indices("evaluation_indices", self.evaluation_indices),
+        )
+        object.__setattr__(
+            self,
+            "metrics_before",
+            _numeric_evidence("metrics_before", self.metrics_before),
+        )
+        object.__setattr__(
+            self,
+            "metrics_after",
+            _numeric_evidence("metrics_after", self.metrics_after),
+        )
         if set(self.metrics_before) != set(self.metrics_after):
             raise ValueError("metrics_before and metrics_after must contain the same metric names")
         if not self.metrics_before:
@@ -462,6 +499,7 @@ class AdaptationEvaluation:
     ) -> "AdaptationEvaluation":
         if application.authority_fingerprint != authority.authority_fingerprint:
             raise ValueError("application authority does not match evaluation authority")
+        authority.require_adaptation_indices(application.adaptation_indices)
         indices = authority.require_evaluation_indices(evaluation_indices)
         return cls(
             application_fingerprint=application.application_fingerprint,
@@ -507,7 +545,11 @@ class AdaptationOutcome:
             raise ValueError("outcome phase must be retained or rolled-back")
         if not self.actor.strip() or not self.reason.strip():
             raise ValueError("outcome actor and reason must be non-empty")
-        expected = self.after_artifact if self.phase is AdaptationPhase.RETAINED else self.before_artifact
+        expected = (
+            self.after_artifact
+            if self.phase is AdaptationPhase.RETAINED
+            else self.before_artifact
+        )
         if self.active_artifact.sha256 != expected.sha256:
             if self.phase is AdaptationPhase.ROLLED_BACK:
                 raise ValueError("rollback must restore the exact pre-adaptation artifact SHA-256")
@@ -524,6 +566,8 @@ class AdaptationOutcome:
     ) -> "AdaptationOutcome":
         if evaluation.application_fingerprint != application.application_fingerprint:
             raise ValueError("evaluation does not belong to adaptation application")
+        if evaluation.authority_fingerprint != application.authority_fingerprint:
+            raise ValueError("evaluation authority does not match adaptation application")
         return cls(
             evaluation_fingerprint=evaluation.evaluation_fingerprint,
             authority_fingerprint=application.authority_fingerprint,
@@ -547,6 +591,8 @@ class AdaptationOutcome:
     ) -> "AdaptationOutcome":
         if evaluation.application_fingerprint != application.application_fingerprint:
             raise ValueError("evaluation does not belong to adaptation application")
+        if evaluation.authority_fingerprint != application.authority_fingerprint:
+            raise ValueError("evaluation authority does not match adaptation application")
         return cls(
             evaluation_fingerprint=evaluation.evaluation_fingerprint,
             authority_fingerprint=application.authority_fingerprint,
