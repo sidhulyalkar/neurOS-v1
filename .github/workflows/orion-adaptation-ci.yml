@@ -4,30 +4,40 @@ on:
   pull_request:
     paths:
       - "packages/orion/src/orion/adaptation.py"
+      - "packages/orion/src/orion/assessment.py"
       - "packages/orion/src/orion/contracts.py"
       - "packages/orion/src/orion/__init__.py"
       - "packages/orion/pyproject.toml"
       - "tests/test_orion_adaptation.py"
       - "tests/test_orion_adaptation_integrity.py"
+      - "tests/test_orion_assessment.py"
       - "tests/test_orion_contracts.py"
       - "examples/orion/adaptation_authority.py"
+      - "examples/orion/final_assessment_authority.py"
       - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/FINAL_ASSESSMENT_AUTHORITY.md"
       - "docs/API_REFERENCE.md"
+      - "packages/orion/README.md"
       - "mkdocs.yml"
       - ".github/workflows/orion-adaptation-ci.yml"
   push:
     branches: [main]
     paths:
       - "packages/orion/src/orion/adaptation.py"
+      - "packages/orion/src/orion/assessment.py"
       - "packages/orion/src/orion/contracts.py"
       - "packages/orion/src/orion/__init__.py"
       - "packages/orion/pyproject.toml"
       - "tests/test_orion_adaptation.py"
       - "tests/test_orion_adaptation_integrity.py"
+      - "tests/test_orion_assessment.py"
       - "tests/test_orion_contracts.py"
       - "examples/orion/adaptation_authority.py"
+      - "examples/orion/final_assessment_authority.py"
       - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/FINAL_ASSESSMENT_AUTHORITY.md"
       - "docs/API_REFERENCE.md"
+      - "packages/orion/README.md"
       - "mkdocs.yml"
       - ".github/workflows/orion-adaptation-ci.yml"
 
@@ -57,28 +67,46 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/orion[test]"
-      - name: Exercise adaptation authority and legacy proposal contracts
+      - name: Exercise adaptation, final-assessment, and legacy proposal contracts
         run: |
           pytest -q \
             tests/test_orion_adaptation.py \
             tests/test_orion_adaptation_integrity.py \
+            tests/test_orion_assessment.py \
             tests/test_orion_contracts.py
-      - name: Exercise public authority example twice
+      - name: Exercise public authority examples twice
         run: |
           python examples/orion/adaptation_authority.py > "${RUNNER_TEMP}/adaptation-first.json"
           python examples/orion/adaptation_authority.py > "${RUNNER_TEMP}/adaptation-second.json"
           diff -u "${RUNNER_TEMP}/adaptation-first.json" "${RUNNER_TEMP}/adaptation-second.json"
+
+          python examples/orion/final_assessment_authority.py > "${RUNNER_TEMP}/assessment-first.json"
+          python examples/orion/final_assessment_authority.py > "${RUNNER_TEMP}/assessment-second.json"
+          diff -u "${RUNNER_TEMP}/assessment-first.json" "${RUNNER_TEMP}/assessment-second.json"
+
           python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          path = Path(os.environ["RUNNER_TEMP"]) / "adaptation-first.json"
-          payload = json.loads(path.read_text())
-          assert payload["outcome"]["phase"] == "retained"
-          assert payload["authority"]["authority_fingerprint"]
-          assert payload["outcome"]["outcome_fingerprint"]
-          assert payload["application"]["before_artifact"]["sha256"] != payload["application"]["after_artifact"]["sha256"]
+          root = Path(os.environ["RUNNER_TEMP"])
+          adaptation = json.loads((root / "adaptation-first.json").read_text())
+          assert adaptation["outcome"]["phase"] == "retained"
+          assert adaptation["authority"]["authority_fingerprint"]
+          assert adaptation["outcome"]["outcome_fingerprint"]
+          assert adaptation["application"]["before_artifact"]["sha256"] != adaptation["application"]["after_artifact"]["sha256"]
+
+          assessment = json.loads((root / "assessment-first.json").read_text())
+          assert assessment["selected_state"]["kind"] == "frozen"
+          assert assessment["selected_state"]["adaptation_authority_fingerprint"] is None
+          assert assessment["authority"]["metric_names"] == ["balanced_accuracy", "ece"]
+          assert assessment["final_assessment"]["assessment_fingerprint"]
+          assert assessment["claim_boundary"]["real_neural_data"] is False
           PY
-      - name: Compile adaptation public modules
-        run: python -m compileall -q packages/orion/src/orion/adaptation.py examples/orion/adaptation_authority.py
+      - name: Compile ORION evidence modules
+        run: |
+          python -m compileall -q \
+            packages/orion/src/orion/adaptation.py \
+            packages/orion/src/orion/assessment.py \
+            examples/orion/adaptation_authority.py \
+            examples/orion/final_assessment_authority.py
