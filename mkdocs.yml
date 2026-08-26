@@ -92,6 +92,7 @@ nav:
       - Evaluation Protocol: neurotokenization/02_EVALUATION_PROTOCOL.md
       - Implementation Sprints: neurotokenization/03_IMPLEMENTATION_SPRINTS.md
   - SDK:
+      - External Plugin Authoring: PLUGIN_AUTHORING.md
       - Neural Windows: NEURAL_WINDOWS.md
       - Braindecode: BRAINDECODE.md
       - API Surface: API_REFERENCE.md

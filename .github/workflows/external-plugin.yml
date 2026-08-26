@@ -1,0 +1,129 @@
+name: External Plugin Contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/external-plugin.yml"
+      - "examples/plugins/**"
+      - "docs/PLUGIN_AUTHORING.md"
+      - "mkdocs.yml"
+      - "scripts/list_workspace_packages.py"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/pyproject.toml"
+      - "packages/neuros-models/pyproject.toml"
+      - "packages/neuros-models/src/neuros/models/threshold_decoder.py"
+      - "packages/neuros/pyproject.toml"
+      - "packages/neuros/src/neuros/cli.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/external-plugin.yml"
+      - "examples/plugins/**"
+      - "docs/PLUGIN_AUTHORING.md"
+      - "mkdocs.yml"
+      - "scripts/list_workspace_packages.py"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/pyproject.toml"
+      - "packages/neuros-models/pyproject.toml"
+      - "packages/neuros-models/src/neuros/models/threshold_decoder.py"
+      - "packages/neuros/pyproject.toml"
+      - "packages/neuros/src/neuros/cli.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-plugin-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clean-wheel-contract:
+    name: Out-of-tree plugin / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Prove reference plugin is not a workspace member
+        run: |
+          set -euo pipefail
+          if python scripts/list_workspace_packages.py | grep -Fxq "examples/plugins/neuros-example-plugin"; then
+            echo "reference external plugin must remain outside the neurOS workspace" >&2
+            exit 1
+          fi
+      - name: Build exact neurOS and external plugin wheels
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install build
+          DIST="${RUNNER_TEMP}/plugin-wheels"
+          mkdir -p "${DIST}"
+          python -m build --wheel --outdir "${DIST}" packages/neuros-core
+          python -m build --wheel --outdir "${DIST}" packages/neuros-drivers
+          python -m build --wheel --outdir "${DIST}" packages/neuros-models
+          python -m build --wheel --outdir "${DIST}" packages/neuros
+          python -m build --wheel --outdir "${DIST}" examples/plugins/neuros-example-plugin
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq 5
+      - name: Install only built neurOS/plugin artifacts in a clean environment
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/plugin-wheels"
+          python -m venv "${RUNNER_TEMP}/plugin-smoke"
+          PY="${RUNNER_TEMP}/plugin-smoke/bin/python"
+          PIP="${RUNNER_TEMP}/plugin-smoke/bin/pip"
+          "${PY}" -m pip install --upgrade pip
+          CORE="$(find "${DIST}" -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS="$(find "${DIST}" -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS="$(find "${DIST}" -name 'neuros_models-*.whl' -print -quit)"
+          SDK="$(find "${DIST}" -name 'neuros-[0-9]*.whl' -print -quit)"
+          PLUGIN="$(find "${DIST}" -name 'neuros_example_plugin-*.whl' -print -quit)"
+          test -n "${CORE}"
+          test -n "${DRIVERS}"
+          test -n "${MODELS}"
+          test -n "${SDK}"
+          test -n "${PLUGIN}"
+          "${PIP}" install "${CORE}" "${DRIVERS}" "${MODELS}" "${SDK}" "${PLUGIN}" pytest pytest-asyncio
+          "${PIP}" check
+      - name: Verify distribution metadata and entry-point provenance
+        run: |
+          set -euo pipefail
+          PY="${RUNNER_TEMP}/plugin-smoke/bin/python"
+          "${PY}" - <<'PY'
+          from importlib import metadata
+          from neuros.contracts import Source, Transform
+          from neuros.plugins import PluginKind, PluginRegistry
+
+          dist = metadata.distribution("neuros-example-plugin")
+          requirements = tuple(dist.requires or ())
+          assert any(req.startswith("neuros-core") and "<3.0.0" in req and ">=2.0.0" in req for req in requirements), requirements
+
+          registry = PluginRegistry()
+          registry.discover()
+          source_desc = registry.get(PluginKind.SOURCE, "example_sine")
+          transform_desc = registry.get(PluginKind.TRANSFORM, "example_gain")
+          assert source_desc.distribution == "neuros-example-plugin", source_desc
+          assert transform_desc.distribution == "neuros-example-plugin", transform_desc
+          assert source_desc.version == dist.version
+          assert transform_desc.version == dist.version
+          assert isinstance(registry.create(PluginKind.SOURCE, "example_sine"), Source)
+          assert isinstance(registry.create(PluginKind.TRANSFORM, "example_gain"), Transform)
+          PY
+      - name: Run external package protocol tests against installed wheel
+        run: |
+          PY="${RUNNER_TEMP}/plugin-smoke/bin/python"
+          "${PY}" -m pytest -q examples/plugins/neuros-example-plugin/tests
+      - name: Execute config-first runtime through installed entry points
+        run: |
+          set -euo pipefail
+          NEUROS="${RUNNER_TEMP}/plugin-smoke/bin/neuros"
+          CONFIG="examples/plugins/neuros-example-plugin/example.yaml"
+          "${NEUROS}" plugins --json
+          "${NEUROS}" validate "${CONFIG}" --json
+          "${NEUROS}" run "${CONFIG}" --duration 0.08 --json

@@ -1,0 +1,33 @@
+schema_version: 1
+
+metadata:
+  name: external-plugin-smoke
+  purpose: prove an out-of-tree source and transform can execute through the neurOS config/runtime path
+
+streams:
+  - id: eeg
+    source:
+      plugin: example_sine
+      options:
+        stream_id: external/eeg
+        sampling_rate: 250.0
+        channels: 4
+        frequency_hz: 10.0
+        amplitude_uv: 20.0
+        chunk_samples: 16
+    transforms:
+      - plugin: example_gain
+        options:
+          gain: 0.5
+
+decoder:
+  plugin: threshold
+  options:
+    threshold: 0.0
+
+runtime:
+  queue_capacity: 8
+  overflow_policy: block
+
+sinks: []
+monitors: []
