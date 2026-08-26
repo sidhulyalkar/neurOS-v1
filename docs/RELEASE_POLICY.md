@@ -8,6 +8,16 @@ The repository is a multi-distribution workspace. Individual Python distribution
 
 A platform release must record the exact versions and wheel hashes of every included distribution.
 
+## Distribution and namespace ownership
+
+Multiple distributions may contribute subpackages to the shared `neuros` Python namespace, but **two distributions must never own the same installed file path**.
+
+Component distributions use PEP 420 implicit namespace portions. The user-facing `neuros` SDK is the sole owner of `neuros/__init__.py` because that initializer defines the public top-level SDK API.
+
+Release qualification scans the payload of every built workspace wheel, normalizes wheel `.data/purelib` and `.data/platlib` entries to their real install destinations, and fails if any destination has multiple owners. The resulting `neuros.wheel_ownership.v1` manifest is checksum-bound into the release-candidate bundle.
+
+This is an install-integrity requirement, not a style preference. Package managers track files per distribution; if two wheels record the same path, uninstalling either distribution can delete a file the other still requires.
+
 ## Versioning
 
 Promoted public Python APIs follow semantic-versioning intent:
@@ -35,7 +45,10 @@ Before a public release is published, CI must:
 
 - build every intended workspace wheel from the release source;
 - run package metadata validation (`twine check` or equivalent);
-- generate SHA-256 checksums for release artifacts;
+- prove that built wheels have no overlapping installed-file ownership;
+- prove core/drivers/models work as implicit namespace portions without the SDK initializer;
+- prove the installed SDK owns and exposes the documented top-level `neuros` API;
+- generate SHA-256 checksums for release artifacts and the wheel-ownership manifest;
 - smoke-install the user-facing `neuros` distribution from the built wheel set;
 - execute a minimal `neuros doctor` / compatibility smoke path;
 - build documentation in strict mode;
@@ -50,6 +63,7 @@ Release notes should include:
 - Git tag and commit SHA;
 - component package/version manifest;
 - SHA-256 manifest for built artifacts;
+- wheel-ownership manifest proving unique installed-file ownership;
 - strongest supported evidence tiers and important claim boundaries;
 - breaking/deprecated behavior;
 - known limitations.

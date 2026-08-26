@@ -1,0 +1,47 @@
+name: Packaging Contracts
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/packaging-contracts.yml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/release-candidate.yml"
+      - "scripts/check_wheel_ownership.py"
+      - "tests/test_wheel_ownership.py"
+      - "packages/*/src/neuros/__init__.py"
+      - "packages/*/pyproject.toml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/packaging-contracts.yml"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/release-candidate.yml"
+      - "scripts/check_wheel_ownership.py"
+      - "tests/test_wheel_ownership.py"
+      - "packages/*/src/neuros/__init__.py"
+      - "packages/*/pyproject.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-contracts-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheel-ownership-unit-contracts:
+    name: Wheel ownership unit contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest pytest-asyncio
+      - name: Exercise ownership normalization and fail-closed cases
+        run: pytest -q tests/test_wheel_ownership.py
