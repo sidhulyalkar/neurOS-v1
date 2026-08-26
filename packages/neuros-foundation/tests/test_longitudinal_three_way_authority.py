@@ -103,6 +103,9 @@ def test_budget_identities_are_nested_and_final_authority_is_budget_invariant():
     assert authority.final_assessment_set_sha256 == final_identity
     assert authority.qualification_set_sha256 == qualification_identity
 
+    with pytest.raises(ValueError, match="integer"):
+        authority.calibration_budget_sha256(1.5)  # type: ignore[arg-type]
+
 
 def test_exact_set_guards_reject_subsets_supersets_and_reordering():
     _, _, authority = _authority()
@@ -184,15 +187,50 @@ def test_processed_data_change_fails_before_reconstructed_split_is_trusted():
         authority.restore(changed)
 
 
-def test_chronology_tampering_fails_even_with_self_consistent_new_authority_hash():
-    data, _, authority = _authority()
+def test_prior_chronology_tampering_fails_at_authority_construction():
+    _, _, authority = _authority()
     payload = copy.deepcopy(authority.to_dict())
     payload.pop("authority_fingerprint")
     payload["observed_group_order"] = ["0", "2", "1"]
-    tampered = ThreeWayLongitudinalCaseAuthority.from_dict(payload)
 
-    with pytest.raises(ValueError, match="deployment-unit order"):
-        tampered.restore(data)
+    with pytest.raises(ValueError, match="complete chronological prefix"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+
+def test_metadata_must_be_deterministic_and_finite():
+    _, split, _ = _authority()
+
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        ThreeWayLongitudinalCaseAuthority.from_split(
+            split,
+            case_id="nan-metadata",
+            history_policy="prior",
+            case_metadata={"score": float("nan")},
+        )
+
+    with pytest.raises(TypeError, match="JSON-compatible"):
+        ThreeWayLongitudinalCaseAuthority.from_split(
+            split,
+            case_id="object-metadata",
+            history_policy="prior",
+            case_metadata={"opaque": object()},
+        )
+
+
+def test_declared_group_identity_invariants_fail_before_restore():
+    _, _, authority = _authority()
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["observed_group_order"] = ["0", "1", "1", "2"]
+    with pytest.raises(ValueError, match="duplicate"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["source_group_values"] = ["0", "2"]
+    with pytest.raises(ValueError, match="disjoint"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
 
 
 def test_schema_and_history_policy_fail_closed():
