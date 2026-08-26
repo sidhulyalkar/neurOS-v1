@@ -26,7 +26,25 @@ namespace Neuros.Unicorn
         Invalid,
         Gap,
         Duplicate,
-        OutOfOrder
+        OutOfOrder,
+        CounterAmbiguous
+    }
+
+    public enum UnicornPacketStatus
+    {
+        Decodable,
+        Malformed
+    }
+
+    public enum UnicornSequenceStatus
+    {
+        Unknown,
+        First,
+        Sequential,
+        Gap,
+        Duplicate,
+        OutOfOrder,
+        PrecisionAmbiguous
     }
 
     public sealed class UnicornRawUdpSample
@@ -41,6 +59,10 @@ namespace Neuros.Unicorn
         public readonly bool AuthorityAllowed;
         public readonly double ReceivedSeconds;
         public readonly string Reason;
+        public readonly UnicornPacketStatus PacketStatus;
+        public readonly UnicornSequenceStatus SequenceStatus;
+        public readonly bool? ValidationAsserted;
+        public readonly bool? CounterStepExact;
 
         public UnicornRawUdpSample(
             float[] values,
@@ -52,7 +74,11 @@ namespace Neuros.Unicorn
             int healthyStreak,
             bool authorityAllowed,
             double receivedSeconds,
-            string reason)
+            string reason,
+            UnicornPacketStatus packetStatus = UnicornPacketStatus.Decodable,
+            UnicornSequenceStatus sequenceStatus = UnicornSequenceStatus.Unknown,
+            bool? validationAsserted = null,
+            bool? counterStepExact = null)
         {
             Values = values;
             Counter = counter;
@@ -64,6 +90,10 @@ namespace Neuros.Unicorn
             AuthorityAllowed = authorityAllowed;
             ReceivedSeconds = receivedSeconds;
             Reason = reason;
+            PacketStatus = packetStatus;
+            SequenceStatus = sequenceStatus;
+            ValidationAsserted = validationAsserted;
+            CounterStepExact = counterStepExact;
         }
     }
 
@@ -74,6 +104,7 @@ namespace Neuros.Unicorn
         public const int BatteryIndex = 14;
         public const int CounterIndex = 15;
         public const int ValidationIndex = 16;
+        public const int Float32ExactIntegerMax = 16777216; // 2^24
 
         private readonly object _sync = new object();
         private readonly int _port;
@@ -86,7 +117,7 @@ namespace Neuros.Unicorn
         private Thread _thread;
         private volatile bool _running;
         private UnicornRawUdpSample _latest;
-        private int? _lastCounter;
+        private int? _counterHighWater;
         private double? _lastDecodableReceiveSeconds;
         private int _healthyStreak;
         private UnicornStreamHealth _lastHealth = UnicornStreamHealth.Stale;
@@ -221,8 +252,7 @@ namespace Neuros.Unicorn
 
                 if (payload.Length != PayloadBytes)
                 {
-                    return PublishFault(
-                        null, null, null, UnicornStreamHealth.Malformed, 0,
+                    return PublishMalformed(
                         receivedSeconds, $"Expected {PayloadBytes} bytes, received {payload.Length}.");
                 }
 
@@ -232,9 +262,7 @@ namespace Neuros.Unicorn
                     values[i] = ReadLittleEndianSingle(payload, i * 4);
                     if (float.IsNaN(values[i]) || float.IsInfinity(values[i]))
                     {
-                        return PublishFault(
-                            values, null, null, UnicornStreamHealth.Malformed, 0,
-                            receivedSeconds, "Packet contains a non-finite value.");
+                        return PublishMalformed(receivedSeconds, "Packet contains a non-finite value.");
                     }
                 }
 
@@ -246,85 +274,159 @@ namespace Neuros.Unicorn
 
                 if (Math.Abs(counterFloat - counter) > 0.25f)
                 {
-                    return PublishFault(
-                        values, null, validation, UnicornStreamHealth.Malformed, 0,
-                        receivedSeconds, "Counter is not sufficiently integer-like.");
+                    return PublishMalformed(receivedSeconds, "Counter is not sufficiently integer-like.");
                 }
                 if (validation != 0 && validation != 1)
                 {
-                    return PublishFault(
-                        values, counter, validation, UnicornStreamHealth.Malformed, 0,
-                        receivedSeconds, "Validation indicator is not binary.");
+                    return PublishMalformed(receivedSeconds, "Validation indicator is not binary.");
                 }
 
                 _lastDecodableReceiveSeconds = receivedSeconds;
-                if (validation != 1)
+                int missedPackets;
+                bool counterStepExact;
+                var sequenceStatus = ClassifySequence(counter, counterFloat, out missedPackets, out counterStepExact);
+                var validationAsserted = validation == 1;
+                var health = SummarizeHealth(validationAsserted, sequenceStatus);
+
+                var sequenceOk = sequenceStatus == UnicornSequenceStatus.First
+                    || sequenceStatus == UnicornSequenceStatus.Sequential;
+                if (sequenceOk && validationAsserted && counterStepExact)
                 {
-                    _lastCounter = counter;
-                    return PublishFault(
-                        values, counter, validation, UnicornStreamHealth.Invalid, 0,
-                        receivedSeconds, "Validation indicator is not asserted.", battery);
+                    _healthyStreak += 1;
+                }
+                else
+                {
+                    _healthyStreak = 0;
                 }
 
-                if (_lastCounter.HasValue)
-                {
-                    var delta = counter - _lastCounter.Value;
-                    if (delta == 0)
-                    {
-                        return PublishFault(
-                            values, counter, validation, UnicornStreamHealth.Duplicate, 0,
-                            receivedSeconds, "Counter repeated.", battery);
-                    }
-                    if (delta < 0)
-                    {
-                        return PublishFault(
-                            values, counter, validation, UnicornStreamHealth.OutOfOrder, 0,
-                            receivedSeconds, "Counter moved backwards.", battery);
-                    }
-                    if (delta > 1)
-                    {
-                        _lastCounter = counter;
-                        return PublishFault(
-                            values, counter, validation, UnicornStreamHealth.Gap, delta - 1,
-                            receivedSeconds, $"Counter advanced by {delta}.", battery);
-                    }
-                }
-
-                _lastCounter = counter;
-                _healthyStreak += 1;
-                _lastHealth = UnicornStreamHealth.Healthy;
-                var allowed = _healthyStreak >= _recoveryPackets;
+                _lastHealth = health;
+                var allowed = health == UnicornStreamHealth.Healthy
+                    && _healthyStreak >= _recoveryPackets;
+                var reason = BuildReason(validationAsserted, sequenceStatus, missedPackets);
                 _latest = new UnicornRawUdpSample(
-                    values, counter, battery, validation, UnicornStreamHealth.Healthy,
-                    0, _healthyStreak, allowed, receivedSeconds,
-                    "Healthy sequential validated packet.");
+                    values,
+                    counter,
+                    battery,
+                    validation,
+                    health,
+                    missedPackets,
+                    _healthyStreak,
+                    allowed,
+                    receivedSeconds,
+                    reason,
+                    UnicornPacketStatus.Decodable,
+                    sequenceStatus,
+                    validationAsserted,
+                    counterStepExact);
                 return _latest;
             }
         }
 
-        private UnicornRawUdpSample PublishFault(
-            float[] values,
-            int? counter,
-            int? validation,
-            UnicornStreamHealth health,
-            int missedPackets,
-            double receivedSeconds,
-            string reason,
-            float? battery = null)
+        private UnicornSequenceStatus ClassifySequence(
+            int counter,
+            float counterFloat,
+            out int missedPackets,
+            out bool counterStepExact)
+        {
+            missedPackets = 0;
+            counterStepExact = Math.Abs(counterFloat) <= Float32ExactIntegerMax
+                && (!_counterHighWater.HasValue || Math.Abs(_counterHighWater.Value) <= Float32ExactIntegerMax);
+            if (!counterStepExact)
+            {
+                if (!_counterHighWater.HasValue || counter > _counterHighWater.Value)
+                {
+                    _counterHighWater = counter;
+                }
+                return UnicornSequenceStatus.PrecisionAmbiguous;
+            }
+
+            if (!_counterHighWater.HasValue)
+            {
+                _counterHighWater = counter;
+                return UnicornSequenceStatus.First;
+            }
+
+            var delta = counter - _counterHighWater.Value;
+            if (delta == 0) return UnicornSequenceStatus.Duplicate;
+            if (delta < 0) return UnicornSequenceStatus.OutOfOrder;
+
+            _counterHighWater = counter;
+            if (delta == 1) return UnicornSequenceStatus.Sequential;
+            missedPackets = delta - 1;
+            return UnicornSequenceStatus.Gap;
+        }
+
+        private static UnicornStreamHealth SummarizeHealth(
+            bool validationAsserted,
+            UnicornSequenceStatus sequenceStatus)
+        {
+            // Keep the prior compact VALID=0 behavior while preserving sequence
+            // information independently on UnicornRawUdpSample.SequenceStatus.
+            if (!validationAsserted) return UnicornStreamHealth.Invalid;
+            switch (sequenceStatus)
+            {
+                case UnicornSequenceStatus.First:
+                case UnicornSequenceStatus.Sequential:
+                    return UnicornStreamHealth.Healthy;
+                case UnicornSequenceStatus.Gap:
+                    return UnicornStreamHealth.Gap;
+                case UnicornSequenceStatus.Duplicate:
+                    return UnicornStreamHealth.Duplicate;
+                case UnicornSequenceStatus.OutOfOrder:
+                    return UnicornStreamHealth.OutOfOrder;
+                case UnicornSequenceStatus.PrecisionAmbiguous:
+                    return UnicornStreamHealth.CounterAmbiguous;
+                default:
+                    return UnicornStreamHealth.Malformed;
+            }
+        }
+
+        private static string BuildReason(
+            bool validationAsserted,
+            UnicornSequenceStatus sequenceStatus,
+            int missedPackets)
+        {
+            var validationReason = validationAsserted ? "" : "Validation indicator is not asserted; ";
+            switch (sequenceStatus)
+            {
+                case UnicornSequenceStatus.First:
+                case UnicornSequenceStatus.Sequential:
+                    return validationAsserted
+                        ? "Healthy sequential validated packet."
+                        : validationReason + "sequence is continuous.";
+                case UnicornSequenceStatus.Gap:
+                    return validationReason + $"counter gap implies {missedPackets} missing packet(s).";
+                case UnicornSequenceStatus.Duplicate:
+                    return validationReason + "counter repeated.";
+                case UnicornSequenceStatus.OutOfOrder:
+                    return validationReason + "counter arrived below the observed high-water mark.";
+                case UnicornSequenceStatus.PrecisionAmbiguous:
+                    return validationReason
+                        + "counter exceeds float32 unit-step exactness; wrap/reset semantics are undocumented.";
+                default:
+                    return validationReason + "sequence status is unknown.";
+            }
+        }
+
+        private UnicornRawUdpSample PublishMalformed(double receivedSeconds, string reason)
         {
             _healthyStreak = 0;
-            _lastHealth = health;
+            _lastHealth = UnicornStreamHealth.Malformed;
             _latest = new UnicornRawUdpSample(
-                values ?? Array.Empty<float>(),
-                counter ?? -1,
-                battery ?? float.NaN,
-                validation ?? -1,
-                health,
-                missedPackets,
+                Array.Empty<float>(),
+                -1,
+                float.NaN,
+                -1,
+                UnicornStreamHealth.Malformed,
+                0,
                 0,
                 false,
                 receivedSeconds,
-                reason);
+                reason,
+                UnicornPacketStatus.Malformed,
+                UnicornSequenceStatus.Unknown,
+                null,
+                null);
             return _latest;
         }
 
