@@ -9,6 +9,7 @@ on:
       - "packages/neuros-sourceweigher/**"
       - "tests/test_synthetic_bci_arena.py"
       - "tests/test_arena_*.py"
+      - "tests/test_unicorn_arena_profile.py"
       - "tests/test_plugin_registry.py"
       - "examples/arena/**"
       - ".github/workflows/synthetic-arena.yml"
@@ -51,6 +52,7 @@ jobs:
             tests/test_arena_timing.py \
             tests/test_arena_benchmark.py \
             tests/test_arena_recording_metadata.py \
+            tests/test_unicorn_arena_profile.py \
             tests/test_plugin_registry.py
       - name: Exercise preset, manifest, and benchmark CLI
         run: |

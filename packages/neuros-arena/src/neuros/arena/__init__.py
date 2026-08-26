@@ -26,6 +26,7 @@ from .conformance import (
     check_transport_drop_monotonicity,
     search_counterexamples,
 )
+from .device_presets import unicorn_hybrid_black_eeg_profile
 from .evaluation import ArenaDecision, evaluate_decisions
 from .evidence import WorldModelEvidenceCard, evidence_card_for_model
 from .leadfield import LeadFieldDrivenWorldModel, export_mne_forward_bundle, save_leadfield_bundle
@@ -127,5 +128,6 @@ __all__ = [
     "save_recording_metadata",
     "search_counterexamples",
     "split_contiguous_recording",
+    "unicorn_hybrid_black_eeg_profile",
     "validate_covariance_anchor_held_out",
 ]

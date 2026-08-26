@@ -14,6 +14,51 @@ from neuros.drivers.synthetic_eeg import (  # noqa: F401
     SyntheticEEGGenerator,
 )
 from neuros.drivers.synthetic_eeg_driver import SyntheticEEGDriver  # noqa: F401
+from neuros.drivers.unicorn_api_sim import (  # noqa: F401
+    AmplifierChannelSim,
+    AmplifierConfigurationSim,
+    DeviceInformationSim,
+    UnicornApiSimError,
+    UnicornPythonApiSimulator,
+)
+from neuros.drivers.unicorn_compatibility import (  # noqa: F401
+    UnicornCompatibilityReport,
+    UnicornCompatibilitySurface,
+    run_unicorn_compatibility_suite,
+)
+from neuros.drivers.unicorn_hybrid_black_sim import (  # noqa: F401
+    UNICORN_ACCEL_NAMES,
+    UNICORN_AUX_NAMES,
+    UNICORN_DEVICE17_NAMES,
+    UNICORN_EEG_API_NAMES,
+    UNICORN_GYRO_NAMES,
+    UNICORN_RECORDER19_NAMES,
+    UNICORN_SCALP_LABELS,
+    UnicornConformanceReport,
+    UnicornHybridBlackBlock,
+    UnicornHybridBlackSimulationConfig,
+    UnicornHybridBlackSimulator,
+    UnicornHybridBlackSpec,
+    validate_unicorn_block,
+)
+from neuros.drivers.unicorn_network_sim import (  # noqa: F401
+    API_FROM_RAW_UDP_INDICES,
+    BANDPOWER_BANDS,
+    BANDPOWER_FEATURE_COUNT,
+    RAW_UDP_CHANNEL_COUNT,
+    RAW_UDP_FROM_API_INDICES,
+    RAW_UDP_PAYLOAD_BYTES,
+    UNICORN_RAW_UDP_NAMES,
+    BandpowerFrame,
+    UnicornBandpowerReferenceStream,
+    api17_scan_to_raw_udp_order,
+    compute_unicorn_bandpower_payload,
+    decode_unicorn_bandpower_ascii,
+    decode_unicorn_udp_scan,
+    encode_unicorn_bandpower_ascii,
+    encode_unicorn_udp_scan,
+    raw_udp_scan_to_api17_order,
+)
 
 # additional drivers
 from neuros.drivers.dataset_driver import DatasetDriver  # noqa: F401
