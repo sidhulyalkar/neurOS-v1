@@ -202,3 +202,20 @@ DANDI / NWB / SpikeInterface
              |
              +------> Evidence
 ```
+
+The invasive lane should not force spike-sorting, dataset-client, or neuromodulation dependencies into `neuros-core`.
+
+## Adding an integration
+
+A new integration should land in this order:
+
+1. define the exact external boundary and what neurOS will not reimplement;
+2. implement an optional adapter/plugin or evidence operator outside `neuros-core`;
+3. add deterministic contract tests;
+4. add a registry entry at the weakest accurate status/evidence tier;
+5. add a clean-install CI lane with the optional dependency where appropriate;
+6. add real upstream integration evidence;
+7. add named real-data, hardware, or closed-loop evidence only when actually exercised;
+8. promote status or evidence tier only in the same change that adds the missing evidence.
+
+A README example alone is never sufficient to mark an integration supported.
