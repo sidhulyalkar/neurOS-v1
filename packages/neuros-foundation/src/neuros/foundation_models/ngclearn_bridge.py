@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import importlib.metadata
+import itertools
 import json
 import math
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ import numpy as np
 NGCLEARN_SUPPORTED_SERIES = (3, 2)
 NGCLEARN_REFERENCE_REPOSITORY = "https://github.com/NACLab/ngc-learn"
 NgcLearnOutput = Literal["linear", "nonlinear"]
+_CONTEXT_IDS = itertools.count()
 
 
 class NgcLearnUnavailableError(ImportError):
@@ -205,7 +207,9 @@ class NgcLearnRateCellTransform:
 
     The transform performs no resampling, filtering, normalization, padding,
     channel reordering, or fitting. One RateCell unit is created per input
-    channel and the upstream dynamical state is reset before each call.
+    channel. The upstream model is initialized lazily once per transform object
+    and reset before every call so ngcsimlib's process-global Context registry
+    cannot accidentally return an older model with the same path.
     """
 
     def __init__(
@@ -240,20 +244,22 @@ class NgcLearnRateCellTransform:
         self.integration_type = integration_type.strip()
         self.output = output
         self.seed = seed
+        self._context_id = next(_CONTEXT_IDS)
+        self._runtime: tuple[Any, Any, Any, Any, Any, str] | None = None
+        self._runtime_channels: int | None = None
 
-    def transform(self, samples: Any, *, sample_rate_hz: float) -> NgcLearnRateCellResult:
-        if isinstance(sample_rate_hz, bool) or not isinstance(sample_rate_hz, (int, float)):
-            raise ValueError("sample_rate_hz must be numeric")
-        sample_rate_hz = float(sample_rate_hz)
-        if sample_rate_hz <= 0 or not math.isfinite(sample_rate_hz):
-            raise ValueError("sample_rate_hz must be positive and finite")
+    def _ensure_runtime(self, n_channels: int) -> tuple[Any, Any, Any, Any, Any, str]:
+        if self._runtime is not None:
+            if self._runtime_channels != n_channels:
+                raise ValueError(
+                    "NgcLearnRateCellTransform input channel count is fixed after first execution; "
+                    f"expected {self._runtime_channels}, received {n_channels}"
+                )
+            return self._runtime
 
-        matrix = _matrix(samples)
         ngclearn, components, jax, jnp, random, version = _load_upstream()
-        dt_ms = 1000.0 / sample_rate_hz
-        n_channels = matrix.shape[1]
-
-        with ngclearn.Context("neuros_ngclearn_ratecell"):
+        context_name = f"neuros_ngclearn_ratecell_{self._context_id}"
+        with ngclearn.Context(context_name):
             cell = components.RateCell(
                 "z0",
                 n_units=n_channels,
@@ -265,6 +271,22 @@ class NgcLearnRateCellTransform:
             )
             advance_process = ngclearn.MethodProcess("advance") >> cell.advance_state
             reset_process = ngclearn.MethodProcess("reset") >> cell.reset
+
+        self._runtime = (cell, advance_process, reset_process, jax, jnp, version)
+        self._runtime_channels = n_channels
+        return self._runtime
+
+    def transform(self, samples: Any, *, sample_rate_hz: float) -> NgcLearnRateCellResult:
+        if isinstance(sample_rate_hz, bool) or not isinstance(sample_rate_hz, (int, float)):
+            raise ValueError("sample_rate_hz must be numeric")
+        sample_rate_hz = float(sample_rate_hz)
+        if sample_rate_hz <= 0 or not math.isfinite(sample_rate_hz):
+            raise ValueError("sample_rate_hz must be positive and finite")
+
+        matrix = _matrix(samples)
+        dt_ms = 1000.0 / sample_rate_hz
+        n_channels = matrix.shape[1]
+        cell, advance_process, reset_process, jax, jnp, version = self._ensure_runtime(n_channels)
 
         reset_process.run()
         outputs: list[np.ndarray] = []
@@ -292,7 +314,7 @@ class NgcLearnRateCellTransform:
             "jax_version": str(getattr(jax, "__version__", "unknown")),
             "jax_backend": str(jax.default_backend()),
             "jax_enable_x64": x64_enabled,
-            "component": f"{components.RateCell.__module__}.{components.RateCell.__name__}",
+            "component": f"{cell.__class__.__module__}.{cell.__class__.__name__}",
             "output_compartment": "z" if self.output == "linear" else "zF",
             "tau_m_ms": self.tau_m_ms,
             "gamma": self.gamma,
