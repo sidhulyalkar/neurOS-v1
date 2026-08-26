@@ -87,6 +87,33 @@ def _string_tuple(name: str, values: Any, *, allow_empty: bool = False) -> tuple
     return result
 
 
+def _strict_int(name: str, value: Any, *, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer")
+    result = int(value)
+    if result < minimum:
+        qualifier = "positive" if minimum == 1 else "non-negative"
+        raise ValueError(f"{name} must be {qualifier}")
+    return result
+
+
+def _shape_tuple(name: str, values: Any) -> tuple[int, ...]:
+    array = np.asarray(values)
+    if array.ndim != 1 or array.size == 0:
+        raise ValueError(f"{name} must be a non-empty one-dimensional integer shape")
+    if array.dtype == np.bool_:
+        raise ValueError(f"{name} must contain integer dimensions, not booleans")
+    try:
+        integer = array.astype(np.int64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain integer dimensions") from exc
+    if not np.array_equal(array, integer):
+        raise ValueError(f"{name} must contain integer dimensions")
+    if np.any(integer < 1):
+        raise ValueError(f"{name} dimensions must be positive")
+    return tuple(int(value) for value in integer.tolist())
+
+
 def _fraction(name: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
         raise ValueError(f"{name} must be numeric")
@@ -172,13 +199,13 @@ class ThreeWayLongitudinalCaseAuthority:
             raise ValueError("three-way longitudinal authority requires a deployment-unit split")
         if self.history_policy not in {"prior", "all-other", "custom"}:
             raise ValueError(f"unsupported history_policy={self.history_policy!r}")
-        if isinstance(self.n_samples, bool) or not isinstance(self.n_samples, int) or self.n_samples <= 0:
-            raise ValueError("n_samples must be a positive integer")
-        if not self.input_shape or self.input_shape[0] != self.n_samples:
+        n_samples = _strict_int("n_samples", self.n_samples, minimum=1)
+        seed = _strict_int("seed", self.seed, minimum=0)
+        input_shape = _shape_tuple("input_shape", self.input_shape)
+        if input_shape[0] != n_samples:
             raise ValueError("input_shape must begin with n_samples")
-        if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
-            raise ValueError("seed must be a non-negative integer")
-        if not str(self.partition_fingerprint).strip():
+        partition_fingerprint = str(self.partition_fingerprint).strip()
+        if not partition_fingerprint:
             raise ValueError("partition_fingerprint must be non-empty")
 
         held_out = _string_tuple("held_out_values", self.held_out_values)
@@ -248,7 +275,7 @@ class ThreeWayLongitudinalCaseAuthority:
             for label, values in sorted(calibration.items())
         ]
         for index, (left_name, left) in enumerate(all_sets):
-            if left and max(left) >= self.n_samples:
+            if left and max(left) >= n_samples:
                 raise ValueError(f"{left_name} contains out-of-range sample indices")
             for right_name, right in all_sets[index + 1 :]:
                 overlap = left & right
@@ -276,6 +303,10 @@ class ThreeWayLongitudinalCaseAuthority:
         object.__setattr__(self, "three_way_split_fingerprint", split_fingerprint)
         object.__setattr__(self, "qualification_fraction", qualification_fraction)
         object.__setattr__(self, "final_assessment_fraction", final_fraction)
+        object.__setattr__(self, "seed", seed)
+        object.__setattr__(self, "n_samples", n_samples)
+        object.__setattr__(self, "input_shape", input_shape)
+        object.__setattr__(self, "partition_fingerprint", partition_fingerprint)
         object.__setattr__(self, "case_metadata", MappingProxyType(metadata))
 
     @classmethod
@@ -442,35 +473,55 @@ class ThreeWayLongitudinalCaseAuthority:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ThreeWayLongitudinalCaseAuthority":
-        if int(payload.get("schema_version", 0)) != 2:
+        schema_version = _strict_int(
+            "schema_version", payload.get("schema_version", 0), minimum=0
+        )
+        if schema_version != 2:
             raise ValueError("three-way longitudinal authority requires schema_version=2")
+        source_indices = _indices_tuple(
+            "source_train_indices", payload["source_train_indices"]
+        )
+        qualification_indices = _indices_tuple(
+            "qualification_indices", payload["qualification_indices"]
+        )
+        final_assessment_indices = _indices_tuple(
+            "final_assessment_indices", payload["final_assessment_indices"]
+        )
+        calibration = {
+            str(key): _indices_tuple(
+                f"calibration_order_by_class[{str(key)!r}]", values, allow_empty=True
+            )
+            for key, values in dict(payload["calibration_order_by_class"]).items()
+        }
+        seed = _strict_int("seed", payload["seed"], minimum=0)
+        n_samples = _strict_int("n_samples", payload["n_samples"], minimum=1)
+        input_shape = _shape_tuple("input_shape", payload["input_shape"])
+        metadata = payload.get("case_metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise TypeError("case_metadata must be a mapping")
+
         value = cls(
-            dataset_id=str(payload["dataset_id"]),
-            case_id=str(payload["case_id"]),
-            split_unit=str(payload["split_unit"]),  # type: ignore[arg-type]
-            held_out_values=tuple(str(item) for item in payload["held_out_values"]),
-            history_policy=str(payload["history_policy"]),  # type: ignore[arg-type]
-            observed_group_order=tuple(str(item) for item in payload["observed_group_order"]),
-            source_group_values=tuple(str(item) for item in payload["source_group_values"]),
-            source_train_indices=tuple(int(item) for item in payload["source_train_indices"]),
-            qualification_indices=tuple(int(item) for item in payload["qualification_indices"]),
-            final_assessment_indices=tuple(
-                int(item) for item in payload["final_assessment_indices"]
-            ),
-            calibration_order_by_class={
-                str(key): tuple(int(item) for item in values)
-                for key, values in dict(payload["calibration_order_by_class"]).items()
-            },
-            qualification_fraction=float(payload["qualification_fraction"]),
-            final_assessment_fraction=float(payload["final_assessment_fraction"]),
-            seed=int(payload["seed"]),
-            partition_fingerprint=str(payload["partition_fingerprint"]),
-            three_way_split_fingerprint=str(payload["three_way_split_fingerprint"]),
-            processed_data_sha256=str(payload["processed_data_sha256"]),
-            n_samples=int(payload["n_samples"]),
-            input_shape=tuple(int(item) for item in payload["input_shape"]),
-            case_metadata=dict(payload.get("case_metadata", {})),
-            schema_version=2,
+            dataset_id=payload["dataset_id"],
+            case_id=payload["case_id"],
+            split_unit=payload["split_unit"],  # type: ignore[arg-type]
+            held_out_values=tuple(payload["held_out_values"]),
+            history_policy=payload["history_policy"],  # type: ignore[arg-type]
+            observed_group_order=tuple(payload["observed_group_order"]),
+            source_group_values=tuple(payload["source_group_values"]),
+            source_train_indices=source_indices,
+            qualification_indices=qualification_indices,
+            final_assessment_indices=final_assessment_indices,
+            calibration_order_by_class=calibration,
+            qualification_fraction=payload["qualification_fraction"],
+            final_assessment_fraction=payload["final_assessment_fraction"],
+            seed=seed,
+            partition_fingerprint=payload["partition_fingerprint"],
+            three_way_split_fingerprint=payload["three_way_split_fingerprint"],
+            processed_data_sha256=payload["processed_data_sha256"],
+            n_samples=n_samples,
+            input_shape=input_shape,
+            case_metadata=metadata,
+            schema_version=schema_version,
         )
         expected_authority = payload.get("authority_fingerprint")
         if expected_authority is not None and str(expected_authority) != value.authority_fingerprint:
