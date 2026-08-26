@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-example-plugin"
+version = "0.1.0"
+description = "Out-of-tree neurOS source and transform plugin reference package"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "neurOS Development Team"}]
+dependencies = [
+    "neuros-core>=2.0.0,<3.0.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
+
+[project.entry-points."neuros.sources"]
+example_sine = "neuros_example_plugin.source:SineSource"
+
+[project.entry-points."neuros.transforms"]
+example_gain = "neuros_example_plugin.transforms:GainTransform"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["neuros_example_plugin*"]

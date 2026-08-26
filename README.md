@@ -21,7 +21,7 @@ The repository contains multiple internal distributions, but the public product 
 
 `neuros-arena` belongs to **Evidence**. It is a deterministic BCI systems wind tunnel for finding failures across display, neural-world, device, transport, decoder, and application boundaries. It is not a fifth product surface and a simulator cannot self-promote a biological claim.
 
-Read [`docs/PLATFORM.md`](docs/PLATFORM.md) for the governing architecture, [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the evidence-backed ecosystem matrix, [`docs/SYNTHETIC_BCI_ARENA.md`](docs/SYNTHETIC_BCI_ARENA.md) for the Arena contract, and [`docs/getting-started/first-10-minutes.md`](docs/getting-started/first-10-minutes.md) for the shortest newcomer path.
+Read [`docs/PLATFORM.md`](docs/PLATFORM.md) for the governing architecture, [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) for the evidence-backed ecosystem matrix, [`docs/SYNTHETIC_BCI_ARENA.md`](docs/SYNTHETIC_BCI_ARENA.md) for the Arena contract, [`docs/PLUGIN_AUTHORING.md`](docs/PLUGIN_AUTHORING.md) for out-of-tree extension authoring, and [`docs/getting-started/first-10-minutes.md`](docs/getting-started/first-10-minutes.md) for the shortest newcomer path.
 
 ## Architecture
 
@@ -292,9 +292,11 @@ neuros.world_models
 
 The kernel does not import concrete hardware, model ecosystems, UI/cloud integrations, ORION implementations, or Arena world-model implementations. A world-model plugin owns neural dynamics, not display/device/transport/application semantics.
 
-A useful integration should solve a concrete boundary problem: canonical conversion, synchronization, conformance, reproducibility, evidence, transfer/adaptation, or duplicated glue assumptions. Package-name accumulation is not a goal.
+The maintained [`examples/plugins/neuros-example-plugin`](examples/plugins/neuros-example-plugin/README.md) distribution is deliberately kept **outside the workspace**. It contributes a structural `Source` and `Transform`, declares a bounded `neuros-core` compatibility range, and is built/installed as its own wheel in a clean Python 3.10–3.12 CI matrix. That matrix verifies entry-point distribution/version provenance, protocol conformance, `pip check`, YAML resolution, and execution through the installed `neuros` CLI.
 
-A maintained out-of-tree plugin authoring kit and clean-wheel compatibility lane are the next major developer-preview usability gate.
+See [`docs/PLUGIN_AUTHORING.md`](docs/PLUGIN_AUTHORING.md) for the supported authoring contract and how to copy the reference into a separate repository.
+
+A useful integration should solve a concrete boundary problem: canonical conversion, synchronization, conformance, reproducibility, evidence, transfer/adaptation, or duplicated glue assumptions. Package-name accumulation is not a goal.
 
 ## Scientific trust and releases
 
@@ -319,7 +321,7 @@ packages/
   neuros-core/          stable runtime/data/replay/plugin contracts
   neuros-drivers/       hardware, simulated, dataset, and LSL sources
   neuros/               user-facing SDK, CLI, interoperability composition
-  orion/                stable ORION token/representation/adaptation/assessment contracts
+  orion/                source directory for the neuros-orion distribution
   neuros-arena/         causal synthetic worlds, faults, populations, counterexamples
   neuros-models/        task decoders and inspectable model surfaces
   neuros-foundation/    foundation-model and real-dataset evidence adapters
@@ -330,11 +332,11 @@ packages/
   neuros-cloud/         optional distributed/provider integrations
 ```
 
-These are implementation boundaries, not twelve competing product identities.
+These are implementation boundaries, not twelve competing product identities. External plugin examples under `examples/plugins/` are intentionally not workspace members.
 
 ## Quality
 
-CI separates kernel contracts across Python 3.10-3.12, installed BCI execution, workspace wheel builds, recording/replay and NWB/Zarr interoperability, scientific/latency gates, model/mechanistic contracts, foundation interoperability, SourceWeigher, ORION authority, longitudinal real-dataset evidence, hardware-boundary drivers, ecosystem compatibility, NeuroAI upstream conformance, Synthetic BCI Arena, public trust, and release-candidate artifacts.
+CI separates kernel contracts across Python 3.10-3.12, installed BCI execution, workspace wheel builds, recording/replay and NWB/Zarr interoperability, scientific/latency gates, model/mechanistic contracts, foundation interoperability, SourceWeigher, ORION authority, longitudinal real-dataset evidence, hardware-boundary drivers, ecosystem compatibility, NeuroAI upstream conformance, Synthetic BCI Arena, **External Plugin Contract**, public trust, and release-candidate artifacts.
 
 Hardware-specific claims require recorded qualification manifests for the exact device, firmware, transport, host, configuration, model, and artifact identities involved.
 
@@ -342,7 +344,7 @@ Hardware-specific claims require recorded qualification manifests for the exact 
 
 The highest-value sequence is now:
 
-1. ship a maintained out-of-tree plugin authoring kit and clean-wheel compatibility lane so external labs can extend neurOS without kernel forks;
+1. graduate the out-of-tree reference kit into an independent starter repository and use it to qualify a real external hardware/model plugin without kernel edits;
 2. execute the predeclared longitudinal EEG model ladder and ORION calibration-reduction studies under identical frozen split/final-assessment authority;
 3. anchor Arena world banks against held-out public EEG and expand world models only behind the common causal contract;
 4. establish DANDI/SpikeInterface invasive-data interoperability and selected visual-neuroscience benchmark evidence;
