@@ -28,7 +28,7 @@ from .unicorn_network_sim import RAW_UDP_PAYLOAD_BYTES, decode_unicorn_udp_scan
 # IEEE-754 float32 represents every integer exactly only through 2**24. The
 # public Unicorn raw-UDP contract documents CNT as a float but does not document
 # wrap/reset behavior. Above this bound, exact +1 packet-continuity inference is
-# therefore unsafe and the default game guard fails closed.
+# unsafe and the game guard deliberately fails closed.
 FLOAT32_EXACT_INTEGER_MAX = 2**24
 
 RawUdpHealth = Literal[
@@ -60,7 +60,6 @@ class UnicornRawUdpGuardConfig:
     stale_after_s: float = 0.100
     recovery_packets: int = 3
     require_validation: bool = True
-    require_exact_counter_steps: bool = True
     byte_order: str = "<"
 
     def validate(self) -> None:
@@ -203,8 +202,6 @@ class UnicornRawUdpGuard:
         if self._last_decodable_receive_s is not None:
             age_before_packet = max(0.0, received_s - self._last_decodable_receive_s)
             if age_before_packet > self.config.stale_after_s:
-                # Fresh traffic may re-establish liveness, but cannot inherit
-                # gameplay authority accumulated before a stale interval.
                 self._healthy_streak = 0
                 self._last_health = "stale"
 
@@ -249,8 +246,7 @@ class UnicornRawUdpGuard:
 
         sequence_ok = sequence_status in {"first", "sequential"}
         validity_ok = validation_asserted or not self.config.require_validation
-        exactness_ok = counter_step_exact or not self.config.require_exact_counter_steps
-        if sequence_ok and validity_ok and exactness_ok:
+        if sequence_ok and validity_ok and counter_step_exact:
             self._healthy_streak += 1
         else:
             self._healthy_streak = 0
@@ -261,7 +257,7 @@ class UnicornRawUdpGuard:
             and self._healthy_streak >= self.config.recovery_packets
             and sequence_ok
             and validity_ok
-            and exactness_ok
+            and counter_step_exact
         )
 
         reasons: list[str] = []
