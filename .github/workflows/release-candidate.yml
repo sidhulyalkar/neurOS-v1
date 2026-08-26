@@ -1,6 +1,15 @@
 name: Release Candidate Artifacts
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-candidate.yml"
+      - "packages/*/pyproject.toml"
+      - "CITATION.cff"
+      - "docs/RELEASE_POLICY.md"
+      - "docs/SCIENTIFIC_CLAIMS.md"
+      - "scripts/check_public_contracts.py"
+      - "mkdocs.yml"
   workflow_dispatch:
   push:
     tags:
@@ -8,6 +17,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-candidate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-verify:
@@ -55,7 +68,6 @@ jobs:
       - name: Generate component and checksum manifests
         run: |
           set -euo pipefail
-          DIST="${RUNNER_TEMP}/neuros-release"
           python - <<'PY'
           from __future__ import annotations
           import hashlib
@@ -68,8 +80,11 @@ jobs:
           artifacts = []
           for wheel in sorted(dist.glob("*.whl")):
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
-              metadata_name = next(name for name in ZipFile(wheel).namelist() if name.endswith(".dist-info/METADATA"))
-              metadata = ZipFile(wheel).read(metadata_name).decode("utf-8", errors="strict")
+              with ZipFile(wheel) as archive:
+                  metadata_name = next(
+                      name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                  )
+                  metadata = archive.read(metadata_name).decode("utf-8", errors="strict")
               fields = {}
               for line in metadata.splitlines():
                   if line.startswith("Name: "):
@@ -78,29 +93,64 @@ jobs:
                       fields["version"] = line[9:]
                   if len(fields) == 2:
                       break
+              if set(fields) != {"name", "version"}:
+                  raise SystemExit(f"missing package metadata in {wheel.name}")
               artifacts.append({"file": wheel.name, "sha256": digest, **fields})
           if len(artifacts) != 11:
               raise SystemExit(f"expected 11 wheels, found {len(artifacts)}")
+          if len({item["name"] for item in artifacts}) != 11:
+              raise SystemExit("release contains duplicate distribution names")
           manifest = {
+              "schema_version": 1,
               "git_sha": os.environ["GITHUB_SHA"],
               "git_ref": os.environ["GITHUB_REF"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
           }
-          (dist / "release-manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-          (dist / "SHA256SUMS").write_text("".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts))
+          (dist / "release-manifest.json").write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (dist / "SHA256SUMS").write_text(
+              "".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts),
+              encoding="utf-8",
+          )
           PY
-      - name: Smoke-install the public SDK from built wheels
+      - name: Verify checksums before installation
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/neuros-release"
+          sha256sum --check SHA256SUMS
+      - name: Smoke-install the public SDK from this exact wheel set
         run: |
           set -euo pipefail
           DIST="${RUNNER_TEMP}/neuros-release"
           python -m venv "${RUNNER_TEMP}/release-smoke"
-          "${RUNNER_TEMP}/release-smoke/bin/python" -m pip install --upgrade pip
-          NEUROS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
-          test -n "${NEUROS_WHEEL}"
-          "${RUNNER_TEMP}/release-smoke/bin/python" -m pip install --find-links "${DIST}" "${NEUROS_WHEEL}"
-          "${RUNNER_TEMP}/release-smoke/bin/neuros" doctor --json
-          "${RUNNER_TEMP}/release-smoke/bin/neuros" compatibility --json
+          PY="${RUNNER_TEMP}/release-smoke/bin/python"
+          NEUROS="${RUNNER_TEMP}/release-smoke/bin/neuros"
+          "${PY}" -m pip install --upgrade pip
+
+          CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
+          SDK_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
+          test -n "${CORE_WHEEL}"
+          test -n "${DRIVERS_WHEEL}"
+          test -n "${MODELS_WHEEL}"
+          test -n "${SDK_WHEEL}"
+
+          # Install all internal SDK dependencies explicitly from the artifacts
+          # produced by this exact source revision. External third-party
+          # dependencies may resolve normally, but neurOS components cannot be
+          # substituted by a stale or unrelated package index artifact.
+          "${PY}" -m pip install \
+            "${CORE_WHEEL}" \
+            "${DRIVERS_WHEEL}" \
+            "${MODELS_WHEEL}" \
+            "${SDK_WHEEL}"
+          "${PY}" -m pip check
+          "${NEUROS}" doctor --json
+          "${NEUROS}" compatibility --json
       - name: Upload immutable release-candidate bundle
         uses: actions/upload-artifact@v4
         with:

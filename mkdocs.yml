@@ -5,6 +5,16 @@ repo_name: sidhulyalkar/neurOS-v1
 repo_url: https://github.com/sidhulyalkar/neurOS-v1
 edit_uri: edit/main/docs/
 
+# Historical documents remain in the repository for provenance but are not part
+# of the maintained public documentation contract. Strict builds therefore
+# validate active docs without forcing obsolete pre-kernel/session links to
+# masquerade as supported navigation.
+exclude_docs: |
+  archive/development/**
+  archive/migrations/**
+  archive/research/**
+  archive/session-notes/**
+
 theme:
   name: material
   palette:
