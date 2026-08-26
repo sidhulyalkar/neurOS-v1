@@ -65,6 +65,12 @@ from neuros.drivers.unicorn_receiver_guard import (  # noqa: F401
     UnicornRawUdpGuardState,
     UnicornRawUdpObservation,
 )
+from neuros.drivers.unicorn_trace import (  # noqa: F401
+    UnicornRawUdpTraceSummary,
+    UnicornTraceContractComparison,
+    analyze_unicorn_raw_udp_trace,
+    compare_unicorn_trace_to_nominal_contract,
+)
 from neuros.drivers.unicorn_transport_sim import (  # noqa: F401
     FAULT_PROFILES,
     DeterministicPacketFaultEngine,
