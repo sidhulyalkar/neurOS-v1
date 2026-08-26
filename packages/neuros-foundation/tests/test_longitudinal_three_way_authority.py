@@ -199,6 +199,32 @@ def test_serialized_numeric_fields_are_validated_not_coerced():
         ThreeWayLongitudinalCaseAuthority.from_dict(payload)
 
 
+def test_serialized_identity_fields_are_not_repaired():
+    _, _, authority = _authority()
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["dataset_id"] = 123
+    with pytest.raises(ValueError, match="serialized dataset_id must be a string"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    payload["held_out_values"] = "2"
+    with pytest.raises(TypeError, match="array of strings"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+    payload = copy.deepcopy(authority.to_dict())
+    payload.pop("authority_fingerprint")
+    calibration = dict(payload["calibration_order_by_class"])
+    first_key = next(iter(calibration))
+    values = calibration.pop(first_key)
+    calibration[7] = values
+    payload["calibration_order_by_class"] = calibration
+    with pytest.raises(ValueError, match="class labels must be strings"):
+        ThreeWayLongitudinalCaseAuthority.from_dict(payload)
+
+
 def test_processed_data_change_fails_before_reconstructed_split_is_trusted():
     data, _, authority = _authority()
     changed_x = np.array(data.X, copy=True)
@@ -242,6 +268,14 @@ def test_metadata_must_be_deterministic_finite_and_deeply_immutable():
             case_id="object-metadata",
             history_policy="prior",
             case_metadata={"opaque": object()},
+        )
+
+    with pytest.raises(ValueError, match="collide after string normalization"):
+        ThreeWayLongitudinalCaseAuthority.from_split(
+            split,
+            case_id="colliding-metadata-keys",
+            history_policy="prior",
+            case_metadata={1: "integer-key", "1": "string-key"},
         )
 
     source_metadata = {
