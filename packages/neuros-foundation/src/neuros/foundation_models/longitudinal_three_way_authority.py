@@ -54,6 +54,16 @@ def _jsonable(value: Any) -> Any:
     )
 
 
+def _freeze_json(value: Any) -> Any:
+    """Deep-freeze already-normalized JSON evidence values."""
+
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
 def _indices_tuple(name: str, values: Any, *, allow_empty: bool = False) -> tuple[int, ...]:
     array = np.asarray(values)
     if array.ndim != 1:
@@ -285,9 +295,10 @@ class ThreeWayLongitudinalCaseAuthority:
                         f"{right_name}, overlap={sorted(overlap)[:8]}"
                     )
 
-        metadata = _jsonable(self.case_metadata)
-        if not isinstance(metadata, dict):
+        metadata_json = _jsonable(self.case_metadata)
+        if not isinstance(metadata_json, dict):
             raise TypeError("case_metadata must be a mapping")
+        metadata = _freeze_json(metadata_json)
 
         object.__setattr__(self, "dataset_id", dataset_id)
         object.__setattr__(self, "case_id", case_id)
@@ -307,7 +318,7 @@ class ThreeWayLongitudinalCaseAuthority:
         object.__setattr__(self, "n_samples", n_samples)
         object.__setattr__(self, "input_shape", input_shape)
         object.__setattr__(self, "partition_fingerprint", partition_fingerprint)
-        object.__setattr__(self, "case_metadata", MappingProxyType(metadata))
+        object.__setattr__(self, "case_metadata", metadata)
 
     @classmethod
     def from_split(
@@ -465,7 +476,7 @@ class ThreeWayLongitudinalCaseAuthority:
             "final_assessment_set_sha256": self.final_assessment_set_sha256,
             "n_samples": self.n_samples,
             "input_shape": list(self.input_shape),
-            "case_metadata": dict(self.case_metadata),
+            "case_metadata": _jsonable(self.case_metadata),
         }
         if include_fingerprint:
             payload["authority_fingerprint"] = self.authority_fingerprint
@@ -487,11 +498,14 @@ class ThreeWayLongitudinalCaseAuthority:
         final_assessment_indices = _indices_tuple(
             "final_assessment_indices", payload["final_assessment_indices"]
         )
+        raw_calibration = payload["calibration_order_by_class"]
+        if not isinstance(raw_calibration, Mapping):
+            raise TypeError("calibration_order_by_class must be a mapping")
         calibration = {
             str(key): _indices_tuple(
                 f"calibration_order_by_class[{str(key)!r}]", values, allow_empty=True
             )
-            for key, values in dict(payload["calibration_order_by_class"]).items()
+            for key, values in raw_calibration.items()
         }
         seed = _strict_int("seed", payload["seed"], minimum=0)
         n_samples = _strict_int("n_samples", payload["n_samples"], minimum=1)
