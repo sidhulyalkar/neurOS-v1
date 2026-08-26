@@ -59,6 +59,15 @@ from neuros.drivers.unicorn_network_sim import (  # noqa: F401
     encode_unicorn_udp_scan,
     raw_udp_scan_to_api17_order,
 )
+from neuros.drivers.unicorn_transport_sim import (  # noqa: F401
+    FAULT_PROFILES,
+    DeterministicPacketFaultEngine,
+    ScheduledDatagram,
+    UnicornBandpowerUdpStreamSimulator,
+    UnicornRawUdpStreamSimulator,
+    UnicornUdpFaultProfile,
+    get_unicorn_udp_fault_profile,
+)
 
 # additional drivers
 from neuros.drivers.dataset_driver import DatasetDriver  # noqa: F401
