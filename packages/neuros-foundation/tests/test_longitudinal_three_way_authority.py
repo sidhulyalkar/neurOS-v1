@@ -225,7 +225,7 @@ def test_prior_chronology_tampering_fails_at_authority_construction():
         ThreeWayLongitudinalCaseAuthority.from_dict(payload)
 
 
-def test_metadata_must_be_deterministic_and_finite():
+def test_metadata_must_be_deterministic_finite_and_deeply_immutable():
     _, split, _ = _authority()
 
     with pytest.raises(ValueError, match="NaN or infinity"):
@@ -243,6 +243,30 @@ def test_metadata_must_be_deterministic_and_finite():
             history_policy="prior",
             case_metadata={"opaque": object()},
         )
+
+    source_metadata = {
+        "protocol": {"name": "three-way", "thresholds": [0.1, 0.2]},
+        "flags": ["frozen", "prospective"],
+    }
+    authority = ThreeWayLongitudinalCaseAuthority.from_split(
+        split,
+        case_id="immutable-metadata",
+        history_policy="prior",
+        case_metadata=source_metadata,
+    )
+    fingerprint = authority.authority_fingerprint
+    serialized = authority.to_dict()
+
+    source_metadata["protocol"]["name"] = "mutated-outside"
+    source_metadata["flags"].append("mutated-outside")
+    assert authority.authority_fingerprint == fingerprint
+    assert authority.to_dict() == serialized
+
+    with pytest.raises(TypeError):
+        authority.case_metadata["protocol"]["name"] = "mutated-inside"  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        authority.case_metadata["flags"].append("mutated-inside")  # type: ignore[union-attr]
+    assert authority.authority_fingerprint == fingerprint
 
 
 def test_declared_group_identity_invariants_fail_before_restore():
