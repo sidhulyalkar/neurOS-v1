@@ -7,6 +7,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from list_workspace_packages import workspace_members
+
 
 EXACT_FORBIDDEN = {
     ".coverage",
@@ -36,17 +38,7 @@ ACTIVE_DOCS = (
     "docs/ARCHITECTURE.md",
     "docs/API_REFERENCE.md",
     "docs/getting-started/installation.md",
-    "packages/neuros-core/README.md",
-    "packages/neuros-drivers/README.md",
-    "packages/neuros-models/README.md",
-    "packages/neuros-foundation/README.md",
-    "packages/neuros-ui/README.md",
-    "packages/neuros-cloud/README.md",
-    "packages/neuros/README.md",
-    "packages/orion/README.md",
-    "packages/neuros-neurofm/README.md",
-    "packages/neuros-mechint/README.md",
-    "packages/neuros-sourceweigher/README.md",
+    *(f"{member}/README.md" for member in workspace_members()),
 )
 
 STALE_MARKERS = (

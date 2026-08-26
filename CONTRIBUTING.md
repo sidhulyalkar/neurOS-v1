@@ -36,6 +36,8 @@ pytest tests/
 python scripts/check_repo_hygiene.py
 ```
 
+The root `pyproject.toml` workspace is the canonical maintained-package inventory. CI and release tooling derive package membership from it through `scripts/list_workspace_packages.py`; do not add parallel hard-coded package lists.
+
 ## Architecture rule
 
 Dependency direction should remain:
@@ -44,11 +46,11 @@ Dependency direction should remain:
 neural contracts
       <- runtime / config / recording / quality
       <- drivers / task models / SDK
-      <- ORION / foundation / transfer / mechanism integrations
+      <- ORION / foundation / transfer / mechanism / Arena integrations
       <- experiments and studies
 ```
 
-A kernel package must not import a research implementation. New hardware, transforms, tokenizers, encoders, decoders, sinks, and monitors should normally enter through plugin interfaces. Model/research ecosystems should use narrow adapters rather than making the runtime aware of their internals.
+A kernel package must not import a research implementation. New hardware, transforms, tokenizers, encoders, decoders, sinks, monitors, and neural world models should normally enter through plugin interfaces. Model/research ecosystems should use narrow adapters rather than making the runtime aware of their internals.
 
 ## Where changes belong
 
@@ -71,6 +73,22 @@ Avoid hardware SDKs, task-specific models, cloud vendors, large deep-learning fr
 Maintained source integrations and simulated/data sources. Optional device dependencies belong in extras or external plugin distributions.
 
 A driver PR claiming hardware support should separate software contract tests from device qualification. Qualification evidence must identify the exact device, firmware, transport, OS, plugin revision, and protocol used.
+
+### `packages/neuros-arena`
+
+Deterministic closed-loop synthetic BCI systems worlds for falsification, conformance, fault injection, population coverage, and counterexample search.
+
+Arena changes should preserve explicit causal boundaries between:
+
+- requested stimulus and actually emitted display history;
+- neural-world dynamics and sensor/device effects;
+- device timing and transport behavior;
+- decoder outputs and application authority;
+- synthetic evidence and real human evidence.
+
+A new world model should normally implement the `neuros.world_models` plugin boundary rather than owning display/device/network/application semantics. More physiological complexity is not automatically stronger evidence. Promotion requires a declared model identity, deterministic/replayable behavior where applicable, metamorphic or ground-truth tests, and an explicit statement of what the model cannot establish.
+
+Public-data similarity or SourceWeigher weights must be described as similarity under the chosen geometry, not as probabilities that synthetic participants are biologically true.
 
 ### `packages/neuros-models`
 
@@ -128,9 +146,9 @@ A new adapter establishes an execution boundary, not truth about a discovered me
 
 ### `packages/orion`
 
-Neural tokenization, representation, adaptation, and neural-intelligence contracts/implementations that have a common evaluation path. New ORION methods require leakage-controlled comparative evidence.
+Neural tokenization, representation, adaptation, assessment authority, and neural-intelligence contracts/implementations that have a common evaluation path. New ORION methods require leakage-controlled comparative evidence.
 
-Fit, representation training, adaptation, and final evaluation partitions should remain explicit. New tokenizers or representations should be compared against simpler controls under matched downstream capacity and compute where practical.
+Fit, representation training, calibration, qualification/model selection, adaptation, and final evaluation partitions should remain explicit. New tokenizers or representations should be compared against simpler controls under matched downstream capacity and compute where practical. Untouched final-assessment rows must never become an implicit adaptation or model-selection pool.
 
 ### `packages/neuros-neurofm` and research packages
 
@@ -140,7 +158,7 @@ A NeuroFM implementation moves behind a promoted ORION interface only after it s
 
 ### `packages/neuros-ui` and `packages/neuros-cloud`
 
-Optional UI/API/distributed integration surfaces. These packages should consume the same config/runtime/event contracts as local execution rather than creating alternate orchestration semantics.
+Optional UI/API/distributed integration surfaces. These packages should consume the same config/runtime/event/evidence contracts as local execution rather than creating alternate orchestration semantics.
 
 Provider- or UI-specific claims require their own tests. Package version numbers alone do not imply kernel-level qualification.
 
@@ -172,6 +190,7 @@ neuros.encoders
 neuros.decoders
 neuros.sinks
 neuros.monitors
+neuros.world_models
 ```
 
 A plugin should:
@@ -181,9 +200,10 @@ A plugin should:
 3. expose deterministic configuration options;
 4. fail with a useful typed error when prerequisites are absent;
 5. include a contract test;
-6. include real-hardware qualification evidence separately if hardware support is claimed.
+6. declare compatible neurOS package ranges in package metadata rather than relying on undocumented assumptions;
+7. include real-hardware qualification evidence separately if hardware support is claimed.
 
-External plugins should not require edits to `neuros-core` unless they reveal a genuinely missing general contract.
+External plugins should not require edits to `neuros-core` unless they reveal a genuinely missing general contract. Plugin authors should depend on the narrowest stable package surface needed by their plugin rather than the entire monorepo.
 
 ## Runtime changes
 
@@ -215,7 +235,7 @@ NWB/Zarr interoperability should not weaken the canonical lossless replay contra
 
 ## Scientific and ORION changes
 
-Scientific comparisons must separate fit/train/adaptation/discovery/evaluation data where relevant. A new tokenizer, representation, transfer method, or mechanistic claim should include appropriate controls and report more than one convenient metric.
+Scientific comparisons must separate fit/train/adaptation/discovery/evaluation data where relevant. A new tokenizer, representation, transfer method, world model, or mechanistic claim should include appropriate controls and report more than one convenient metric.
 
 At minimum consider:
 
@@ -230,6 +250,7 @@ At minimum consider:
 - runtime and memory;
 - representation geometry/domain leakage;
 - mechanism intervention/faithfulness where claimed;
+- synthetic-world sensitivity/counterexamples where applicable;
 - reproducibility seed/config/data/artifact manifests.
 
 Do not describe synthetic, software-only, or public-dataset evidence as hardware or clinical validation.
@@ -248,7 +269,7 @@ Use the weakest accurate evidence label:
 8. closed-loop qualification;
 9. clinical evidence.
 
-A passing unit test is not evidence for a device latency claim. A hardware smoke test is not clinical validation. A model-level causal intervention is not automatically a biological mechanism.
+A passing unit test is not evidence for a device latency claim. A hardware smoke test is not clinical validation. A model-level causal intervention is not automatically a biological mechanism. A simulator passing its own benchmark is not proof of human BCI performance.
 
 ## Pull requests
 
@@ -291,7 +312,7 @@ Run:
 python scripts/check_repo_hygiene.py
 ```
 
-before submitting structural changes.
+before submitting structural changes. The hygiene check automatically includes every workspace package README, so a new maintained distribution must ship a current README as part of its addition.
 
 ## Security, privacy, and safety
 

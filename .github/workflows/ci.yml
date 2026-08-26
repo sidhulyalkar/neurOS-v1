@@ -36,24 +36,15 @@ jobs:
           python -m pip install build
       - name: Build every workspace distribution
         run: |
+          set -euo pipefail
           DIST="${RUNNER_TEMP}/neuros-wheels"
           mkdir -p "${DIST}"
-          for package in \
-            packages/neuros-core \
-            packages/neuros-drivers \
-            packages/neuros-models \
-            packages/neuros-foundation \
-            packages/neuros-ui \
-            packages/neuros-cloud \
-            packages/neuros \
-            packages/neuros-mechint \
-            packages/neuros-neurofm \
-            packages/neuros-sourceweigher \
-            packages/orion
+          mapfile -t PACKAGES < <(python scripts/list_workspace_packages.py)
+          for package in "${PACKAGES[@]}"
           do
             python -m build --wheel --outdir "${DIST}" "${package}"
           done
-          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq 11
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq "${#PACKAGES[@]}"
 
   kernel-contracts:
     name: Kernel contracts / Python ${{ matrix.python-version }}
@@ -74,6 +65,7 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
       - name: Run kernel contract tests
         run: |
+          python scripts/list_workspace_packages.py --json
           pytest -q \
             tests/test_kernel_contracts.py \
             tests/test_runtime_queues.py \

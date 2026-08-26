@@ -66,6 +66,8 @@ nav:
       - Installation: getting-started/installation.md
   - Platform:
       - Four Public Surfaces: PLATFORM.md
+      - Synthetic BCI Arena: SYNTHETIC_BCI_ARENA.md
+      - EEG World Models: EEG_WORLD_MODELS.md
       - Ecosystem Compatibility: COMPATIBILITY.md
       - NeuroAI Ecosystem: NEUROAI_ECOSYSTEM.md
       - Qualification Bundles: QUALIFICATION.md
@@ -74,9 +76,11 @@ nav:
       - Project Status: PROJECT_STATUS.md
   - Scientific Trust:
       - Scientific Claims: SCIENTIFIC_CLAIMS.md
+      - Scientific Validation Policy: SCIENTIFIC_VALIDATION_POLICY.md
       - Release Policy: RELEASE_POLICY.md
   - Real-World Evidence:
       - Evidence Program: REAL_WORLD_EVIDENCE.md
+      - Public EEG Anchoring Study: PUBLIC_EEG_ANCHORING_STUDY.md
       - Ranked Source Map: EVIDENCE_SOURCE_MAP.md
       - Longitudinal EEG Showcase: LONGITUDINAL_EEG_SHOWCASE.md
       - Longitudinal Model Ladder: LONGITUDINAL_MODEL_LADDER.md
