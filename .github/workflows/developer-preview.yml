@@ -1,0 +1,116 @@
+name: Developer Preview Journey
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/developer-preview.yml"
+      - "scripts/run_developer_preview_journey.py"
+      - "docs/getting-started/**"
+      - "mkdocs.yml"
+      - "configs/examples/mock_bci.yaml"
+      - "examples/plugins/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-models/**"
+      - "packages/neuros/**"
+      - "packages/neuros-arena/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/developer-preview.yml"
+      - "scripts/run_developer_preview_journey.py"
+      - "docs/getting-started/**"
+      - "mkdocs.yml"
+      - "configs/examples/mock_bci.yaml"
+      - "examples/plugins/**"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-models/**"
+      - "packages/neuros/**"
+      - "packages/neuros-arena/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: developer-preview-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-wheel-journey:
+    name: Installed-wheel external-user journey
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Build exact public-path wheels
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install build
+          DIST="${RUNNER_TEMP}/developer-preview-wheels"
+          mkdir -p "${DIST}"
+          python -m build --wheel --outdir "${DIST}" packages/neuros-core
+          python -m build --wheel --outdir "${DIST}" packages/neuros-drivers
+          python -m build --wheel --outdir "${DIST}" packages/neuros-models
+          python -m build --wheel --outdir "${DIST}" packages/neuros
+          python -m build --wheel --outdir "${DIST}" packages/neuros-arena
+          python -m build --wheel --outdir "${DIST}" examples/plugins/neuros-example-plugin
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq 6
+      - name: Install only built neurOS/plugin artifacts
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/developer-preview-wheels"
+          ENV="${RUNNER_TEMP}/developer-preview-env"
+          python -m venv "${ENV}"
+          PY="${ENV}/bin/python"
+          PIP="${ENV}/bin/pip"
+          "${PY}" -m pip install --upgrade pip
+          CORE="$(find "${DIST}" -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS="$(find "${DIST}" -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS="$(find "${DIST}" -name 'neuros_models-*.whl' -print -quit)"
+          SDK="$(find "${DIST}" -name 'neuros-[0-9]*.whl' -print -quit)"
+          ARENA="$(find "${DIST}" -name 'neuros_arena-*.whl' -print -quit)"
+          PLUGIN="$(find "${DIST}" -name 'neuros_example_plugin-*.whl' -print -quit)"
+          for artifact in "${CORE}" "${DRIVERS}" "${MODELS}" "${SDK}" "${ARENA}" "${PLUGIN}"; do
+            test -n "${artifact}"
+          done
+          "${PIP}" install "${CORE}" "${DRIVERS}" "${MODELS}" "${SDK}" "${ARENA}" "${PLUGIN}"
+          "${PIP}" check
+      - name: Run the complete installed-wheel journey
+        run: |
+          set -euo pipefail
+          PY="${RUNNER_TEMP}/developer-preview-env/bin/python"
+          OUT="${RUNNER_TEMP}/developer-preview-report"
+          "${PY}" scripts/run_developer_preview_journey.py \
+            --repo-root "${GITHUB_WORKSPACE}" \
+            --output "${OUT}" \
+            --duration 0.1
+          test -s "${OUT}/journey-report.json"
+          "${PY}" - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = Path(os.environ["RUNNER_TEMP"]) / "developer-preview-report" / "journey-report.json"
+          payload = json.loads(report.read_text(encoding="utf-8"))
+          assert payload["schema"] == "neuros.developer_preview_journey.v1"
+          assert payload["status"] == "pass", payload.get("failure")
+          assert len(payload["commands"]) >= 15
+          assert all(not item["editable"] for item in payload["distributions"].values())
+          required = {"session", "qualification", "arena_report"}
+          assert required <= set(payload["artifacts"])
+          PY
+      - name: Upload developer-preview evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neurOS-developer-preview-${{ github.sha }}
+          path: ${{ runner.temp }}/developer-preview-report
+          if-no-files-found: warn
+          retention-days: 30

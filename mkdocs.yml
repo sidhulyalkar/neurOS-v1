@@ -63,6 +63,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - First 10 Minutes: getting-started/first-10-minutes.md
+      - Developer Preview Journey: getting-started/developer-preview.md
       - Installation: getting-started/installation.md
   - Platform:
       - Four Public Surfaces: PLATFORM.md
