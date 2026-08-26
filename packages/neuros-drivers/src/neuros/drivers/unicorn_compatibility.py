@@ -15,6 +15,11 @@ inspectable. Each surface is tagged by evidence class:
 ``synthetic_assumption``
     A useful stress-model policy that is intentionally not attributed to the
     manufacturer.
+
+Compatibility receipts also embed the exact upstream documentation snapshot used
+for those classifications. Public vendor documentation can change independently
+of neurOS; a historical receipt therefore needs to say which source revision or
+retrieval snapshot justified the contract at the time it was produced.
 """
 from __future__ import annotations
 
@@ -43,6 +48,101 @@ from .unicorn_network_sim import (
 )
 
 EvidenceClass = Literal["exact_contract", "reference_implementation", "synthetic_assumption"]
+
+
+@dataclass(frozen=True)
+class UnicornUpstreamReference:
+    """One auditable upstream source supporting the compatibility classification."""
+
+    reference_id: str
+    authority: str
+    title: str
+    locator: str
+    revision: str
+    retrieved_date: str
+    supports: tuple[str, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            "reference_id": self.reference_id,
+            "authority": self.authority,
+            "title": self.title,
+            "locator": self.locator,
+            "revision": self.revision,
+            "retrieved_date": self.retrieved_date,
+            "supports": list(self.supports),
+        }
+
+
+# This snapshot is intentionally explicit rather than dynamically fetched at
+# runtime. A compatibility result should remain reproducible even if a vendor
+# edits a web page or moves a repository after the result was generated.
+UNICORN_UPSTREAM_CONTRACT_SNAPSHOT: tuple[UnicornUpstreamReference, ...] = (
+    UnicornUpstreamReference(
+        reference_id="gtec-hybrid-black-product-2026-08-26",
+        authority="g.tec medical engineering GmbH",
+        title="Unicorn Hybrid Black technical specifications",
+        locator="https://www.gtec.at/product/unicorn-hybrid-black-bci-platform/",
+        revision="retrieved:2026-08-26",
+        retrieved_date="2026-08-26",
+        supports=(
+            "eeg8_anatomical",
+            "direct_api17_scan",
+            "motion_and_battery_stress_policy",
+        ),
+    ),
+    UnicornUpstreamReference(
+        reference_id="unicorn-python-api-reference",
+        authority="unicorn-bi / g.tec medical engineering GmbH",
+        title="Unicorn Hybrid Black Windows Python API reference",
+        locator=(
+            "https://github.com/unicorn-bi/Unicorn-Hybrid-Black-Windows-APIs/"
+            "blob/main/python-api/unicorn-python-api-reference.md"
+        ),
+        revision="git-blob:9c34d49be17e1b147a2e05c2ec7c058d36d9b848",
+        retrieved_date="2026-08-26",
+        supports=("direct_api17_scan", "python_api_lifecycle"),
+    ),
+    UnicornUpstreamReference(
+        reference_id="unicorn-raw-udp-interface",
+        authority="unicorn-bi / g.tec medical engineering GmbH",
+        title="Unicorn Network Interfaces Hybrid Black raw UDP contract",
+        locator=(
+            "https://github.com/unicorn-bi/Unicorn-Network-Interfaces-Hybrid-Black/"
+            "blob/main/UDP/unicorn-udp-interface.md"
+        ),
+        revision="git-blob:c69de6cf17d88434acf71c96cb1752070199cdfc",
+        retrieved_date="2026-08-26",
+        supports=("raw_udp17_wire",),
+    ),
+    UnicornUpstreamReference(
+        reference_id="unicorn-recorder-hybrid-black",
+        authority="unicorn-bi / g.tec medical engineering GmbH",
+        title="Unicorn Recorder Hybrid Black acquisition/network contract",
+        locator="https://github.com/unicorn-bi/Unicorn-Recorder-Hybrid-Black/blob/main/README.md",
+        revision="git-blob:1e99c71cc7f7699ea8a1443a1928dc35674a9830",
+        retrieved_date="2026-08-26",
+        supports=("recorder19_fields",),
+    ),
+    UnicornUpstreamReference(
+        reference_id="unicorn-bandpower-hybrid-black",
+        authority="unicorn-bi / g.tec medical engineering GmbH",
+        title="Unicorn Bandpower Hybrid Black UDP payload and cadence contract",
+        locator="https://github.com/unicorn-bi/Unicorn-Bandpower-Hybrid-Black/blob/main/README.md",
+        revision="git-blob:3576791793bf169a35ae7c72fd2d4d880c154165",
+        retrieved_date="2026-08-26",
+        supports=("bandpower70_reference",),
+    ),
+    UnicornUpstreamReference(
+        reference_id="gpype-hybrid-black-3.0.9",
+        authority="g.tec medical engineering GmbH",
+        title="g.Pype HybridBlack source documentation",
+        locator="https://gpype.gtec.at/content/7_sdk_reference/backend_sources/hybrid_black.html",
+        revision="g.Pype-docs:3.0.9;retrieved:2026-08-26",
+        retrieved_date="2026-08-26",
+        supports=("direct_api17_scan", "acquisition_availability_delay"),
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -80,6 +180,9 @@ class UnicornCompatibilityReport:
             "synthetic": self.synthetic,
             "passed": self.passed,
             "surfaces": [surface.to_dict() for surface in self.surfaces],
+            "upstream_contract_snapshot": [
+                reference.to_dict() for reference in UNICORN_UPSTREAM_CONTRACT_SNAPSHOT
+            ],
             "evidence_boundary": (
                 "Synthetic device/interface compatibility only. This report cannot qualify Bluetooth radio behavior, "
                 "physical electrode contact, actual Unicorn firmware, proprietary Bandpower numerics, or human EEG performance."
