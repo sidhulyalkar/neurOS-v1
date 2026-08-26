@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from neuros.foundation_models.ngclearn_bridge import _array_sha256
+from neuros.foundation_models.ngclearn_bridge import _array_sha256, _matrix
 from scripts.evidence.run_ngclearn_hebbian_authority import (
     _fixture,
     run_governed_hebbian_adaptation,
@@ -27,8 +27,11 @@ def test_real_upstream_authority_worker_binds_exact_calibration_and_evaluation_r
     pytest.importorskip("ngclearn")
     samples, authority, model, payload = _run()
 
-    adaptation = samples[list(authority.adaptation_indices)]
-    evaluation = samples[list(authority.evaluation_indices)]
+    # Match the exact canonical matrix representation consumed by the bridge and
+    # sliced by the authority worker rather than the caller's source dtype.
+    canonical = _matrix(samples)
+    adaptation = canonical[list(authority.adaptation_indices)]
+    evaluation = canonical[list(authority.evaluation_indices)]
     assert payload["inputs"]["adaptation_input_sha256"] == _array_sha256(adaptation)
     assert payload["inputs"]["evaluation_input_sha256"] == _array_sha256(evaluation)
     assert (
@@ -70,8 +73,14 @@ def test_authority_worker_is_deterministic_across_independent_real_upstream_runs
 
     assert first_authority.authority_fingerprint == second_authority.authority_fingerprint
     assert first["evidence_sha256"] == second["evidence_sha256"]
-    assert first["learner_adaptation"]["evidence_sha256"] == second["learner_adaptation"]["evidence_sha256"]
-    assert first["outcome"]["outcome_fingerprint"] == second["outcome"]["outcome_fingerprint"]
+    assert (
+        first["learner_adaptation"]["evidence_sha256"]
+        == second["learner_adaptation"]["evidence_sha256"]
+    )
+    assert (
+        first["outcome"]["outcome_fingerprint"]
+        == second["outcome"]["outcome_fingerprint"]
+    )
     assert first == second
 
 
@@ -88,7 +97,10 @@ def test_predeclared_failed_held_out_gate_rolls_back_exact_complete_learning_sta
         payload["outcome"]["active_artifact"]["sha256"]
         != payload["application"]["after_artifact"]["sha256"]
     )
-    assert model.snapshot_state().state_sha256 == payload["outcome"]["active_artifact"]["sha256"]
+    assert (
+        model.snapshot_state().state_sha256
+        == payload["outcome"]["active_artifact"]["sha256"]
+    )
 
 
 def test_processed_data_identity_mismatch_fails_before_learner_runtime_is_initialized():
