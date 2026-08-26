@@ -107,10 +107,11 @@ jobs:
             --dry-run-packets 20
       - name: Compile engine-facing C# receiver
         run: dotnet build examples/game_engines/csharp/Neuros.Unicorn.Examples.csproj --configuration Release
-      - name: Syntax-check real-time substitution and capture endpoints
+      - name: Syntax-check real-time substitution and trace endpoints
         run: |
           python -m py_compile \
             examples/unicorn_hybrid_black_simulator.py \
             examples/unicorn_udp_simulator.py \
             examples/unicorn_raw_udp_trace_capture.py \
+            examples/unicorn_trace_compare.py \
             examples/unicorn_sim_conformance.py
