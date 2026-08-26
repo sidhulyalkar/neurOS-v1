@@ -16,7 +16,10 @@ from pathlib import Path
 import socket
 import time
 
-from neuros.drivers import analyze_unicorn_raw_udp_trace, compare_unicorn_trace_to_nominal_contract
+from neuros.drivers import (
+    analyze_unicorn_raw_udp_trace,
+    compare_unicorn_trace_to_nominal_contract,
+)
 
 
 def main() -> None:
@@ -69,11 +72,15 @@ def main() -> None:
         rate_tolerance_hz=args.rate_tolerance_hz,
     )
     payload = {
-        "schema": "neuros.unicorn_raw_udp_capture_receipt.v1",
+        "schema": "neuros.unicorn_raw_udp_capture_receipt.v2",
         "summary": summary.to_dict(),
         "nominal_contract_comparison": comparison.to_dict(),
         "capture_requested_seconds": args.seconds,
         "raw_packets_persisted": False,
+        "evidence_boundary": (
+            "Capture receipt contains reduced interface diagnostics only. Raw datagrams "
+            "exist transiently in process memory and are not persisted by this tool."
+        ),
     }
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
