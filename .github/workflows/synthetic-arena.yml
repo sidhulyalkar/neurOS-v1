@@ -1,0 +1,100 @@
+name: Synthetic BCI Arena
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-arena/**"
+      - "packages/neuros-core/src/neuros/plugins/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-sourceweigher/**"
+      - "tests/test_synthetic_bci_arena.py"
+      - "tests/test_arena_*.py"
+      - "tests/test_plugin_registry.py"
+      - "examples/arena/**"
+      - ".github/workflows/synthetic-arena.yml"
+      - "pyproject.toml"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  arena-contracts:
+    name: Arena contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install local Arena stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e "packages/neuros-arena[test]"
+      - name: Run deterministic Arena contracts
+        run: |
+          pytest -q \
+            tests/test_synthetic_bci_arena.py \
+            tests/test_arena_world_models.py \
+            tests/test_arena_leadfield.py \
+            tests/test_arena_population.py \
+            tests/test_arena_conformance.py \
+            tests/test_arena_timing.py \
+            tests/test_arena_benchmark.py \
+            tests/test_arena_recording_metadata.py \
+            tests/test_plugin_registry.py
+      - name: Exercise preset, manifest, and benchmark CLI
+        run: |
+          OUT="${RUNNER_TEMP}/arena"
+          mkdir -p "${OUT}"
+          neuros-arena --preset dual-target-smoke --output "${OUT}/smoke.json" --write-manifest "${OUT}/world.json"
+          neuros-arena --manifest examples/arena/dual_target_custom.json --output "${OUT}/custom.json" --npz "${OUT}/custom.npz"
+          neuros-arena --benchmark-pack examples/arena/benchmark_packs/eeg_game_system_v1.json --output "${OUT}/benchmark.json"
+          test -s "${OUT}/smoke.json"
+          test -s "${OUT}/world.json"
+          test -s "${OUT}/custom.json"
+          test -s "${OUT}/custom.npz"
+          test -s "${OUT}/benchmark.json"
+
+  reality-anchor:
+    name: Arena real-domain anchoring
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install local reality stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-sourceweigher
+          python -m pip install -e "packages/neuros-arena[test]"
+      - name: Qualify SourceWeigher and held-out reality bridges
+        run: |
+          pytest -q \
+            tests/test_arena_reality_anchor.py \
+            tests/test_arena_scientific_validation.py \
+            tests/test_arena_cohort_study.py
+
+  arena-wheel:
+    name: Arena wheel build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build --wheel packages/neuros-arena --outdir "${RUNNER_TEMP}/dist"

@@ -5,6 +5,7 @@
 members = [
     "packages/neuros-core",
     "packages/neuros-drivers",
+    "packages/neuros-arena",
     "packages/neuros-models",
     "packages/neuros-foundation",
     "packages/neuros-ui",

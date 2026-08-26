@@ -16,6 +16,7 @@ class PluginKind(str, Enum):
     DECODER = "decoder"
     SINK = "sink"
     MONITOR = "monitor"
+    WORLD_MODEL = "world_model"
 
     @property
     def entry_point_group(self) -> str:

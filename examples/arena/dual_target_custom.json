@@ -1,0 +1,34 @@
+{
+  "schema": "neuros.synthetic_bci_arena.manifest.v1",
+  "scenario": {
+    "name": "community-dual-target-example",
+    "seed": 42,
+    "metadata": {"paradigm": "dual-target-ssvep", "purpose": "shareable example"},
+    "stages": [
+      {"label": "rest", "duration_s": 4.0, "target_frequency_hz": null, "attention_gain": 0.0, "artifacts": []},
+      {"label": "blue", "duration_s": 5.0, "target_frequency_hz": 10.0, "attention_gain": 0.8, "artifacts": [{"at_s": 2.0, "kind": "controller", "duration_s": 0.6, "severity": 0.8}]},
+      {"label": "green", "duration_s": 5.0, "target_frequency_hz": 12.0, "attention_gain": 0.7, "artifacts": [{"at_s": 2.5, "kind": "jaw", "duration_s": 0.5, "severity": 0.7}]}
+    ]
+  },
+  "participant": {
+    "name": "creative-builder-profile", "seed": 42, "colored_noise_uv": 5.5, "white_noise_uv": 1.8,
+    "alpha_frequency_hz": 9.8, "alpha_amplitude_uv": 4.0, "ssvep_amplitude_uv": 5.0,
+    "first_harmonic_ratio": 0.3, "response_delay_s": 0.25, "switch_time_constant_s": 0.55,
+    "response_attenuation_per_minute": 0.05, "gaze_duty_cycle": 0.75, "artifact_gain": 1.0
+  },
+  "device": {
+    "name": "unicorn-like", "sampling_rate_hz": 250.0,
+    "channel_names": ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"],
+    "adc_bits": 24, "input_range_uv": 450000.0, "sensor_noise_uv": 0.5,
+    "line_frequency_hz": 60.0, "line_noise_uv": 1.0, "clock_drift_ppm": 12.0, "chunk_samples": 5
+  },
+  "display": {
+    "name": "community-60hz", "refresh_hz": 60.0, "response_lag_ms": 5.0,
+    "frame_jitter_ms": 0.5, "frame_drop_probability": 0.005,
+    "low_luminance": 0.18, "high_luminance": 1.0
+  },
+  "transport": {
+    "name": "wifi-stress", "drop_probability": 0.01, "jitter_ms": 10.0,
+    "reorder_probability": 0.005, "silence_windows": [[9.0, 1.0]]
+  }
+}

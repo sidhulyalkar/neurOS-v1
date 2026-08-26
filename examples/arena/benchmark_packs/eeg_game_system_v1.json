@@ -1,0 +1,64 @@
+{
+  "schema": "neuros.synthetic_bci_arena.benchmark_pack.v1",
+  "name": "eeg-game-systems",
+  "version": "1.0.0",
+  "description": "Dependency-light systems conformance for interactive EEG applications. It validates causal display coupling, clean transport, and explicit clock-domain recovery. It is not a human-performance benchmark.",
+  "claim_scope": "synthetic EEG game systems conformance",
+  "cases": [
+    {
+      "name": "clean-causal-loop",
+      "description": "A clean fixed-refresh dual-stage visual world should preserve display causality and lossless, aligned delivery.",
+      "manifest": {
+        "schema": "neuros.synthetic_bci_arena.manifest.v1",
+        "scenario": {
+          "name": "benchmark-clean-causal-loop",
+          "seed": 101,
+          "metadata": {"paradigm": "ssvep", "purpose": "portable benchmark"},
+          "stages": [
+            {"label": "rest", "duration_s": 1.0, "target_frequency_hz": null, "attention_gain": 0.0, "artifacts": []},
+            {"label": "target", "duration_s": 2.0, "target_frequency_hz": 10.0, "attention_gain": 0.9, "artifacts": [], "target": {"semantic": "selection"}, "task_state": {"phase": "active"}}
+          ]
+        },
+        "participant": {},
+        "device": {"line_noise_uv": 0.0},
+        "display": {},
+        "transport": {},
+        "world_model": {"name": "driven_state_space", "parameters": {}}
+      },
+      "rules": [
+        {"path": "world_model_evidence.evidence_level", "operator": "==", "expected": "W1-causal-phenomenological", "description": "the pack must not silently change model evidence tier"},
+        {"path": "metrics.world_model.display_coupled", "operator": "==", "expected": true, "description": "neural world must be driven by emitted display history"},
+        {"path": "metrics.transport.packet_drop_fraction", "operator": "==", "expected": 0.0},
+        {"path": "metrics.transport.corrected_timestamp_p95_abs_ms", "operator": "<=", "expected": 0.000001},
+        {"path": "metrics.device_clipped_fraction", "operator": "==", "expected": 0.0}
+      ]
+    },
+    {
+      "name": "clock-domain-recovery",
+      "description": "A badly offset/drifting source clock may be corrected without conflating clock error with delivery latency.",
+      "manifest": {
+        "schema": "neuros.synthetic_bci_arena.manifest.v1",
+        "scenario": {
+          "name": "benchmark-clock-domain-recovery",
+          "seed": 102,
+          "metadata": {"paradigm": "ssvep", "purpose": "portable benchmark"},
+          "stages": [
+            {"label": "rest", "duration_s": 1.0, "target_frequency_hz": null, "attention_gain": 0.0, "artifacts": []},
+            {"label": "target", "duration_s": 2.0, "target_frequency_hz": 12.0, "attention_gain": 0.8, "artifacts": []}
+          ]
+        },
+        "participant": {},
+        "device": {"line_noise_uv": 0.0, "clock_offset_ms": 25.0, "clock_drift_ppm": 100.0, "timestamp_jitter_ms": 0.0},
+        "display": {},
+        "transport": {"clock_correction_offset_error_ms": 1.5, "clock_correction_drift_error_ppm": 10.0, "clock_correction_noise_ms": 0.0},
+        "world_model": {"name": "driven_state_space", "parameters": {}}
+      },
+      "rules": [
+        {"path": "metrics.transport.source_clock_offset_ms_estimated", "operator": ">=", "expected": 24.9},
+        {"path": "metrics.transport.source_clock_drift_ppm_estimated", "operator": ">=", "expected": 99.0},
+        {"path": "metrics.transport.corrected_timestamp_p95_abs_ms", "operator": "<=", "expected": 1.7},
+        {"path": "metrics.transport.packet_drop_fraction", "operator": "==", "expected": 0.0}
+      ]
+    }
+  ]
+}

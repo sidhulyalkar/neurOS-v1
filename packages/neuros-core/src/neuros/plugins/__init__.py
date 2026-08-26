@@ -2,7 +2,8 @@
 
 Third-party packages can advertise entry points under ``neuros.sources``,
 ``neuros.transforms``, ``neuros.tokenizers``, ``neuros.encoders``,
-``neuros.decoders``, ``neuros.sinks`` and ``neuros.monitors``.
+``neuros.decoders``, ``neuros.sinks``, ``neuros.monitors`` and
+``neuros.world_models``.
 """
 
 from .registry import (

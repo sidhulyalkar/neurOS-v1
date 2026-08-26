@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuros-arena"
+version = "0.1.0"
+description = "Deterministic closed-loop synthetic BCI systems arena for neurOS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "neurOS Development Team"}]
+keywords = ["neuroscience", "bci", "eeg", "simulation", "benchmark", "testing", "world-model"]
+dependencies = [
+    "numpy>=1.24.0",
+    "neuros-core>=2.0.0",
+    "neuros-drivers>=2.1.0",
+]
+
+[project.optional-dependencies]
+reality = ["neuros-sourceweigher>=0.2.0"]
+real = [
+    "mne>=1.6",
+    "mne-lsl>=1.5",
+    "moabb>=1.0",
+    "neuros-sourceweigher>=0.2.0",
+]
+test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
+
+[project.scripts]
+neuros-arena = "neuros.arena.cli:main"
+
+[project.entry-points."neuros.world_models"]
+legacy_synthetic = "neuros.arena.world_models:LegacySyntheticWorldModel"
+driven_state_space = "neuros.arena.world_models:DrivenStateSpaceWorldModel"
+semi_synthetic_replay = "neuros.arena.semi_synthetic:SemiSyntheticReplayWorldModel"
+leadfield_driven = "neuros.arena.leadfield:LeadFieldDrivenWorldModel"
+
+[project.urls]
+Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
+Repository = "https://github.com/sidhulyalkar/neurOS-v1"
+Issues = "https://github.com/sidhulyalkar/neurOS-v1/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["neuros*"]
+namespaces = true
