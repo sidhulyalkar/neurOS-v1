@@ -1,0 +1,104 @@
+name: Three-way Adaptive Study
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/__init__.py"
+      - "packages/orion/src/orion/adaptation.py"
+      - "packages/orion/src/orion/assessment.py"
+      - "packages/orion/src/orion/__init__.py"
+      - "tests/test_three_way_adaptive_study.py"
+      - "tests/test_orion_assessment.py"
+      - "packages/neuros-foundation/tests/test_longitudinal_three_way.py"
+      - "packages/neuros-foundation/tests/test_longitudinal_three_way_authority.py"
+      - "scripts/evidence/verify_three_way_adaptive_study.py"
+      - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
+      - "docs/API_REFERENCE.md"
+      - ".github/workflows/three-way-adaptive-study-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/__init__.py"
+      - "packages/orion/src/orion/adaptation.py"
+      - "packages/orion/src/orion/assessment.py"
+      - "packages/orion/src/orion/__init__.py"
+      - "tests/test_three_way_adaptive_study.py"
+      - "tests/test_orion_assessment.py"
+      - "packages/neuros-foundation/tests/test_longitudinal_three_way.py"
+      - "packages/neuros-foundation/tests/test_longitudinal_three_way_authority.py"
+      - "scripts/evidence/verify_three_way_adaptive_study.py"
+      - "docs/ADAPTATION_AUTHORITY.md"
+      - "docs/LONGITUDINAL_MODEL_LADDER.md"
+      - "docs/API_REFERENCE.md"
+      - ".github/workflows/three-way-adaptive-study-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: three-way-adaptive-study-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Three-way adaptive study / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install exact local study graph
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[dev]"
+          python -m pip install -e "packages/orion[test]"
+          python -m pip check
+      - name: Exercise source, ORION, and cross-package authority contracts
+        run: |
+          pytest -q \
+            packages/neuros-foundation/tests/test_longitudinal_three_way.py \
+            packages/neuros-foundation/tests/test_longitudinal_three_way_authority.py \
+            tests/test_orion_assessment.py \
+            tests/test_three_way_adaptive_study.py
+      - name: Replay complete cross-package evidence twice
+        run: |
+          python scripts/evidence/verify_three_way_adaptive_study.py > "${RUNNER_TEMP}/study-first.json"
+          python scripts/evidence/verify_three_way_adaptive_study.py > "${RUNNER_TEMP}/study-second.json"
+          diff -u "${RUNNER_TEMP}/study-first.json" "${RUNNER_TEMP}/study-second.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads((Path(os.environ["RUNNER_TEMP"]) / "study-first.json").read_text())
+          assert payload["invariants"]["source_authority_shared"] is True
+          assert payload["invariants"]["qualification_fixed_across_budgets"] is True
+          assert payload["invariants"]["final_assessment_fixed_across_budgets"] is True
+          assert payload["invariants"]["budget_zero_is_frozen_not_adapted"] is True
+          assert payload["invariants"]["final_assessment_after_state_selection"] is True
+          assert payload["frozen_baseline"]["selected_state"]["kind"] == "frozen"
+          assert payload["adaptive_path"]["selected_state"]["kind"] == "adapted"
+          assert payload["claim_boundary"]["synthetic_contract_only"] is True
+          assert payload["claim_boundary"]["real_neural_data"] is False
+          assert payload["evidence_sha256"]
+          PY
+      - name: Compile cross-package study modules
+        run: |
+          python -m compileall -q \
+            packages/orion/src/orion/assessment.py \
+            packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way.py \
+            packages/neuros-foundation/src/neuros/foundation_models/longitudinal_three_way_authority.py \
+            scripts/evidence/verify_three_way_adaptive_study.py
