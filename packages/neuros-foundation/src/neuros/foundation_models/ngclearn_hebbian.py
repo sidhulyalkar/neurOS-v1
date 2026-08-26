@@ -52,9 +52,25 @@ def _nonnegative_finite(name: str, value: Any) -> float:
     return result
 
 
+def _tree_schema(jax: Any, tree: Any) -> tuple[Any, tuple[tuple[str, tuple[int, ...]], ...]]:
+    """Return optimizer pytree structure plus exact leaf dtype/shape schema."""
+
+    treedef = jax.tree_util.tree_structure(tree)
+    specs: list[tuple[str, tuple[int, ...]]] = []
+    for leaf in jax.tree_util.tree_leaves(tree):
+        array = np.asarray(leaf)
+        if array.dtype.hasobject or not np.issubdtype(array.dtype, np.number):
+            raise TypeError("optimizer state contains non-numeric leaf")
+        if not np.isfinite(array).all():
+            raise ValueError("optimizer state contains NaN or infinite values")
+        specs.append((array.dtype.str, tuple(int(v) for v in array.shape)))
+    return treedef, tuple(specs)
+
+
 def _tree_sha256(jax: Any, tree: Any) -> str:
     """Hash a JAX pytree by deterministic leaf order, dtype, shape, and bytes."""
 
+    _tree_schema(jax, tree)
     digest = hashlib.sha256()
     digest.update(b"neuros.ngclearn.optimizer-state.v1\0")
     leaves = jax.tree_util.tree_leaves(tree)
@@ -62,8 +78,6 @@ def _tree_sha256(jax: Any, tree: Any) -> str:
     digest.update(b"\0")
     for index, leaf in enumerate(leaves):
         array = np.ascontiguousarray(np.asarray(leaf))
-        if array.dtype.hasobject:
-            raise TypeError("optimizer state contains object-dtype leaf")
         digest.update(str(index).encode("ascii"))
         digest.update(b"\0")
         digest.update(array.dtype.str.encode("ascii"))
@@ -177,6 +191,7 @@ class NgcLearnHebbianAdaptationEvidence:
                 "state_identity_includes_optimizer": True,
                 "rollback_state_supported": True,
                 "transactional_checkpoint_validation": True,
+                "optimizer_schema_validated_before_rollback": True,
                 "row_normalization_after_update": False,
                 "orion_authority_applied_here": False,
                 "real_dataset_qualified": False,
@@ -396,11 +411,30 @@ class NgcLearnHebbianPredictiveCoding:
         if self._runtime is None:
             raise RuntimeError("runtime must be initialized before state validation")
         _, _, generative, _, _, _, _, jax, _, _ = self._runtime
-        expected_shape = tuple(int(v) for v in generative.weights.get().shape)
+        live_weights = np.asarray(generative.weights.get())
+        expected_shape = tuple(int(v) for v in live_weights.shape)
         if tuple(state.weights.shape) != expected_shape:
             raise ValueError(
                 f"rollback weight shape mismatch: expected {expected_shape}, received {state.weights.shape}"
             )
+        if np.dtype(state.weights.dtype) != np.dtype(live_weights.dtype):
+            raise ValueError(
+                "rollback weight dtype mismatch: "
+                f"expected {live_weights.dtype}, received {state.weights.dtype}"
+            )
+        if not np.issubdtype(state.weights.dtype, np.number) or not np.isfinite(state.weights).all():
+            raise ValueError("rollback checkpoint weights must be finite numeric values")
+
+        live_optimizer = generative.opt_params.get()
+        live_treedef, live_schema = _tree_schema(jax, live_optimizer)
+        state_treedef, state_schema = _tree_schema(jax, state.optimizer_state)
+        if state_treedef != live_treedef:
+            raise ValueError("rollback checkpoint optimizer pytree structure is incompatible")
+        if state_schema != live_schema:
+            raise ValueError(
+                "rollback checkpoint optimizer leaf dtype/shape schema is incompatible"
+            )
+
         actual_weights_sha = _array_sha256(np.ascontiguousarray(state.weights))
         if actual_weights_sha != state.weights_sha256:
             raise ValueError("rollback checkpoint weight SHA-256 does not match checkpoint contents")
@@ -415,7 +449,7 @@ class NgcLearnHebbianPredictiveCoding:
         if self._runtime is None:
             raise RuntimeError("runtime must be initialized before state restoration")
         # Validate the complete checkpoint before mutating live state. A corrupt
-        # rollback object must fail transactionally and leave the learner intact.
+        # or optimizer-incompatible rollback object must fail transactionally.
         self._validate_checkpoint(state)
         _, _, generative, feedback, _, reset, _, _, jnp, _ = self._runtime
         generative.weights.set(jnp.asarray(state.weights))
