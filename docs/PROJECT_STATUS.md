@@ -53,6 +53,8 @@ The runtime plane should remain small and conservative. Research and model layer
 
 The repository directory is `packages/orion`, while the installable distribution is `neuros-orion`. The root `pyproject.toml` workspace is the canonical maintained-distribution inventory. CI, release-candidate wheel builds, and repository hygiene derive package membership from that authority rather than keeping parallel package lists.
 
+External plugin examples under `examples/plugins/` are deliberately **not** workspace members. Their separate wheel/install path is part of the compatibility test: an extension should be able to cross the same packaging boundary used by an independent lab or company.
+
 ## What is genuinely usable today
 
 ### 1. Build and execute a reproducible software BCI pipeline
@@ -112,11 +114,21 @@ The maintained deep decoders expose logits, embeddings, stable model identity, a
 
 ORION compares tokenizer families under controlled synthetic motifs and exposes separate authority for calibration, qualification/model selection, and untouched final assessment. Synthetic known-ground-truth tests remain falsification tools. Real-data promotion requires deployment-unit-disjoint evidence and frozen assessment identity.
 
+### 9. Build an extension outside the neurOS workspace
+
+The maintained `examples/plugins/neuros-example-plugin` reference is a standalone Python distribution, not a hidden workspace package. It contributes a structural source and transform through Python entry points, depends only on a bounded `neuros-core` range, and can be instantiated from ordinary versioned neurOS YAML.
+
+The `External Plugin Contract` matrix builds exact neurOS and plugin wheels on Python 3.10, 3.11, and 3.12, installs them into a fresh environment, runs `pip check`, verifies entry-point distribution/version provenance, tests the public `Source`/`Transform` protocols, and executes the external source/transform through the installed `neuros` CLI.
+
+This establishes the software extension boundary. It does not qualify a physical device or a scientific algorithm supplied by a plugin.
+
 ## Important gaps before neurOS should be marketed as a broadly deployable BCI platform
 
-### External plugin authoring journey
+### Independent plugin ecosystem and compatibility certification
 
-The kernel has a real entry-point registry, but the developer preview still needs a maintained out-of-tree plugin template, clean-wheel install test, source/transform examples, and explicit compatibility/version negotiation. This is the next major usability gate because extensibility must work without editing the monorepo.
+The repository now proves that out-of-tree wheels work. The next ecosystem gate is stronger: move the starter into an independent repository, exercise compatibility against released neurOS artifacts rather than only same-revision monorepo wheels, and qualify at least one genuinely external hardware or model integration without a kernel fork.
+
+Longer term, plugin authors should be able to run a reusable neurOS conformance suite and publish machine-readable compatibility evidence for the exact neurOS/plugin/Python/device or model tuple they claim.
 
 ### Hardware qualification
 
@@ -170,7 +182,9 @@ The next coherent public milestone should be a **developer preview** in which an
 5. select an inspectable decoder;
 6. compare or adapt representations through the foundation/SourceWeigher layers;
 7. run an ORION tokenizer/adaptation study under frozen authority;
-8. add an external plugin without modifying kernel code;
+8. build/install an out-of-tree plugin without modifying kernel code;
 9. understand exactly which claims are supported by software, synthetic, dataset, hardware, or closed-loop evidence.
+
+The repository now has executable evidence for item 8 through the clean-wheel external-plugin matrix. The remaining developer-preview work should focus on closing the other end-to-end usability and evidence gaps rather than multiplying internal packages.
 
 That milestone is more valuable than simply adding more algorithms. It turns neurOS from a large repository into a legible, extensible platform.
