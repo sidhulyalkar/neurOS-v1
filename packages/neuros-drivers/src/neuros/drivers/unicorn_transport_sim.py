@@ -5,6 +5,15 @@ physiology or manufacturer telemetry semantics. Instead it turns already-encoded
 raw-UDP or Bandpower payloads into a reproducible delivery schedule with explicit
 loss, duplication, delay, and reordering probes.
 
+Two source-clock quantities are kept separate:
+
+``initial_delay_s``
+    Time from stream start until the first source update can exist. Raw EEG has
+    no synthetic warm-up delay. Bandpower requires its complete analysis window.
+
+``interval_s``
+    Cadence between subsequent source updates.
+
 The fault profiles are synthetic test policies. They are not claimed to describe
 measured Unicorn Bluetooth or operating-system network statistics.
 """
@@ -189,9 +198,6 @@ class DeterministicPacketFaultEngine:
             release_time_s=float(nominal_time_s),
         )
 
-        # If the previous packet was held for a reordering probe, release the
-        # current packet first and the held packet second. Dropping the current
-        # packet still releases the held packet so the engine cannot deadlock.
         if self._held_for_reorder is not None:
             held = self._held_for_reorder
             self._held_for_reorder = None
@@ -246,6 +252,7 @@ class UnicornRawUdpStreamSimulator:
         )
         self.byte_order = byte_order
         self.sequence = 0
+        self.initial_delay_s = 0.0
         self.interval_s = 1.0 / self.device.spec.sampling_rate_hz
         self.faults = DeterministicPacketFaultEngine(
             fault_profile or FAULT_PROFILES["pristine"],
@@ -260,7 +267,7 @@ class UnicornRawUdpStreamSimulator:
         return self.faults.process(
             payload,
             source_sequence=sequence,
-            nominal_time_s=sequence * self.interval_s,
+            nominal_time_s=self.initial_delay_s + sequence * self.interval_s,
         )
 
     def flush(self) -> tuple[ScheduledDatagram, ...]:
@@ -268,7 +275,14 @@ class UnicornRawUdpStreamSimulator:
 
 
 class UnicornBandpowerUdpStreamSimulator:
-    """Generate 70-value Bandpower reference datagrams at the documented cadence."""
+    """Generate 70-value Bandpower reference datagrams at the documented cadence.
+
+    The public Bandpower interface uses a 250-sample analysis buffer and a
+    10-sample hop. At 250 Hz, a stream starting with no history therefore needs
+    one second of source acquisition before its first complete feature window can
+    exist. ``initial_delay_s`` models that warm-up independently of the later
+    25 Hz update cadence.
+    """
 
     def __init__(
         self,
@@ -283,6 +297,7 @@ class UnicornBandpowerUdpStreamSimulator:
             sampling_rate_hz=self.device.spec.sampling_rate_hz
         )
         self.sequence = 0
+        self.initial_delay_s = self.bandpower.buffer_size / self.bandpower.sampling_rate_hz
         self.interval_s = 1.0 / self.bandpower.update_rate_hz
         self.faults = DeterministicPacketFaultEngine(
             fault_profile or FAULT_PROFILES["pristine"],
@@ -303,7 +318,7 @@ class UnicornBandpowerUdpStreamSimulator:
         return self.faults.process(
             payload,
             source_sequence=sequence,
-            nominal_time_s=sequence * self.interval_s,
+            nominal_time_s=self.initial_delay_s + sequence * self.interval_s,
         )
 
     def flush(self) -> tuple[ScheduledDatagram, ...]:
