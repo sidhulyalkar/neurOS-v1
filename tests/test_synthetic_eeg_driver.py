@@ -3,7 +3,10 @@ from __future__ import annotations
 import numpy as np
 
 from neuros.drivers.synthetic_eeg import SyntheticEEGConfig, SyntheticEEGGenerator
-from neuros.drivers.synthetic_eeg_driver import SyntheticEEGDriver
+from neuros.drivers.synthetic_eeg_driver import (
+    SYNTHETIC_EEG_GENERATOR_CONTRACT,
+    SyntheticEEGDriver,
+)
 
 
 def spectral_amplitude(signal: np.ndarray, sampling_rate_hz: float, frequency_hz: float) -> float:
@@ -101,11 +104,32 @@ def test_artifacts_and_channel_contact_are_explicit():
     assert np.allclose(dropout.data_uv[6], 0.0)
 
 
-def test_driver_exposes_unicorn_like_descriptor():
-    driver = SyntheticEEGDriver(SyntheticEEGConfig(seed=1), realtime=False, stream_id="phantom")
+def test_driver_exposes_versioned_replay_configuration():
+    config = SyntheticEEGConfig(
+        seed=41,
+        colored_noise_uv=3.25,
+        white_noise_uv=0.75,
+        alpha_frequency_hz=10.2,
+        alpha_amplitude_uv=1.8,
+        ssvep_amplitude_uv=7.2,
+        first_harmonic_ratio=0.42,
+    )
+    driver = SyntheticEEGDriver(config, realtime=False, stream_id="phantom")
     descriptor = driver.descriptor
     assert descriptor.stream_id == "phantom"
     assert descriptor.modality == "eeg"
     assert descriptor.sample_rate_hz == 250.0
     assert descriptor.channel_names == ("Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8")
     assert descriptor.metadata["synthetic"] is True
+    assert descriptor.metadata["generator"] == SYNTHETIC_EEG_GENERATOR_CONTRACT
+    assert descriptor.metadata["generator_config"] == {
+        "sampling_rate_hz": 250.0,
+        "channel_names": ["Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8"],
+        "colored_noise_uv": 3.25,
+        "white_noise_uv": 0.75,
+        "alpha_frequency_hz": 10.2,
+        "alpha_amplitude_uv": 1.8,
+        "ssvep_amplitude_uv": 7.2,
+        "first_harmonic_ratio": 0.42,
+        "seed": 41,
+    }
