@@ -236,12 +236,12 @@ def run_unicorn_compatibility_suite(*, seed: int = 7) -> UnicornCompatibilityRep
     delay = api17.available_timestamps_s - api17.sample_timestamps_s
     surfaces.append(_surface(
         "acquisition_availability_delay",
-        "exact_contract",
+        "reference_implementation",
         bool(np.allclose(delay, spec.device_delay_ms / 1000.0)),
         {
             "modeled_delay_ms": float(np.mean(delay) * 1000.0),
         },
-        "Models the documented approximately 40 ms compensation boundary; real hardware jitter/radio scheduling still require measurement.",
+        "Implements the documented approximately 40 ms g.Pype compensation reference. It does not assert exact physical Bluetooth delivery latency or jitter.",
     ))
 
     surfaces.append(_surface(
