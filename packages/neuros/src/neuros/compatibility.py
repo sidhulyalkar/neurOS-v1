@@ -74,10 +74,7 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         status=IntegrationStatus.SUPPORTED,
         capabilities=("source", "continuous-stream", "device-metadata"),
         evidence_tier=EvidenceTier.SOFTWARE_CONTRACT,
-        evidence_paths=(
-            "tests/test_brainflow_driver.py",
-            ".github/workflows/drivers-ci.yml",
-        ),
+        evidence_paths=("tests/test_brainflow_driver.py", ".github/workflows/drivers-ci.yml"),
         notes=(
             "Board-aware acquisition is fail-closed and contract-tested. No physical "
             "board/firmware/transport combination is yet claimed as hardware-qualified."
@@ -91,10 +88,7 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         status=IntegrationStatus.SUPPORTED,
         capabilities=("source", "continuous-stream", "clock-correction"),
         evidence_tier=EvidenceTier.SOFTWARE_CONTRACT,
-        evidence_paths=(
-            "tests/test_lsl_driver.py",
-            ".github/workflows/drivers-ci.yml",
-        ),
+        evidence_paths=("tests/test_lsl_driver.py", ".github/workflows/drivers-ci.yml"),
         notes=(
             "Continuous regular-rate streams use deterministic discovery and explicit "
             "raw-timestamp plus time-correction semantics. Network timing remains a "
@@ -109,10 +103,7 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         status=IntegrationStatus.SUPPORTED,
         capabilities=("raw-adapter", "signalframe-bridge", "stream-descriptor"),
         evidence_tier=EvidenceTier.INTEGRATION,
-        evidence_paths=(
-            "tests/test_mne_interop.py",
-            ".github/workflows/compatibility-ci.yml",
-        ),
+        evidence_paths=("tests/test_mne_interop.py", ".github/workflows/compatibility-ci.yml"),
         notes=(
             "MNE Raw objects can be converted to provenance-rich SignalFrame chunks and "
             "reconstructed from unambiguous sample-by-channel frames. This is an object "
@@ -177,17 +168,9 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         name="Braindecode",
         category="decoder ecosystem",
         status=IntegrationStatus.EXPERIMENTAL,
-        capabilities=(
-            "neural-window",
-            "model-adapter",
-            "training-bridge",
-            "decoder-bridge",
-        ),
+        capabilities=("neural-window", "model-adapter", "training-bridge", "decoder-bridge"),
         evidence_tier=EvidenceTier.INTEGRATION,
-        evidence_paths=(
-            "tests/test_braindecode_adapter.py",
-            ".github/workflows/braindecode-ci.yml",
-        ),
+        evidence_paths=("tests/test_braindecode_adapter.py", ".github/workflows/braindecode-ci.yml"),
         notes=(
             "Braindecode 1.7 is integrated by delegation for a qualified raw-window "
             "whitelist (EEGNet, EEGConformer, ShallowFBCSPNet, Deep4Net). The adapter "
@@ -196,6 +179,51 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
             "paths, and hardware/closed-loop behavior remain separate qualification steps."
         ),
         install_hint='pip install "neuros[braindecode]"',
+    ),
+    IntegrationRecord(
+        integration_id="snap",
+        name="SNAP spectral alignment",
+        category="representation evidence",
+        status=IntegrationStatus.EXPERIMENTAL,
+        capabilities=(
+            "positive-rank-spectrum",
+            "task-power",
+            "residual-target-power",
+            "null-space-invariant-evidence",
+        ),
+        evidence_tier=EvidenceTier.SOFTWARE_CONTRACT,
+        evidence_paths=(
+            "packages/neuros-foundation/src/neuros/foundation_models/spectral_alignment.py",
+            "packages/neuros-foundation/tests/test_spectral_alignment.py",
+            ".github/workflows/neuroai-ecosystem-ci.yml",
+        ),
+        notes=(
+            "neurOS implements dependency-light SNAP-derived invariant spectral quantities. "
+            "Positive-rank modes are explicit while null-space target power is aggregated "
+            "because the null eigenbasis is non-unique across valid linear-algebra backends. "
+            "This is a numerical-method contract, not a reproduced-paper or biological claim."
+        ),
+    ),
+    IntegrationRecord(
+        integration_id="ngclearn",
+        name="ngc-learn",
+        category="computational neuroscience / NeuroAI",
+        status=IntegrationStatus.EXPERIMENTAL,
+        capabilities=("rate-cell-transform", "jax-identity", "biological-dynamics-bridge"),
+        evidence_tier=EvidenceTier.INTEGRATION,
+        evidence_paths=(
+            "packages/neuros-foundation/src/neuros/foundation_models/ngclearn_bridge.py",
+            "packages/neuros-foundation/tests/test_ngclearn_bridge.py",
+            ".github/workflows/neuroai-ecosystem-ci.yml",
+        ),
+        notes=(
+            "The first qualified upstream surface is deliberately narrow: ngc-learn 3.2.x "
+            "RateCell execution with exact JAX/upstream identity, explicit time-by-channel "
+            "geometry, and no hidden preprocessing. Predictive-coding circuits, spiking "
+            "networks, Hebbian/STDP learning, real-data utility, and closed-loop behavior "
+            "remain unqualified until separate evidence lands."
+        ),
+        install_hint='pip install "neuros-foundation[ngclearn]"',
     ),
     IntegrationRecord(
         integration_id="neuralbench",
@@ -208,6 +236,47 @@ _REGISTRY: tuple[IntegrationRecord, ...] = (
         notes=(
             "Planned as an isolated optional benchmark worker so upstream Python/runtime "
             "requirements never become kernel dependencies."
+        ),
+    ),
+    IntegrationRecord(
+        integration_id="neuroaikit",
+        name="IBM NeuroAIKit",
+        category="historical NeuroAI reference",
+        status=IntegrationStatus.PLANNED,
+        capabilities=("isolated-snu-reference-worker",),
+        evidence_tier=None,
+        evidence_paths=(),
+        notes=(
+            "The TensorFlow-era SNU toolkit is scientifically useful as a historical/reference "
+            "baseline, but its legacy dependency surface will remain isolated from neurOS core."
+        ),
+    ),
+    IntegrationRecord(
+        integration_id="mouse-vision",
+        name="NeuroAI Lab mouse-vision",
+        category="neural predictivity benchmark",
+        status=IntegrationStatus.PLANNED,
+        capabilities=("external-model-benchmark", "allen-neural-response-evidence"),
+        evidence_tier=None,
+        evidence_paths=(),
+        notes=(
+            "Planned as a cross-species representation/predictivity benchmark. neurOS will "
+            "prefer authoritative Allen/public-data identities over adopting research pickles "
+            "as a canonical runtime format."
+        ),
+    ),
+    IntegrationRecord(
+        integration_id="tdann",
+        name="NeuroAI Lab TDANN",
+        category="topographic representation benchmark",
+        status=IntegrationStatus.PLANNED,
+        capabilities=("topographic-representation-evidence",),
+        evidence_tier=None,
+        evidence_paths=(),
+        notes=(
+            "Planned as an external representation/topography benchmark, not a runtime "
+            "dependency. Licensing and reproducible artifact identity must be resolved before "
+            "any implementation code is reused."
         ),
     ),
     IntegrationRecord(
@@ -277,11 +346,15 @@ def _validate_registry(records: Iterable[IntegrationRecord]) -> tuple[Integratio
         seen.add(record.integration_id)
         if record.status is IntegrationStatus.PLANNED and record.evidence_tier is not None:
             raise ValueError(f"Planned integration {record.integration_id} cannot claim evidence")
+        if record.status is IntegrationStatus.PLANNED and record.evidence_paths:
+            raise ValueError(f"Planned integration {record.integration_id} cannot publish evidence paths")
         if record.status is IntegrationStatus.SUPPORTED:
             if record.evidence_tier is None or not record.evidence_paths:
                 raise ValueError(
                     f"Supported integration {record.integration_id} requires evidence paths and tier"
                 )
+        if record.evidence_tier is not None and not record.evidence_paths:
+            raise ValueError(f"Evidence-bearing integration {record.integration_id} requires evidence paths")
     return materialized
 
 

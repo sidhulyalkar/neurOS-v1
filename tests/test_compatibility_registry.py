@@ -28,6 +28,12 @@ def test_supported_integrations_have_evidence_and_tier():
         assert record.evidence_paths
 
 
+def test_every_evidence_bearing_integration_has_executable_paths():
+    for record in compatibility_inventory():
+        if record.evidence_tier is not None:
+            assert record.evidence_paths
+
+
 def test_planned_integrations_cannot_claim_evidence_tier():
     planned = [
         item for item in compatibility_inventory() if item.status is IntegrationStatus.PLANNED
@@ -79,6 +85,45 @@ def test_braindecode_is_integration_qualified_not_real_dataset_promoted():
     assert "Real-dataset" in record.notes
     assert "mechint" not in record.capabilities
     assert "hardware" not in record.capabilities
+
+
+def test_snap_is_a_numerical_evidence_contract_not_a_biological_claim():
+    record = get_integration("snap")
+
+    assert record.status is IntegrationStatus.EXPERIMENTAL
+    assert record.evidence_tier is EvidenceTier.SOFTWARE_CONTRACT
+    assert "null-space-invariant-evidence" in record.capabilities
+    assert "reproduced-paper" not in record.capabilities
+    assert "biological" not in record.capabilities
+    assert "spectral_alignment.py" in " ".join(record.evidence_paths)
+
+
+def test_ngclearn_is_real_upstream_integration_but_only_for_narrow_surface():
+    record = get_integration("ngclearn")
+
+    assert record.status is IntegrationStatus.EXPERIMENTAL
+    assert record.evidence_tier is EvidenceTier.INTEGRATION
+    assert "rate-cell-transform" in record.capabilities
+    assert "spiking-network" not in record.capabilities
+    assert "predictive-coding" not in record.capabilities
+    assert record.install_hint == 'pip install "neuros-foundation[ngclearn]"'
+    assert "3.2.x" in record.notes
+
+
+def test_research_organizations_are_not_promoted_as_monolithic_integrations():
+    ids = {record.integration_id for record in compatibility_inventory()}
+    assert "neuroailab" not in ids
+    assert "chung-neuroai-lab" not in ids
+    assert "mouse-vision" in ids
+    assert "tdann" in ids
+
+
+def test_legacy_neuroaikit_is_planned_and_isolated():
+    record = get_integration("neuroaikit")
+    assert record.status is IntegrationStatus.PLANNED
+    assert record.evidence_tier is None
+    assert record.evidence_paths == ()
+    assert "isolated-snu-reference-worker" in record.capabilities
 
 
 def test_openbci_is_indirect_not_hardware_qualified():
