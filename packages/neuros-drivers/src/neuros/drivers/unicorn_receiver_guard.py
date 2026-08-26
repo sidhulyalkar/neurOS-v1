@@ -76,6 +76,8 @@ class UnicornRawUdpGuard:
         self.config = config or UnicornRawUdpGuardConfig()
         self.config.validate()
         self._last_counter: int | None = None
+        # Most recent structurally decodable packet, even if VALID=0. Stream
+        # liveness and gameplay authority are intentionally separate concepts.
         self._last_valid_receive_s: float | None = None
         self._healthy_streak = 0
         self._last_health: RawUdpHealth = "stale"
@@ -119,6 +121,13 @@ class UnicornRawUdpGuard:
         received_s = float(received_monotonic_s)
         if not np.isfinite(received_s):
             raise ValueError("received_monotonic_s must be finite")
+        if self._last_valid_receive_s is not None:
+            age_before_packet = max(0.0, received_s - self._last_valid_receive_s)
+            if age_before_packet > self.config.stale_after_s:
+                # Fresh traffic re-establishes liveness but cannot inherit neural
+                # authority accumulated before a stale interval.
+                self._healthy_streak = 0
+                self._last_health = "stale"
         if len(payload) != RAW_UDP_PAYLOAD_BYTES:
             return self._fault(
                 "malformed",
@@ -156,7 +165,9 @@ class UnicornRawUdpGuard:
                 reason="validation indicator is not binary",
             )
         if self.config.require_validation and validation != 1:
-            # An invalid device packet is observable but cannot grant authority.
+            # The packet is structurally observable and advances the device
+            # counter, but its neural payload cannot grant gameplay authority.
+            self._last_counter = counter
             self._last_valid_receive_s = received_s
             return self._fault(
                 "invalid",
