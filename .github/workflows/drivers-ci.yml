@@ -7,6 +7,7 @@ on:
       - "packages/neuros-drivers/**"
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
+      - "tests/test_synthetic_eeg_driver.py"
       - "tests/test_unicorn_*.py"
       - "examples/unicorn_*.py"
       - "examples/game_engines/csharp/**"
@@ -20,6 +21,7 @@ on:
       - "packages/neuros-drivers/**"
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
+      - "tests/test_synthetic_eeg_driver.py"
       - "tests/test_unicorn_*.py"
       - "examples/unicorn_*.py"
       - "examples/game_engines/csharp/**"
@@ -80,9 +82,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/neuros-drivers[test]"
-      - name: Verify device, API, UDP, Bandpower, transport, receiver, trace, and compatibility contracts
+      - name: Verify synthetic-world replay plus Unicorn device/interface contracts
         run: |
           pytest -q \
+            tests/test_synthetic_eeg_driver.py \
             tests/test_unicorn_hybrid_black_sim.py \
             tests/test_unicorn_api_sim.py \
             tests/test_unicorn_network_sim.py \

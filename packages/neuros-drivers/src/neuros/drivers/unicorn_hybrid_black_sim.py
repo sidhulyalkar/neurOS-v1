@@ -1,8 +1,8 @@
 """Device-faithful Unicorn Hybrid Black simulation contracts.
 
 This module models the *acquisition/interface behavior* of the Unicorn Hybrid
-Black around an EEG source.  It deliberately does not claim to be a human
-physiology simulator.  Neural voltages come from ``SyntheticEEGGenerator`` (or,
+Black around an EEG source. It deliberately does not claim to be a human
+physiology simulator. Neural voltages come from ``SyntheticEEGGenerator`` (or,
 in higher-level Arena integrations, another world model); this layer adds the
 hardware-facing channel schemas, quantization/clipping envelope, motion/auxiliary
 telemetry, counter continuity, battery state, validation state, and acquisition
@@ -22,8 +22,12 @@ current g.tec/Unicorn documentation:
 * about 40 ms device-delay compensation in g.Pype's HybridBlack source.
 
 The Recorder/network 19-field view additionally exposes delta-time and status /
-trigger fields.  Those two fields are application/interface products rather than
+trigger fields. Those two fields are application/interface products rather than
 extra amplifier electrodes.
+
+Random stress processes use independent seeded streams and time-major draws so
+replay does not depend on how a caller partitions an otherwise identical sample
+sequence across ``render()`` calls.
 """
 from __future__ import annotations
 
@@ -41,7 +45,12 @@ UNICORN_SCALP_LABELS = ("Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8")
 UNICORN_ACCEL_NAMES = ("Accelerometer X", "Accelerometer Y", "Accelerometer Z")
 UNICORN_GYRO_NAMES = ("Gyroscope X", "Gyroscope Y", "Gyroscope Z")
 UNICORN_AUX_NAMES = ("Counter", "Battery Level", "Validation Indicator")
-UNICORN_DEVICE17_NAMES = UNICORN_EEG_API_NAMES + UNICORN_ACCEL_NAMES + UNICORN_GYRO_NAMES + UNICORN_AUX_NAMES
+UNICORN_DEVICE17_NAMES = (
+    UNICORN_EEG_API_NAMES
+    + UNICORN_ACCEL_NAMES
+    + UNICORN_GYRO_NAMES
+    + UNICORN_AUX_NAMES
+)
 UNICORN_RECORDER19_NAMES = (
     UNICORN_EEG_API_NAMES
     + ("ACC X", "ACC Y", "ACC Z")
@@ -54,7 +63,7 @@ UNICORN_RECORDER19_NAMES = (
 class UnicornHybridBlackSpec:
     """Published device constants used by the simulator.
 
-    ``input_impedance_lower_bound_ohm`` is descriptive provenance only.  The
+    ``input_impedance_lower_bound_ohm`` is descriptive provenance only. The
     physical headset specification states >1 GOhm; the simulator does not claim
     to infer or reproduce electrode-skin impedance.
     """
@@ -125,7 +134,7 @@ class UnicornHybridBlackBlock:
 
     ``sample_timestamps_s`` represent causal sample times. ``available_timestamps_s``
     represent when those samples become available to host software after the
-    configured device-delay model.  Keeping these separate prevents a transport
+    configured device-delay model. Keeping these separate prevents a transport
     latency from silently becoming a neural timestamp.
     """
 
@@ -196,7 +205,14 @@ class UnicornHybridBlackSimulator:
         if float(eeg_generator.config.sampling_rate_hz) != self.spec.sampling_rate_hz:
             raise ValueError("Unicorn simulator source must run at 250 Hz")
         self.eeg = eeg_generator
-        self.rng = np.random.default_rng(self.config.seed + 6011)
+
+        timing_seed, accel_seed, gyro_seed = np.random.SeedSequence(
+            self.config.seed + 6011
+        ).spawn(3)
+        self._availability_rng = np.random.default_rng(timing_seed)
+        self._accel_rng = np.random.default_rng(accel_seed)
+        self._gyro_rng = np.random.default_rng(gyro_seed)
+
         self.accel_g = np.asarray([0.0, 0.0, 1.0], dtype=float)
         self.gyro_dps = np.zeros(3, dtype=float)
         self.validation_value = int(self.config.validation_default)
@@ -207,10 +223,19 @@ class UnicornHybridBlackSimulator:
     def schema(self) -> UnicornSchema:
         return self.config.schema
 
-    def set_motion(self, accel_xyz_g: tuple[float, float, float], gyro_xyz_dps: tuple[float, float, float]) -> None:
+    def set_motion(
+        self,
+        accel_xyz_g: tuple[float, float, float],
+        gyro_xyz_dps: tuple[float, float, float],
+    ) -> None:
         accel = np.asarray(accel_xyz_g, dtype=float)
         gyro = np.asarray(gyro_xyz_dps, dtype=float)
-        if accel.shape != (3,) or gyro.shape != (3,) or not np.all(np.isfinite(accel)) or not np.all(np.isfinite(gyro)):
+        if (
+            accel.shape != (3,)
+            or gyro.shape != (3,)
+            or not np.all(np.isfinite(accel))
+            or not np.all(np.isfinite(gyro))
+        ):
             raise ValueError("motion vectors must contain three finite values")
         self.accel_g = accel
         self.gyro_dps = gyro
@@ -235,22 +260,42 @@ class UnicornHybridBlackSimulator:
         runtime_s = self.config.battery_runtime_hours * 3600.0
         elapsed = np.maximum(0.0, np.asarray(sample_times_s, dtype=float))
         fraction = np.clip(elapsed / runtime_s, 0.0, 1.0)
-        return np.maximum(0.0, self.config.battery_start_percent * (1.0 - fraction))
+        return np.maximum(
+            0.0,
+            self.config.battery_start_percent * (1.0 - fraction),
+        )
 
     def _availability(self, sample_times_s: np.ndarray) -> np.ndarray:
-        base = np.asarray(sample_times_s, dtype=float) + self.spec.device_delay_ms / 1000.0
+        base = (
+            np.asarray(sample_times_s, dtype=float)
+            + self.spec.device_delay_ms / 1000.0
+        )
         if self.config.acquisition_delay_jitter_ms <= 0:
             return base
-        jitter = self.rng.normal(0.0, self.config.acquisition_delay_jitter_ms / 1000.0, size=base.size)
+        jitter = self._availability_rng.normal(
+            0.0,
+            self.config.acquisition_delay_jitter_ms / 1000.0,
+            size=base.size,
+        )
         return base + jitter
 
     def _motion(self, samples: int) -> tuple[np.ndarray, np.ndarray]:
         accel = np.repeat(self.accel_g[:, None], samples, axis=1)
         gyro = np.repeat(self.gyro_dps[:, None], samples, axis=1)
         if self.config.accelerometer_noise_g:
-            accel += self.rng.normal(0.0, self.config.accelerometer_noise_g, size=accel.shape)
+            # Time-major draws make one N-sample render equivalent to any
+            # partition of the same N samples.
+            accel += self._accel_rng.normal(
+                0.0,
+                self.config.accelerometer_noise_g,
+                size=(samples, 3),
+            ).T
         if self.config.gyroscope_noise_dps:
-            gyro += self.rng.normal(0.0, self.config.gyroscope_noise_dps, size=gyro.shape)
+            gyro += self._gyro_rng.normal(
+                0.0,
+                self.config.gyroscope_noise_dps,
+                size=(samples, 3),
+            ).T
         return accel.astype(np.float32), gyro.astype(np.float32)
 
     def render(self, samples: int) -> UnicornHybridBlackBlock:
@@ -290,7 +335,11 @@ class UnicornHybridBlackSimulator:
                 + ("count", "percent", "boolean")
             )
         else:
-            delta_ms = np.full(samples, 1000.0 / self.spec.sampling_rate_hz, dtype=np.float32)
+            delta_ms = np.full(
+                samples,
+                1000.0 / self.spec.sampling_rate_hz,
+                dtype=np.float32,
+            )
             data = np.vstack(
                 [
                     eeg_uv,
@@ -344,31 +393,65 @@ def validate_unicorn_block(
     }[block.schema]
     if samples > 1:
         sample_dt = np.diff(block.sample_timestamps_s)
-        available_delay_ms = (block.available_timestamps_s - block.sample_timestamps_s) * 1000.0
+        available_delay_ms = (
+            block.available_timestamps_s - block.sample_timestamps_s
+        ) * 1000.0
         mean_rate = 1.0 / float(np.mean(sample_dt))
         counter_continuity = bool(np.all(np.diff(block.counter) == 1))
         mean_delay = float(np.mean(available_delay_ms))
     else:
         mean_rate = device.sampling_rate_hz
         counter_continuity = True
-        mean_delay = float(np.mean((block.available_timestamps_s - block.sample_timestamps_s) * 1000.0)) if samples else 0.0
+        mean_delay = (
+            float(
+                np.mean(
+                    (block.available_timestamps_s - block.sample_timestamps_s)
+                    * 1000.0
+                )
+            )
+            if samples
+            else 0.0
+        )
     checks = {
         "two_dimensional_samples": block.data.ndim == 2 and samples > 0,
-        "expected_channel_count": block.data.ndim == 2 and block.data.shape[0] == expected_channels,
-        "channel_metadata_count": len(block.channel_names) == expected_channels and len(block.channel_units) == expected_channels,
+        "expected_channel_count": (
+            block.data.ndim == 2 and block.data.shape[0] == expected_channels
+        ),
+        "channel_metadata_count": (
+            len(block.channel_names) == expected_channels
+            and len(block.channel_units) == expected_channels
+        ),
         "250hz_sample_clock": abs(mean_rate - device.sampling_rate_hz) < 1e-6,
         "counter_continuity": counter_continuity,
-        "battery_range": bool(np.all((block.battery_percent >= 0.0) & (block.battery_percent <= 100.0))),
+        "battery_range": bool(
+            np.all(
+                (block.battery_percent >= 0.0)
+                & (block.battery_percent <= 100.0)
+            )
+        ),
         "validation_binary": bool(np.all(np.isin(block.validation, [0.0, 1.0]))),
-        "eeg_within_sensitivity": bool(np.all(np.abs(block.eeg_data_uv) <= device.sensitivity_uv + block.lsb_uv)),
-        "published_quantization_lsb": abs(block.lsb_uv - device.eeg_lsb_uv) < 1e-12,
-        "availability_not_before_sample": bool(np.all(block.available_timestamps_s >= block.sample_timestamps_s)),
+        "eeg_within_sensitivity": bool(
+            np.all(
+                np.abs(block.eeg_data_uv)
+                <= device.sensitivity_uv + block.lsb_uv
+            )
+        ),
+        "published_quantization_lsb": (
+            abs(block.lsb_uv - device.eeg_lsb_uv) < 1e-12
+        ),
+        "availability_not_before_sample": bool(
+            np.all(block.available_timestamps_s >= block.sample_timestamps_s)
+        ),
     }
     if block.schema == "device17_api":
         checks["api_channel_order"] = block.channel_names == UNICORN_DEVICE17_NAMES
     elif block.schema == "recorder19":
-        checks["recorder_channel_order"] = block.channel_names == UNICORN_RECORDER19_NAMES
-        checks["recorder_delta_time"] = bool(np.allclose(block.data[17], 4.0, atol=1e-6))
+        checks["recorder_channel_order"] = (
+            block.channel_names == UNICORN_RECORDER19_NAMES
+        )
+        checks["recorder_delta_time"] = bool(
+            np.allclose(block.data[17], 4.0, atol=1e-6)
+        )
     else:
         checks["anatomical_eeg_order"] = block.channel_names == UNICORN_SCALP_LABELS
     metrics = {
@@ -376,7 +459,15 @@ def validate_unicorn_block(
         "mean_availability_delay_ms": mean_delay,
         "eeg_lsb_uv": float(block.lsb_uv),
         "clipped_fraction": float(block.clipped_fraction),
-        "battery_min_percent": float(np.min(block.battery_percent)) if samples else 0.0,
-        "battery_max_percent": float(np.max(block.battery_percent)) if samples else 0.0,
+        "battery_min_percent": (
+            float(np.min(block.battery_percent)) if samples else 0.0
+        ),
+        "battery_max_percent": (
+            float(np.max(block.battery_percent)) if samples else 0.0
+        ),
     }
-    return UnicornConformanceReport(passed=all(checks.values()), checks=checks, metrics=metrics)
+    return UnicornConformanceReport(
+        passed=all(checks.values()),
+        checks=checks,
+        metrics=metrics,
+    )
