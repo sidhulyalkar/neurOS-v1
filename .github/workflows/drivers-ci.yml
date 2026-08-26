@@ -7,6 +7,9 @@ on:
       - "packages/neuros-drivers/**"
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
+      - "tests/test_unicorn_*.py"
+      - "examples/unicorn_*.py"
+      - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
   push:
     branches:
@@ -17,6 +20,9 @@ on:
       - "packages/neuros-drivers/**"
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
+      - "tests/test_unicorn_*.py"
+      - "examples/unicorn_*.py"
+      - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
 
 permissions:
@@ -56,3 +62,55 @@ jobs:
           python -m pip install -e "packages/neuros-drivers[test]"
       - name: Verify LSL discovery and timing semantics with deterministic fakes
         run: pytest -q tests/test_lsl_driver.py
+
+  unicorn-simulation-contracts:
+    name: Unicorn Hybrid Black simulation contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install driver test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-drivers[test]"
+      - name: Verify device, API, UDP, Bandpower, transport, receiver, trace, and compatibility contracts
+        run: |
+          pytest -q \
+            tests/test_unicorn_hybrid_black_sim.py \
+            tests/test_unicorn_api_sim.py \
+            tests/test_unicorn_network_sim.py \
+            tests/test_unicorn_transport_sim.py \
+            tests/test_unicorn_receiver_guard.py \
+            tests/test_unicorn_trace.py \
+            tests/test_unicorn_compatibility_suite.py
+      - name: Execute machine-readable compatibility receipt
+        run: |
+          OUT="${RUNNER_TEMP}/unicorn-compatibility.json"
+          python examples/unicorn_sim_conformance.py --seed 41 --output "${OUT}"
+          test -s "${OUT}"
+      - name: Exercise deterministic UDP dry runs
+        run: |
+          python examples/unicorn_udp_simulator.py \
+            --mode raw \
+            --fault-profile mixed-torture \
+            --dry-run-packets 200
+          python examples/unicorn_udp_simulator.py \
+            --mode bandpower \
+            --fault-profile delay-probe \
+            --dry-run-packets 20
+      - name: Compile engine-facing C# receiver
+        run: dotnet build examples/game_engines/csharp/Neuros.Unicorn.Examples.csproj --configuration Release
+      - name: Syntax-check real-time substitution and capture endpoints
+        run: |
+          python -m py_compile \
+            examples/unicorn_hybrid_black_simulator.py \
+            examples/unicorn_udp_simulator.py \
+            examples/unicorn_raw_udp_trace_capture.py \
+            examples/unicorn_sim_conformance.py
