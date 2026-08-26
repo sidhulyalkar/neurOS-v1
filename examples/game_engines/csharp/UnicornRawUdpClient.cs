@@ -118,6 +118,7 @@ namespace Neuros.Unicorn
         private volatile bool _running;
         private UnicornRawUdpSample _latest;
         private int? _counterHighWater;
+        private bool _counterPrecisionAmbiguous;
         private double? _lastDecodableReceiveSeconds;
         private int _healthyStreak;
         private UnicornStreamHealth _lastHealth = UnicornStreamHealth.Stale;
@@ -269,10 +270,11 @@ namespace Neuros.Unicorn
                 var battery = values[BatteryIndex];
                 var counterFloat = values[CounterIndex];
                 var validationFloat = values[ValidationIndex];
-                var counter = (int)Math.Round(counterFloat);
+                var counterStepExact = Math.Abs(counterFloat) <= Float32ExactIntegerMax;
+                var counter = counterStepExact ? (int)Math.Round(counterFloat) : -1;
                 var validation = (int)Math.Round(validationFloat);
 
-                if (Math.Abs(counterFloat - counter) > 0.25f)
+                if (counterStepExact && Math.Abs(counterFloat - counter) > 0.25f)
                 {
                     return PublishMalformed(receivedSeconds, "Counter is not sufficiently integer-like.");
                 }
@@ -283,8 +285,7 @@ namespace Neuros.Unicorn
 
                 _lastDecodableReceiveSeconds = receivedSeconds;
                 int missedPackets;
-                bool counterStepExact;
-                var sequenceStatus = ClassifySequence(counter, counterFloat, out missedPackets, out counterStepExact);
+                var sequenceStatus = ClassifySequence(counter, counterStepExact, out missedPackets);
                 var validationAsserted = validation == 1;
                 var health = SummarizeHealth(validationAsserted, sequenceStatus);
 
@@ -324,19 +325,13 @@ namespace Neuros.Unicorn
 
         private UnicornSequenceStatus ClassifySequence(
             int counter,
-            float counterFloat,
-            out int missedPackets,
-            out bool counterStepExact)
+            bool counterStepExact,
+            out int missedPackets)
         {
             missedPackets = 0;
-            counterStepExact = Math.Abs(counterFloat) <= Float32ExactIntegerMax
-                && (!_counterHighWater.HasValue || Math.Abs(_counterHighWater.Value) <= Float32ExactIntegerMax);
-            if (!counterStepExact)
+            if (!counterStepExact || _counterPrecisionAmbiguous)
             {
-                if (!_counterHighWater.HasValue || counter > _counterHighWater.Value)
-                {
-                    _counterHighWater = counter;
-                }
+                _counterPrecisionAmbiguous = true;
                 return UnicornSequenceStatus.PrecisionAmbiguous;
             }
 
@@ -360,8 +355,6 @@ namespace Neuros.Unicorn
             bool validationAsserted,
             UnicornSequenceStatus sequenceStatus)
         {
-            // Keep the prior compact VALID=0 behavior while preserving sequence
-            // information independently on UnicornRawUdpSample.SequenceStatus.
             if (!validationAsserted) return UnicornStreamHealth.Invalid;
             switch (sequenceStatus)
             {
