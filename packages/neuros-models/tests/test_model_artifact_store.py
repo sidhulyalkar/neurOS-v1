@@ -64,7 +64,6 @@ def test_store_publishes_by_content_address_and_rolls_back_only_the_ref(tmp_path
     store = ModelArtifactStore(tmp_path / "store")
     assert store.publish(tmp_path / "first-export").artifact_sha256 == first.artifact_sha256
     assert store.publish(tmp_path / "second-export").artifact_sha256 == second.artifact_sha256
-    # Publishing the same immutable object again is idempotent.
     assert store.publish(tmp_path / "first-export").artifact_sha256 == first.artifact_sha256
 
     first_path = store.artifact_path(first.artifact_sha256)
@@ -76,7 +75,6 @@ def test_store_publishes_by_content_address_and_rolls_back_only_the_ref(tmp_path
     store.rollback("active", first.artifact_sha256)
     assert store.active_sha256("active") == first.artifact_sha256
 
-    # Rollback changes only the reference. Historical artifact bytes remain exact.
     assert (first_path / "manifest.json").read_bytes() == before_manifest
     assert (first_path / "weights.safetensors").read_bytes() == before_weights
     assert store.list_artifacts() == tuple(sorted((first.artifact_sha256, second.artifact_sha256)))
@@ -115,7 +113,7 @@ def test_store_refs_reject_path_traversal_and_sha_ambiguity(tmp_path: Path):
     with pytest.raises(ValueError, match="artifact ref"):
         store.activate("../active", "a" * 64)
     with pytest.raises(ValueError, match="SHA-shaped"):
-        store.resolve("a" * 64 + "") if False else store.activate("a" * 64, "b" * 64)
+        store.activate("a" * 64, "b" * 64)
 
 
 def test_store_ref_tampering_fails_closed(tmp_path: Path):
@@ -132,8 +130,44 @@ def test_store_ref_tampering_fails_closed(tmp_path: Path):
     store.activate("active", manifest.artifact_sha256)
     ref = store.refs_dir / "active.json"
     ref.write_text(
-        '{"schema_version":1,"ref":"different","artifact_sha256":"' + manifest.artifact_sha256 + '"}\n',
+        '{"schema_version":1,"ref":"different","artifact_sha256":"'
+        + manifest.artifact_sha256
+        + '"}\n',
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="requested ref name"):
         store.resolve("active")
+
+
+def test_store_rejects_symlinked_refs_and_artifact_addresses(tmp_path: Path):
+    model, _X = _model(7)
+    manifest = export_model_artifact(
+        model,
+        tmp_path / "export",
+        artifact_id="symlink-tamper",
+        input_contract=_contract(),
+        git_sha=GIT_SHA,
+    )
+    store = ModelArtifactStore(tmp_path / "store")
+    store.publish(tmp_path / "export")
+    store.activate("active", manifest.artifact_sha256)
+
+    original_ref = store.refs_dir / "active.json"
+    external_ref = tmp_path / "external-ref.json"
+    external_ref.write_bytes(original_ref.read_bytes())
+    original_ref.unlink()
+    try:
+        original_ref.symlink_to(external_ref)
+    except OSError:
+        pytest.skip("symlinks are unavailable on this platform")
+    with pytest.raises(ValueError, match="refs cannot be symbolic links"):
+        store.resolve("active")
+
+    original_ref.unlink()
+    store.activate("active", manifest.artifact_sha256)
+    artifact_path = store.artifact_path(manifest.artifact_sha256)
+    moved = tmp_path / "moved-artifact"
+    artifact_path.rename(moved)
+    artifact_path.symlink_to(moved, target_is_directory=True)
+    with pytest.raises(ValueError, match="symbolic links"):
+        store.resolve(manifest.artifact_sha256)
