@@ -8,15 +8,22 @@ import numpy as np
 from .specs import DeviceProfile, DisplayProfile, TransportProfile
 
 
+DISPLAY_TRACE_MODEL = "neuros.arena.display_trace.v2"
+
+
 @dataclass(frozen=True)
 class StimulusTrace:
     frequency_hz: float | None
+    # Command/scheduler clock: when the application requested each frame state.
+    command_frame_times_s: np.ndarray
+    # Modeled physical-emission clock: command time plus display response lag.
     frame_times_s: np.ndarray
     luminance: np.ndarray
     dropped_frames: np.ndarray
     observed_frequency_hz: float
     frame_drop_fraction: float
     interval_jitter_ms: float
+    model: str = DISPLAY_TRACE_MODEL
 
 
 @dataclass(frozen=True)
@@ -46,6 +53,22 @@ def simulate_stimulus(
     profile: DisplayProfile,
     seed: int,
 ) -> StimulusTrace:
+    """Simulate commanded display frames and their delayed physical emission.
+
+    ``command_frame_times_s`` is the application/scheduler clock. The coded
+    luminance value is evaluated on that clock. ``frame_times_s`` is the modeled
+    emission clock after applying the declared constant response lag. Therefore
+    a non-zero response lag produces a persistent phase delay:
+
+    ``emitted(t + lag) = commanded(t)``
+
+    rather than merely delaying the first frame and then snapping back onto an
+    undelayed global phase. Frame jitter belongs to the command/frame cadence;
+    dropped frames hold the previously emitted luminance value.
+
+    This remains a synthetic display model. Physical monitor timing requires
+    photodiode or equivalent observation.
+    """
     profile.validate()
     if duration_s <= 0:
         raise ValueError("duration_s must be positive")
@@ -56,18 +79,24 @@ def simulate_stimulus(
     nominal = 1.0 / profile.refresh_hz
     jitter = rng.normal(0.0, profile.frame_jitter_ms / 1000.0, size=frames)
     intervals = np.maximum(nominal * 0.25, nominal + jitter)
-    frame_times = np.cumsum(intervals) - intervals[0] + profile.response_lag_ms / 1000.0
+    command_frame_times = np.cumsum(intervals) - intervals[0]
+    response_lag_s = profile.response_lag_ms / 1000.0
+    frame_times = command_frame_times + response_lag_s
     dropped = rng.random(frames) < profile.frame_drop_probability
     luminance = np.full(frames, profile.low_luminance, dtype=float)
     previous = profile.low_luminance
-    for index, t_s in enumerate(frame_times):
+    for index, command_t_s in enumerate(command_frame_times):
         if dropped[index]:
             luminance[index] = previous
             continue
         if frequency_hz is None:
             value = profile.low_luminance
         else:
-            value = profile.high_luminance if np.sin(2 * np.pi * frequency_hz * t_s) >= 0 else profile.low_luminance
+            value = (
+                profile.high_luminance
+                if np.sin(2 * np.pi * frequency_hz * command_t_s) >= 0
+                else profile.low_luminance
+            )
         luminance[index] = value
         previous = value
     transitions = int(np.count_nonzero(np.diff(luminance) != 0))
@@ -75,6 +104,7 @@ def simulate_stimulus(
     observed = transitions / (2.0 * span) if frequency_hz is not None else 0.0
     return StimulusTrace(
         frequency_hz=frequency_hz,
+        command_frame_times_s=command_frame_times,
         frame_times_s=frame_times,
         luminance=luminance,
         dropped_frames=dropped,
@@ -91,9 +121,11 @@ def sample_stimulus(
 ) -> np.ndarray:
     """Sample-and-hold the physically emitted luminance at EEG sample times.
 
-    Values are normalized to [-1, 1] around the configured low/high luminance.
-    A no-target trace returns zeros so resting baseline does not become an
-    artificial negative periodic drive.
+    ``trace.frame_times_s`` is the modeled emission clock. Before the first
+    emitted frame the display remains at the configured low luminance. Values are
+    normalized to [-1, 1] around the configured low/high luminance. A no-target
+    trace returns zeros so resting baseline does not become an artificial
+    negative periodic drive.
     """
     times = np.asarray(sample_times_s, dtype=float)
     if times.ndim != 1:

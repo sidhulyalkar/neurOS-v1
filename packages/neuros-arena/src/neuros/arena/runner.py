@@ -11,7 +11,8 @@ from neuros.plugins import PluginKind, load_plugin
 
 from .evidence import evidence_card_for_model
 from .participant import compile_participant_state_trace
-from .simulators import DeviceOutput, StimulusTrace, TransportPacket, apply_device, packetize, sample_stimulus, simulate_stimulus
+from .presentation import compile_presentation_plan
+from .simulators import DeviceOutput, StimulusTrace, TransportPacket, apply_device, packetize, sample_stimulus
 from .specs import ArenaScenario, DeviceProfile, DisplayProfile, ParticipantProfile, TransportProfile, WorldModelProfile
 from .world_input import WorldInputBlock
 from .world_models import NeuralWorldModel
@@ -44,6 +45,8 @@ class ArenaRun:
     ground_truth_target_hz: np.ndarray
     stage_index: np.ndarray
     stages: tuple[StageInterval, ...]
+    # Legacy stage-addressable view. Adjacent stages in the same physical
+    # presentation epoch intentionally reference the same complete trace.
     stimulus_traces: tuple[StimulusTrace, ...]
     report: dict
 
@@ -213,14 +216,14 @@ def run_scenario(
 
     fs = float(device.sampling_rate_hz)
     participant_trace = compile_participant_state_trace(scenario, participant, fs)
+    presentation_plan = compile_presentation_plan(scenario, display, fs)
     block_samples = WORLD_RENDER_CHUNK_SAMPLES
     data_blocks: list[np.ndarray] = []
     timestamp_blocks: list[np.ndarray] = []
     truth_blocks: list[np.ndarray] = []
     stage_blocks: list[np.ndarray] = []
     stage_intervals: list[StageInterval] = []
-    stage_timing: list[dict[str, float | int | str]] = []
-    stimulus_traces: list[StimulusTrace] = []
+    stage_timing: list[dict[str, object]] = []
     latent_stage_end: list[dict[str, float | str]] = []
     global_sample_start = 0
 
@@ -229,6 +232,7 @@ def run_scenario(
         stage_start = global_sample_start / fs
         stage_end = (global_sample_start + samples_total) / fs
         resolved_duration = samples_total / fs
+        presentation_epoch = presentation_plan.epoch_for_stage(stage_i)
         stage_intervals.append(StageInterval(stage.label, stage_start, stage_end, stage.target_frequency_hz))
         stage_timing.append({
             "stage": stage.label,
@@ -240,14 +244,10 @@ def run_scenario(
             "requested_duration_s": float(stage.duration_s),
             "resolved_duration_s": float(resolved_duration),
             "duration_error_ms": float((resolved_duration - stage.duration_s) * 1000.0),
+            "presentation_epoch_index": presentation_epoch.index,
+            "stimulus_id": stage.stimulus_id,
+            "stimulus_retrigger": bool(stage.stimulus_retrigger),
         })
-        trace = simulate_stimulus(
-            stage.target_frequency_hz,
-            stage.duration_s,
-            display,
-            seed=scenario.seed * 1009 + stage_i,
-        )
-        stimulus_traces.append(trace)
         artifact_cursor: set[int] = set()
         produced = 0
         last_latent: dict[str, float] = {}
@@ -255,8 +255,8 @@ def run_scenario(
             count = min(block_samples, samples_total - produced)
             sample_offsets = produced + np.arange(count, dtype=np.int64)
             global_indices = global_sample_start + sample_offsets
-            local_times = sample_offsets.astype(float) / fs
             global_times = global_indices.astype(float) / fs
+            epoch_local_times = (global_indices - presentation_epoch.start_sample).astype(float) / fs
             elapsed = produced / fs
             if artifact_execution == "legacy_injection":
                 for artifact_i, artifact in enumerate(stage.artifacts):
@@ -275,7 +275,7 @@ def run_scenario(
             # first source sample is the least surprising summary because the old
             # runner updated the value at block start.
             effective_gain = float(attention_stream[0]) if attention_stream.size else 0.0
-            emitted_drive = sample_stimulus(trace, local_times, display)
+            emitted_drive = sample_stimulus(presentation_epoch.trace, epoch_local_times, display)
             target = dict(stage.target)
             if stage.target_frequency_hz is not None:
                 target.setdefault("frequency_hz", float(stage.target_frequency_hz))
@@ -336,9 +336,16 @@ def run_scenario(
         snr[f"{frequency:g}Hz"] = _spectral_snr_db(output.data_uv[posterior][:, mask], device.sampling_rate_hz, float(frequency))
 
     display_metrics = []
-    for stage, trace in zip(scenario.stages, stimulus_traces, strict=True):
+    for stage_i, stage in enumerate(scenario.stages):
+        epoch = presentation_plan.epoch_for_stage(stage_i)
+        trace = epoch.trace
         display_metrics.append({
             "stage": stage.label,
+            "stage_index": stage_i,
+            "presentation_epoch_index": epoch.index,
+            "stimulus_id": stage.stimulus_id,
+            "stimulus_retrigger": bool(stage.stimulus_retrigger),
+            "shared_presentation_epoch": len(epoch.stage_indices) > 1,
             "target_frequency_hz": stage.target_frequency_hz,
             "observed_frequency_hz": trace.observed_frequency_hz,
             "frequency_error_hz": (0.0 if stage.target_frequency_hz is None else abs(trace.observed_frequency_hz - stage.target_frequency_hz)),
@@ -364,6 +371,7 @@ def run_scenario(
             "target_snr_db": snr,
             "transport": transport_metrics,
             "display": display_metrics,
+            "presentation": presentation_plan.to_summary(scenario),
             "stage_timing": stage_timing,
             "participant_state": participant_trace.to_summary(),
             "world_model": {
@@ -389,6 +397,9 @@ def run_scenario(
         ground_truth_target_hz=truth,
         stage_index=stage_index,
         stages=tuple(stage_intervals),
-        stimulus_traces=tuple(stimulus_traces),
+        stimulus_traces=tuple(
+            presentation_plan.epoch_for_stage(stage_i).trace
+            for stage_i in range(len(scenario.stages))
+        ),
         report=report,
     )

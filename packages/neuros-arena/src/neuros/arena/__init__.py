@@ -37,6 +37,12 @@ from .participant import (
     compile_participant_state_trace,
 )
 from .population import ParameterDistribution, PopulationRun, PopulationSpec, run_population
+from .presentation import (
+    PRESENTATION_EPOCH_MODEL,
+    PresentationEpoch,
+    PresentationPlan,
+    compile_presentation_plan,
+)
 from .presets import get_preset, list_presets
 from .reality import RealityAnchorResult, anchor_worlds_by_covariance, anchor_worlds_by_embeddings
 from .recording import (
@@ -49,6 +55,7 @@ from .recording import (
 from .reference import compare_feature_signatures, feature_signature
 from .runner import ArenaRun, run_scenario
 from .semi_synthetic import SemiSyntheticReplayWorldModel
+from .simulators import DISPLAY_TRACE_MODEL
 from .specs import (
     ArenaScenario,
     ArtifactEvent,
@@ -79,6 +86,7 @@ __all__ = [
     "BenchmarkPackResult",
     "CohortAnchorFold",
     "CohortAnchorStudy",
+    "DISPLAY_TRACE_MODEL",
     "DeviceProfile",
     "DisplayProfile",
     "DrivenStateSpaceWorldModel",
@@ -90,11 +98,14 @@ __all__ = [
     "MetricRule",
     "NeuralWorldModel",
     "PARTICIPANT_RESPONSE_MODEL",
+    "PRESENTATION_EPOCH_MODEL",
     "ParameterDistribution",
     "ParticipantProfile",
     "ParticipantStateTrace",
     "PopulationRun",
     "PopulationSpec",
+    "PresentationEpoch",
+    "PresentationPlan",
     "RealityAnchorResult",
     "RecordingMetadata",
     "SemiSyntheticReplayWorldModel",
@@ -111,6 +122,7 @@ __all__ = [
     "check_transport_drop_monotonicity",
     "compare_feature_signatures",
     "compile_participant_state_trace",
+    "compile_presentation_plan",
     "evaluate_application_trace",
     "evaluate_decisions",
     "evidence_card_for_model",

@@ -26,9 +26,11 @@ class ParticipantStateTrace:
     """Resolved per-sample frequency-target participant state.
 
     ``target_switch`` is retained as the compact field name for this contract,
-    but its semantics are target transitions: it is true when an active frequency
-    target first appears or whenever target identity changes, including
-    active→rest and rest→active boundaries. Initial rest is not a transition.
+    but its semantics are target transitions: it is true when an active visual
+    frequency target first appears or whenever target identity changes. Identity
+    is the pair ``(target_frequency_hz, stimulus_id)`` so two different physical
+    objects using the same code remain distinct attentional targets. Active→rest
+    and rest→active boundaries are transitions; initial rest is not.
     """
 
     attention_gain: np.ndarray
@@ -72,6 +74,7 @@ class ParticipantStateTrace:
         return {
             "model": self.model,
             "scope": PARTICIPANT_RESPONSE_SCOPE,
+            "target_identity": "target_frequency_hz+stimulus_id",
             "samples": int(np.asarray(self.attention_gain).size),
             "sampling_rate_hz": float(self.sampling_rate_hz),
             "target_transition_samples": transition_samples,
@@ -111,8 +114,12 @@ def compile_participant_state_trace(
     * ``gaze_duty_cycle`` is represented as a deterministic attenuation factor,
       not as a claim about literal eye-open sample occupancy;
     * global response attenuation scales that request with elapsed source time;
-    * frequency-target identity changes reset effective attention and start the
-      declared response delay;
+    * attentional target identity is ``(target_frequency_hz, stimulus_id)``;
+    * target-identity changes reset effective attention and start the declared
+      response delay;
+    * a pure ``stimulus_retrigger`` of the same target does not by itself reset
+      attention, because display presentation and attentional target are distinct
+      causal layers;
     * the first non-zero response sample can occur only at-or-after that delay;
     * after the delay, a first-order state approaches the current request using
       ``switch_time_constant_s``;
@@ -138,7 +145,7 @@ def compile_participant_state_trace(
 
     delay_samples = _delay_sample_count(participant.response_delay_s, fs)
     alpha = min(1.0, 1.0 / (fs * participant.switch_time_constant_s))
-    current_target: float | None = None
+    current_target: tuple[float, str | None] | None = None
     response_state = 0.0
     delay_remaining = 0
     cursor = 0
@@ -146,23 +153,24 @@ def compile_participant_state_trace(
 
     for stage in scenario.stages:
         count = _stage_sample_count(stage.duration_s, fs)
-        target = None if stage.target_frequency_hz is None else float(stage.target_frequency_hz)
+        frequency = None if stage.target_frequency_hz is None else float(stage.target_frequency_hz)
+        target_identity = None if frequency is None else (frequency, stage.stimulus_id)
         for local_index in range(count):
             sample_index = cursor + local_index
             if not initialized:
                 initialized = True
-                current_target = target
-                if target is not None:
+                current_target = target_identity
+                if target_identity is not None:
                     response_state = 0.0
                     delay_remaining = delay_samples
                     transition_trace[sample_index] = True
-            elif target != current_target:
-                current_target = target
+            elif target_identity != current_target:
+                current_target = target_identity
                 response_state = 0.0
-                delay_remaining = delay_samples if target is not None else 0
+                delay_remaining = delay_samples if target_identity is not None else 0
                 transition_trace[sample_index] = True
 
-            if target is None:
+            if target_identity is None:
                 requested_gain = 0.0
                 response_state = 0.0
             else:
@@ -186,8 +194,8 @@ def compile_participant_state_trace(
 
             requested[sample_index] = requested_gain
             effective[sample_index] = response_state
-            if target is not None:
-                target_trace[sample_index] = target
+            if frequency is not None:
+                target_trace[sample_index] = frequency
         cursor += count
 
     trace = ParticipantStateTrace(

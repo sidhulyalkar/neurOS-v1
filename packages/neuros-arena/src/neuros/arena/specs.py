@@ -234,6 +234,8 @@ class StageSpec:
     artifacts: tuple[ArtifactEvent, ...] = ()
     target: dict[str, Any] = field(default_factory=dict)
     task_state: dict[str, Any] = field(default_factory=dict)
+    stimulus_id: str | None = None
+    stimulus_retrigger: bool = False
 
     def validate(self) -> None:
         if not self.label or not np.isfinite(self.duration_s) or self.duration_s <= 0:
@@ -243,6 +245,10 @@ class StageSpec:
                 raise ValueError("target frequency must be positive and finite")
         if not np.isfinite(self.attention_gain) or self.attention_gain < 0:
             raise ValueError("attention gain must be non-negative and finite")
+        if self.stimulus_id is not None and (not isinstance(self.stimulus_id, str) or not self.stimulus_id.strip()):
+            raise ValueError("stimulus_id must be a non-empty string when supplied")
+        if not isinstance(self.stimulus_retrigger, (bool, np.bool_)):
+            raise ValueError("stimulus_retrigger must be boolean")
         for event in self.artifacts:
             event.validate(self.duration_s)
         _validate_scalar_mapping("stage.target", self.target)
@@ -307,6 +313,8 @@ class ArenaScenario:
                 artifacts=tuple(artifacts),
                 target=dict(stage_raw.get("target", {})),
                 task_state=dict(stage_raw.get("task_state", {})),
+                stimulus_id=(None if stage_raw.get("stimulus_id") is None else str(stage_raw["stimulus_id"])),
+                stimulus_retrigger=stage_raw.get("stimulus_retrigger", False),
             ))
         scenario = cls(name=str(raw["name"]), stages=tuple(stages), seed=int(raw.get("seed", 7)), metadata=dict(raw.get("metadata", {})))
         scenario.validate()

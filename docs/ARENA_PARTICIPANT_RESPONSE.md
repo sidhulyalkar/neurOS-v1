@@ -39,14 +39,23 @@ The v1 compiler resolves the entire participant response on the **source sample 
 
 ## Inputs
 
-The v1 compiler consumes the existing `ParticipantProfile` and frequency-target fields from `ArenaScenario`:
+The v1 compiler consumes the existing `ParticipantProfile` plus explicit frequency-target identity from `ArenaScenario`:
 
 - `StageSpec.target_frequency_hz`;
+- `StageSpec.stimulus_id`;
 - `StageSpec.attention_gain`;
 - `ParticipantProfile.response_delay_s`;
 - `ParticipantProfile.switch_time_constant_s`;
 - `ParticipantProfile.gaze_duty_cycle`;
 - `ParticipantProfile.response_attenuation_per_minute`.
+
+For this model, attentional target identity is:
+
+```text
+(target_frequency_hz, stimulus_id)
+```
+
+Frequency is a decoder code, not necessarily a unique physical target. Two different objects may reuse the same frequency and must therefore remain distinguishable.
 
 These parameter values define a synthetic world. They are not population estimates unless a separate empirical study justifies a particular distribution.
 
@@ -57,11 +66,11 @@ These parameter values define a synthetic world. They are not population estimat
 - `attention_gain`: effective synthetic participant drive;
 - `requested_attention_gain`: requested drive after declared gaze/fatigue scaling;
 - `target_frequency_hz`: active frequency target, with NaN for rest/no-frequency target;
-- `target_switch`: frequency-target transition marker;
+- `target_switch`: attentional target-transition marker;
 - `sampling_rate_hz`;
 - versioned model identifier.
 
-The report exposes a compact participant-state summary including transition samples and effective/requested gain statistics.
+The report exposes a compact participant-state summary including transition samples, the declared target-identity rule, and effective/requested gain statistics.
 
 ## Timing authority
 
@@ -90,19 +99,31 @@ Stage labels are not participant causes.
 Two adjacent stages such as:
 
 ```text
-sight-a: 10 Hz
-sight-b: 10 Hz
+sight-a: 10 Hz, stimulus_id="sight-orb"
+sight-b: 10 Hz, stimulus_id="sight-orb"
 ```
 
 preserve the participant response state. Renaming or splitting a stage does not restart response delay.
 
-A true target change such as:
+A true frequency change such as:
 
 ```text
 10 Hz → 12 Hz
 ```
 
 resets the v1 response state and begins the declared response delay.
+
+A physical target-identity change also resets response even if the frequency is reused:
+
+```text
+10 Hz, stimulus_id="left-orb"
+→
+10 Hz, stimulus_id="right-orb"
+```
+
+This is a real attentional target switch despite identical frequency-valued decoder truth.
+
+By contrast, `stimulus_retrigger=True` restarts the **display presentation** of the same physical object. It does not by itself create an attentional target switch when `(target_frequency_hz, stimulus_id)` is unchanged. Presentation state and participant attention are separate causal layers.
 
 Transitions into or out of rest are also recorded. Initial rest is not reported as a transition because no target change has yet occurred.
 
@@ -116,7 +137,7 @@ After the delay, v1 uses a first-order discrete response state that approaches t
 
 ## WorldInputBlock
 
-The paradigm-neutral world-model boundary now distinguishes:
+The paradigm-neutral world-model boundary distinguishes:
 
 ```text
 participant_state
@@ -154,13 +175,29 @@ W3 consumes the same participant stream before projecting the visual response th
 
 ## Render-partition invariance
 
-For W1/W2/W3, the following is now a software contract:
+For W1/W2/W3, the following is a software contract:
 
 > Given the same scenario, participant profile, display, world parameters, seed and source sample clock, changing Arena's internal neural render chunk size must not change the generated source/device EEG.
 
 The test suite compares 1-sample and 37-sample render chunks exactly.
 
 This is not a claim that the synthetic EEG is physiologically realistic. It proves that implementation batching is not part of the synthetic causal world.
+
+## Presentation boundary
+
+Participant state and physical display state are related but distinct.
+
+The presentation layer owns:
+
+- physical stimulus identity;
+- explicit retrigger;
+- display response lag;
+- frame timing/jitter/drop realization;
+- coded waveform phase.
+
+The participant layer owns the synthetic response to the attentional target identity.
+
+See `docs/ARENA_PRESENTATION_EPOCHS.md` for the presentation-epoch contract.
 
 ## Paradigm boundary
 
@@ -184,6 +221,8 @@ It can support statements such as:
 
 - participant state is deterministic for a fixed manifest/profile/seed;
 - stage-label-only splits do not reset frequency-target response;
+- same-frequency/different-stimulus switches remain real target transitions;
+- pure display retriggers do not invent attention switches;
 - declared delays never begin before the source sample at-or-after the delay;
 - W1/W2/W3 are invariant to internal neural render partitioning;
 - participant-stream geometry/non-finite values fail closed.

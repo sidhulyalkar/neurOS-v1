@@ -48,6 +48,7 @@ jobs:
             tests/test_arena_authority_contracts.py \
             tests/test_arena_world_input.py \
             tests/test_arena_participant_state.py \
+            tests/test_arena_presentation.py \
             tests/test_arena_world_models.py \
             tests/test_arena_leadfield.py \
             tests/test_arena_population.py \
