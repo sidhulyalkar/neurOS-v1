@@ -7,6 +7,7 @@ on:
       - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
+      - "tests/test_orion_scientific_result_integrity.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -17,6 +18,7 @@ on:
       - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
+      - "tests/test_orion_scientific_result_integrity.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -51,6 +53,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_orion_scientific_authority.py \
+            tests/test_orion_scientific_result_integrity.py \
             tests/test_orion_adaptation_integrity.py \
             tests/test_orion_assessment.py
       - name: Prove deterministic machine-readable report
