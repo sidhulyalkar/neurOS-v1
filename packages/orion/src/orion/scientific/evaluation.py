@@ -45,6 +45,12 @@ class MetricSpec:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("MetricSpec schema_version must be 2")
+        if not isinstance(self.direction, MetricDirection):
+            raise TypeError("direction must be MetricDirection")
+        if not isinstance(self.probability_requirement, ProbabilityRequirement):
+            raise TypeError("probability_requirement must be ProbabilityRequirement")
+        if not isinstance(self.failure_policy, FailureAggregationPolicy):
+            raise TypeError("failure_policy must be FailureAggregationPolicy")
         for name in (
             "metric_id",
             "version",
@@ -58,9 +64,17 @@ class MetricSpec:
             object.__setattr__(self, name, nonempty(name, getattr(self, name)))
         if not isinstance(self.primary, bool):
             raise ValueError("primary must be boolean")
+        if self.positive_class is not None:
+            object.__setattr__(self, "positive_class", nonempty("positive_class", self.positive_class))
         if self.direction is MetricDirection.TARGET_IS_BEST:
-            if self.target_value is None or not math.isfinite(float(self.target_value)):
-                raise ValueError("target_is_best metrics require a finite target_value")
+            if (
+                self.target_value is None
+                or isinstance(self.target_value, bool)
+                or not isinstance(self.target_value, (int, float, np.number))
+                or not math.isfinite(float(self.target_value))
+            ):
+                raise ValueError("target_is_best metrics require a finite numeric target_value")
+            object.__setattr__(self, "target_value", float(self.target_value))
         elif self.target_value is not None:
             raise ValueError("target_value is only valid for target_is_best metrics")
         if self.probability_requirement is not ProbabilityRequirement.NONE:
@@ -178,6 +192,10 @@ class CaseOutcome:
     def __post_init__(self) -> None:
         object.__setattr__(self, "case_id", nonempty("case_id", self.case_id))
         object.__setattr__(self, "method_id", nonempty("method_id", self.method_id))
+        if not isinstance(self.status, CaseStatus):
+            raise TypeError("status must be CaseStatus")
+        if not isinstance(self.metrics, Mapping):
+            raise TypeError("metrics must be a mapping")
         metrics: dict[str, float] = {}
         for key, value in self.metrics.items():
             name = nonempty("metric name", key)
@@ -193,6 +211,11 @@ class CaseOutcome:
             if not metrics:
                 raise ValueError("successful rows require at least one metric")
         else:
+            if metrics:
+                raise ValueError(
+                    "non-success rows cannot carry scientific metric values; "
+                    "store partial diagnostics in metadata"
+                )
             object.__setattr__(self, "reason", nonempty("reason", self.reason or ""))
         object.__setattr__(self, "metrics", MappingProxyType(metrics))
         metadata = freeze_json(self.metadata)
@@ -225,9 +248,12 @@ class FailurePreservingResultSet:
             raise ValueError("FailurePreservingResultSet schema_version must be 2")
         cases = strings("declared_case_ids", self.declared_case_ids, allow_empty=False)
         methods = strings("method_ids", self.method_ids, allow_empty=False)
+        rows = tuple(self.rows)
+        if any(not isinstance(row, CaseOutcome) for row in rows):
+            raise TypeError("rows must contain only CaseOutcome objects")
         expected = {(method, case) for method in methods for case in cases}
-        actual = {(row.method_id, row.case_id) for row in self.rows}
-        if len(actual) != len(self.rows):
+        actual = {(row.method_id, row.case_id) for row in rows}
+        if len(actual) != len(rows):
             raise ValueError("result rows cannot duplicate a method/case pair")
         missing = sorted(expected - actual)
         extra = sorted(actual - expected)
@@ -238,6 +264,7 @@ class FailurePreservingResultSet:
             )
         object.__setattr__(self, "declared_case_ids", cases)
         object.__setattr__(self, "method_ids", methods)
+        object.__setattr__(self, "rows", rows)
 
     @property
     def result_sha256(self) -> str:
@@ -254,7 +281,10 @@ class FailurePreservingResultSet:
         return counts
 
     def require_metric_specs(self, specs: tuple[MetricSpec, ...]) -> None:
-        declared = {spec.metric_id for spec in specs}
+        specs_tuple = tuple(specs)
+        if any(not isinstance(spec, MetricSpec) for spec in specs_tuple):
+            raise TypeError("metric specifications must contain only MetricSpec objects")
+        declared = {spec.metric_id for spec in specs_tuple}
         if not declared:
             raise ValueError("at least one metric spec is required")
         for row in self.rows:
