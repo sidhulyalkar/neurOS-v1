@@ -68,6 +68,13 @@ def test_signal_frame_recursively_detaches_metadata():
         frame.metadata["nested"]["new"] = 1
 
 
+def test_metadata_requires_mapping_at_contract_root():
+    with pytest.raises(TypeError, match="metadata must be a mapping"):
+        _frame(metadata=[("modality", "eeg")])
+    with pytest.raises(TypeError, match="metadata must be a mapping"):
+        _descriptor(metadata=[("reference", "average")])
+
+
 def test_provenance_metadata_rejects_unstable_python_values():
     with pytest.raises(TypeError, match="bytes"):
         _descriptor(metadata={"blob": b"opaque"})
@@ -109,11 +116,13 @@ def test_frame_integer_identity_fields_reject_lossy_coercion(field, bad_value):
         _frame(**{field: bad_value})
 
 
-def test_quality_flags_do_not_accept_lossy_numeric_coercion():
+def test_quality_flags_do_not_accept_lossy_or_undefined_states():
     with pytest.raises(TypeError):
         _frame(quality=1.5)
     with pytest.raises(TypeError):
         _frame(quality=True)
+    with pytest.raises(ValueError, match="undefined"):
+        _frame(quality=1 << 20)
 
 
 def test_declared_clock_domain_requires_corresponding_timestamp():
@@ -264,6 +273,24 @@ def test_archive_v2_descriptor_tampering_is_detected(tmp_path: Path):
     reader = SessionArchiveReader(root)
     with pytest.raises(IOError, match="fingerprint mismatch"):
         reader.descriptor("eeg")
+
+
+@pytest.mark.asyncio
+async def test_archive_v2_index_does_not_coerce_malformed_identity_fields(tmp_path: Path):
+    root = tmp_path / "strict-index"
+    writer = SessionArchiveWriter(root, session_id="strict-index")
+    writer.register_stream(_descriptor())
+    await writer.write(_frame())
+    await writer.close()
+
+    index_path = root / "streams" / "eeg" / "index.ndjson"
+    row = json.loads(index_path.read_text(encoding="utf-8").strip())
+    row["sequence_id"] = 3.5
+    index_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    reader = SessionArchiveReader(root)
+    with pytest.raises(TypeError, match="sequence_id must be an integer"):
+        list(reader.iter_frames("eeg"))
 
 
 @pytest.mark.asyncio
