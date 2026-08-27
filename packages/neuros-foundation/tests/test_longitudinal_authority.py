@@ -88,9 +88,15 @@ def test_authority_roundtrip_restores_exact_split():
     serialized = authority.to_dict()
     json.dumps(serialized, sort_keys=True)
 
+    assert len(authority.authority_sha256) == 64
+    assert authority.authority_fingerprint == authority.authority_sha256[:16]
+    assert serialized["authority_sha256"] == authority.authority_sha256
+    assert serialized["authority_fingerprint"] == authority.authority_fingerprint
+
     restored_authority = LongitudinalCaseAuthority.from_dict(serialized)
     split = restored_authority.restore(data)
 
+    assert restored_authority.authority_sha256 == authority.authority_sha256
     assert restored_authority.authority_fingerprint == authority.authority_fingerprint
     assert split.partition.fingerprint == authority.partition_fingerprint
     assert split.fingerprint == authority.calibration_split_fingerprint
@@ -131,11 +137,22 @@ def test_authority_rejects_sample_order_change_even_when_shape_matches():
         authority.restore(reordered)
 
 
-def test_serialized_authority_fingerprint_detects_index_tampering():
+def test_serialized_authority_sha256_detects_structurally_valid_index_tampering():
     authority = _authority(_fixture())
     payload = copy.deepcopy(authority.to_dict())
-    payload["evaluation_indices"][0] += 1
-    with pytest.raises(ValueError, match="authority_fingerprint"):
+    payload["evaluation_indices"][0], payload["evaluation_indices"][1] = (
+        payload["evaluation_indices"][1],
+        payload["evaluation_indices"][0],
+    )
+    with pytest.raises(ValueError, match="authority_sha256"):
+        LongitudinalCaseAuthority.from_dict(payload)
+
+
+def test_serialized_authority_rejects_lossy_index_coercion():
+    authority = _authority(_fixture())
+    payload = copy.deepcopy(authority.to_dict())
+    payload["evaluation_indices"][0] = float(payload["evaluation_indices"][0])
+    with pytest.raises(ValueError, match="without coercion"):
         LongitudinalCaseAuthority.from_dict(payload)
 
 
@@ -145,9 +162,9 @@ def test_prior_authority_rejects_future_session_in_source_history():
     payload = authority.to_dict(include_fingerprint=False)
 
     # Make a structurally self-consistent but scientifically invalid authority:
-    # target session 1 with source sessions 0 and 2 (future leakage). Recompute
-    # the serial authority fingerprint by constructing it normally, then restore
-    # must reject the non-prefix source-group semantics.
+    # target session 1 with source sessions 0 and 2 (future leakage). The split
+    # fingerprints intentionally no longer match, so restore must fail closed
+    # before such an authority can be used by a method runner.
     group = np.asarray(data.groups["session"])
     payload["held_out_values"] = ["1"]
     payload["source_group_values"] = ["0", "2"]
@@ -159,8 +176,6 @@ def test_prior_authority_rejects_future_session_in_source_history():
         "right": target[12:16].tolist(),
     }
 
-    # Partition/split fingerprints intentionally no longer match; restore should
-    # fail closed before such an authority can be used by a method runner.
     invalid = LongitudinalCaseAuthority.from_dict(payload)
     with pytest.raises(ValueError):
         invalid.restore(data)
