@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "packages/orion/src/orion/scientific_authority.py"
+      - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "examples/orion/scientific_authority_v2.py"
@@ -13,6 +14,7 @@ on:
     branches: [main]
     paths:
       - "packages/orion/src/orion/scientific_authority.py"
+      - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "examples/orion/scientific_authority_v2.py"
@@ -69,9 +71,13 @@ jobs:
           assert report["evidence_domains"]["hardware"] == []
           assert report["evidence_domains"]["clinical"] == []
           assert report["pretraining_overlap"][0]["status"] == "disjoint_verified"
+          assert report["result_sets"][0]["status_counts"]["ok"] == 1
+          assert report["target_observation_budgets"]["zero-target-observation"]["labeled_examples"] == 0
+          assert report["target_observation_budgets"]["zero-target-observation"]["unlabeled_examples"] == 0
           PY
       - name: Compile scientific authority surface
         run: |
           python -m compileall -q \
+            packages/orion/src/orion/scientific \
             packages/orion/src/orion/scientific_authority.py \
             examples/orion/scientific_authority_v2.py
