@@ -37,7 +37,7 @@ A short fingerprint may appear in a table or UI, but it is not sufficient durabl
 - model input assumptions;
 - explicit pretraining-lineage completeness.
 
-Unknown lineage is not disjoint lineage.
+Unknown lineage is not disjoint lineage. Dataset/model identity-set sequences are detached from caller-owned containers before scientific identity is computed.
 
 ## Pretraining overlap
 
@@ -52,7 +52,9 @@ The audit walks transitive dataset ancestry. A checkpoint pretrained on TUEG the
 
 If a declared parent dataset cannot be resolved, a complete-looking leaf dataset does not receive `disjoint_verified`; the result is `possible_overlap`.
 
-The audit also checks declared entity identities. If pretraining and evaluation expose an overlapping participant/session/site/device/run identity at the same level, the overlap is machine-visible even when the top-level dataset names differ.
+The audit also checks declared entity identities across the evaluation leaf **and every resolved ancestor**. If pretraining and any resolved evaluation lineage expose an overlapping participant/session/site/device/run identity at the same level, the overlap is machine-visible even when the top-level dataset names differ or the child dataset does not repeat its parent's participant IDs.
+
+Known-dataset lookup keys must match the `DatasetLineage.dataset_id` they claim to resolve. A mapping therefore cannot silently relabel an unrelated lineage object as a missing ancestor.
 
 The regression suite treats BENDR pretraining on TUEG as overlapping TUAB/TUEV when those evaluation datasets declare TUEG ancestry. An overlap does not forbid evaluation. It changes the permitted claim qualification.
 
@@ -71,7 +73,7 @@ Scientific Authority v2 does not reduce the experiment to train/test. `Observati
 - mechanistic discovery;
 - untouched final assessment.
 
-`ObservationConsumption` binds a state-changing operation to the exact observation-authority SHA-256 values it consumed.
+`ObservationConsumption` binds a state-changing operation to the exact observation-authority SHA-256 values it consumed. A consumption authority must contain at least one real observation authority. A transform cannot call itself `data_fitted` while attaching an empty consumption record.
 
 The default role policy is intentionally strict:
 
@@ -102,14 +104,16 @@ unlabeled_seconds
 
 Zero labeled calibration is not automatically zero-shot. A method that observes target-session statistics, target covariance, embeddings, moments, or other unlabeled target information has a nonzero target-observation budget even when `labeled_examples == 0`.
 
-A claim explicitly marked `zero_shot_claim=True` must point to a declared target budget with zero labeled examples, zero unlabeled examples, and zero unlabeled seconds. Otherwise study construction fails.
+Budget fields must also be internally consistent. A positive per-class labeled budget cannot coexist with zero total labeled examples, and the per-class count cannot exceed the total labeled count.
+
+A claim explicitly marked `zero_shot_claim=True` must point to a declared target budget with zero total labeled examples, zero per-class labeled examples (or no per-class budget), zero unlabeled examples, and zero unlabeled seconds. Otherwise study construction fails.
 
 ## Fitted preprocessing
 
 `PreprocessingFitAuthority` distinguishes:
 
 - `predeclared_fixed`: no data fit is claimed;
-- `data_fitted`: exact preprocessing-fit observation consumption is mandatory.
+- `data_fitted`: exact non-empty preprocessing-fit observation consumption is mandatory.
 
 The fitted state receives its own SHA-256 identity. Examples include normalization state, covariance estimates, learned filters, imputation, feature selection, source weights, representation adapters, and artifact models.
 
@@ -128,7 +132,7 @@ Promoted metrics are immutable `MetricSpec` objects rather than bare strings. A 
 - uncertainty/inference method;
 - primary/secondary status.
 
-The failure policy deliberately has no silent `drop` option. Probability-dependent metrics must make their probability/calibration semantics explicit.
+The failure policy deliberately has no silent `drop` option. Probability-dependent metrics must make their probability/calibration semantics explicit. Metric direction/probability/failure semantics use typed authority enums rather than free-form strings.
 
 A promoted study must declare exactly one primary metric.
 
@@ -149,7 +153,11 @@ The declared clustering authority must include the independent experimental unit
 - `nonconverged`
 - `unavailable`
 
-Successful rows must report the declared metric scorecard. Unknown metric names are rejected. A method therefore cannot improve its aggregate by disappearing from difficult cases or changing its scorecard case by case.
+Successful rows must report the declared metric scorecard. Unknown metric names are rejected. Non-success rows cannot carry scientific metric values; partial losses, iteration counts, memory diagnostics, or other incomplete-case information belong in metadata and are never silently promoted into the score table.
+
+The result set detaches its row sequence from caller-owned containers. Its SHA-256 therefore cannot change because upstream code later mutates a list used during construction.
+
+A method cannot improve its aggregate by disappearing from difficult cases or changing its scorecard case by case.
 
 Task-utility claims must cite at least one embedded failure-preserving **result-set SHA-256**. A metric-definition SHA says how the study intended to score; it is not evidence that the model actually achieved a result.
 
@@ -157,7 +165,7 @@ Task-utility claims must cite at least one embedded failure-preserving **result-
 
 `bind_longitudinal_case_authority()` consumes the existing serialized `LongitudinalCaseAuthority` produced by the longitudinal benchmark. It does not regenerate or alter the split.
 
-The bridge derives a full SHA-256 over the exact serialized frozen case authority after removing only derived identity fields. If a future longitudinal authority supplies its own full `authority_sha256`, the bridge verifies it rather than trusting it. The legacy 16-character `authority_fingerprint` is preserved only as display metadata.
+The bridge derives a full SHA-256 over the exact serialized frozen case authority after removing only derived identity fields. The longitudinal authority now also emits its own full `authority_sha256`; the bridge verifies it rather than trusting it. The legacy 16-character `authority_fingerprint` remains display-only compatibility metadata.
 
 For a declared calibration budget it binds:
 
@@ -169,6 +177,8 @@ For a declared calibration budget it binds:
 Indices must be actual non-negative integers. Floats and booleans are not silently coerced. When `n_samples` is present, every index is range-checked.
 
 Source, labeled calibration, unlabeled target observation, and final assessment must remain disjoint. In particular, the adapter refuses to relabel source-history or final-assessment rows as unlabeled target observations.
+
+Tensor shape is validated separately from sample-index identity. Repeated dimensions such as `(samples, 32, 32)` are valid and do not inherit index-uniqueness rules.
 
 This preserves the frozen Kumar2024 protocol while adding full identity and information-budget governance.
 
@@ -189,7 +199,9 @@ This separation is intentional and should remain visible in Studio/Evidence rath
 
 ## Structural immutability
 
-Scientific authorities detach caller-owned sequences and recursively freeze provenance mappings where they cross the authority boundary. The top-level study stores target budgets as a read-only mapping. A study identity must not change because a caller still holds a mutable alias.
+Scientific authorities detach caller-owned sequences and recursively freeze provenance mappings where they cross the authority boundary. Dataset/model identity sets, result rows, observations, metrics, preprocessing authorities, claims, and top-level study collections are held as immutable snapshots. The top-level study stores target budgets as a read-only mapping.
+
+A scientific identity must not change because a caller still holds a mutable alias.
 
 ## Example
 
