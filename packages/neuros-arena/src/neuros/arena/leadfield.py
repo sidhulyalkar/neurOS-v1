@@ -18,6 +18,8 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from neuros.drivers.synthetic_eeg import ArtifactEvent as DriverArtifactEvent
+
 from .specs import ParticipantProfile
 from .world_models import WorldModelEmission, _ArtifactEngine
 
@@ -179,12 +181,36 @@ class LeadFieldDrivenWorldModel:
             raise ValueError("lead-field time constants must be positive")
         self._artifact = _ArtifactEngine(self.fs, seed + 1777) if len(self.channel_names) == 8 else None
 
-    def inject_artifact(self, kind: str, duration_seconds: float, severity: float) -> None:
+    def _require_standard_artifact_montage(self) -> _ArtifactEngine:
         if self._artifact is None:
-            if kind != "dropout":
-                raise ValueError("generic artifact overlay currently requires the standard 8-channel Arena montage")
-            raise ValueError("dropout overlay currently requires the standard 8-channel Arena montage")
-        self._artifact.inject(kind, duration_seconds, severity)
+            raise ValueError(
+                "generic artifact overlay currently requires the standard 8-channel Arena montage"
+            )
+        return self._artifact
+
+    def inject_artifact(self, kind: str, duration_seconds: float, severity: float) -> None:
+        self._require_standard_artifact_montage().inject(kind, duration_seconds, severity)
+
+    def schedule_artifact(
+        self,
+        kind: str,
+        *,
+        event_id: str,
+        start_sample: int,
+        duration_seconds: float,
+        severity: float,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> DriverArtifactEvent:
+        return self._require_standard_artifact_montage().schedule(
+            kind,
+            event_id=event_id,
+            start_sample=start_sample,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            channels=channels,
+            seed=seed,
+        )
 
     def render(
         self,
@@ -231,13 +257,9 @@ class LeadFieldDrivenWorldModel:
             * np.sin(2 * np.pi * self.participant.alpha_frequency_hz * times + self._alpha_phase)[None, :]
         )
         if self._artifact is not None:
-            artifact, artifact_kind = self._artifact.render(times)
-            dropout = artifact_kind == "dropout"
-            if dropout:
-                artifact = np.nan_to_num(artifact, nan=0.0)
+            artifact, dropout_mask, _artifact_events = self._artifact.render(times)
             data += artifact
-            if dropout:
-                data[6, :] = 0.0
+            data[dropout_mask] = 0.0
         return WorldModelEmission(
             data_uv=data.astype(np.float32),
             latent={

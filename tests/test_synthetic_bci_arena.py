@@ -3,16 +3,19 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from neuros.arena import (
     ArenaDecision,
     ArenaManifest,
     ArenaScenario,
+    ArtifactEvent,
     DeviceProfile,
     DisplayProfile,
     ParticipantProfile,
     StageSpec,
     TransportProfile,
+    WorldInputBlock,
     WorldModelProfile,
     compare_feature_signatures,
     evaluate_decisions,
@@ -21,6 +24,7 @@ from neuros.arena import (
     run_scenario,
     save_manifest,
 )
+from neuros.arena.manifest import SCHEMA, SCHEMA_V1, manifest_from_dict
 
 
 def tiny_world(
@@ -109,21 +113,92 @@ def test_feature_signature_comparison_is_identity_for_same_data():
     assert comparison["max_abs_log_ratio"] == 0.0
 
 
-def test_manifest_round_trip(tmp_path):
-    run = tiny_world(world_model=WorldModelProfile("driven_state_space", {"resonance_damping": 0.31}))
-    manifest = ArenaManifest(
-        run.scenario,
-        run.participant,
-        run.device,
-        run.display,
-        run.transport,
-        run.world_model,
+def test_world_input_rejects_non_finite_scalar_metadata():
+    block = WorldInputBlock(
+        sample_times_s=np.asarray([0.0, 0.004]),
+        paradigm="ssvep",
+        stage_label="sight",
+        emitted_streams={"visual_luminance": np.asarray([1.0, -1.0])},
+        participant_state={"attention_gain": float("nan")},
     )
+    with pytest.raises(ValueError, match="participant_state.attention_gain must be finite"):
+        block.validate()
+
+    for mapping_name in ("target", "task_state"):
+        kwargs = {
+            "sample_times_s": np.asarray([0.0]),
+            "paradigm": "ssvep",
+            "stage_label": "sight",
+            "emitted_streams": {"visual_luminance": np.asarray([0.0])},
+            mapping_name: {"bad": float("inf")},
+        }
+        with pytest.raises(ValueError, match=rf"{mapping_name}.bad must be finite"):
+            WorldInputBlock(**kwargs).validate()
+
+
+def _artifact_manifest() -> ArenaManifest:
+    scenario = ArenaScenario(
+        "manifest-artifacts",
+        (
+            StageSpec(
+                "sight",
+                1.0,
+                10.0,
+                0.8,
+                (
+                    ArtifactEvent(
+                        0.2,
+                        "controller",
+                        0.3,
+                        0.7,
+                        event_id="hand-1",
+                        channels=("C3", "C4"),
+                        seed=19,
+                    ),
+                ),
+            ),
+        ),
+        seed=17,
+    )
+    return ArenaManifest(
+        scenario,
+        ParticipantProfile(seed=17),
+        DeviceProfile(chunk_samples=5),
+        DisplayProfile(),
+        TransportProfile(),
+        WorldModelProfile("driven_state_space", {"resonance_damping": 0.31}),
+    )
+
+
+def test_manifest_round_trip_writes_v2_and_preserves_artifact_provenance(tmp_path):
+    manifest = _artifact_manifest()
     path = tmp_path / "world.json"
     save_manifest(manifest, path)
     loaded = load_manifest(path)
     assert loaded == manifest
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["schema"] == "neuros.synthetic_bci_arena.manifest.v1"
+    assert raw["schema"] == SCHEMA == "neuros.synthetic_bci_arena.manifest.v2"
     assert raw["world_model"]["name"] == "driven_state_space"
     assert raw["world_model"]["parameters"]["resonance_damping"] == 0.31
+    artifact = raw["scenario"]["stages"][0]["artifacts"][0]
+    assert artifact["event_id"] == "hand-1"
+    assert artifact["channels"] == ["C3", "C4"]
+    assert artifact["seed"] == 19
+
+
+def test_manifest_v1_remains_readable_with_historical_artifact_shape():
+    manifest = _artifact_manifest()
+    raw = manifest.to_dict()
+    raw["schema"] = SCHEMA_V1
+    artifact = raw["scenario"]["stages"][0]["artifacts"][0]
+    artifact.pop("event_id")
+    artifact.pop("channels")
+    artifact.pop("seed")
+
+    loaded = manifest_from_dict(raw)
+    loaded_artifact = loaded.scenario.stages[0].artifacts[0]
+    assert loaded_artifact.event_id is None
+    assert loaded_artifact.channels is None
+    assert loaded_artifact.seed is None
+    assert loaded_artifact.at_s == 0.2
+    assert loaded_artifact.kind == "controller"

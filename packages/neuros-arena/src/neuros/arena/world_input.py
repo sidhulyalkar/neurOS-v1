@@ -1,6 +1,6 @@
 """Paradigm-neutral causal input blocks for neural world models.
 
-Manifest v1 remains SSVEP-friendly, but the model boundary should not be. A
+Arena manifests remain SSVEP-friendly, but the model boundary should not be. A
 world model may consume this richer block through ``render_world`` while legacy
 models continue to implement the original ``render`` method.
 """
@@ -55,6 +55,8 @@ class WorldInputBlock:
                     raise ValueError(f"{mapping_name} keys must be non-empty strings")
                 if not isinstance(value, (str, int, float, bool)) and value is not None:
                     raise ValueError(f"{mapping_name}.{key} must be a JSON scalar")
+                if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+                    raise ValueError(f"{mapping_name}.{key} must be finite")
 
     @property
     def visual_luminance(self) -> np.ndarray:

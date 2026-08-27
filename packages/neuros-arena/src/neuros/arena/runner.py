@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 
 import numpy as np
 
@@ -12,6 +14,12 @@ from .simulators import DeviceOutput, StimulusTrace, TransportPacket, apply_devi
 from .specs import ArenaScenario, DeviceProfile, DisplayProfile, ParticipantProfile, TransportProfile, WorldModelProfile
 from .world_input import WorldInputBlock
 from .world_models import NeuralWorldModel
+
+
+# Neural-world integration cadence is an Arena execution policy. It is
+# deliberately independent of DeviceProfile.chunk_samples, which belongs to the
+# acquisition/packetization layer and must not change the simulated neural source.
+WORLD_RENDER_CHUNK_SAMPLES = 5
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,12 @@ def _spectral_snr_db(data_uv: np.ndarray, fs: float, target_hz: float) -> float:
     signal_power = float(np.mean(power[signal])) if np.any(signal) else 0.0
     noise_power = float(np.mean(power[noise])) if np.any(noise) else 1e-12
     return float(10.0 * np.log10(max(signal_power, 1e-12) / max(noise_power, 1e-12)))
+
+
+def _stage_sample_count(duration_s: float, sampling_rate_hz: float) -> int:
+    """Resolve a requested stage duration onto the source sample clock."""
+
+    return max(1, int(round(float(duration_s) * float(sampling_rate_hz))))
 
 
 def _create_world_model(
@@ -95,6 +109,116 @@ def _render_world_model(
     )
 
 
+def _artifact_identity_payload(artifact) -> str:
+    """Canonical semantic identity for an Arena artifact without an explicit ID.
+
+    Tuple/list position is deliberately excluded. Exact duplicate events remain
+    meaningful, so the compiler adds a deterministic duplicate ordinal after
+    sorting by this canonical payload.
+    """
+
+    payload = {
+        "at_s": float(artifact.at_s),
+        "channels": None if artifact.channels is None else sorted(str(name) for name in artifact.channels),
+        "duration_s": float(artifact.duration_s),
+        "kind": str(artifact.kind),
+        "seed": None if artifact.seed is None else int(artifact.seed),
+        "severity": float(artifact.severity),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _compile_artifact_schedule(
+    model: NeuralWorldModel,
+    scenario: ArenaScenario,
+    participant: ParticipantProfile,
+    sampling_rate_hz: float,
+) -> tuple[str, list[dict[str, object]]]:
+    """Compile Arena stage artifacts to an absolute sample-indexed timeline.
+
+    Built-in v3-aware world models expose ``schedule_artifact``. Older/external
+    plugins may implement only ``inject_artifact``; those stay on the historical
+    block-triggered fallback and are labelled explicitly in the report.
+    """
+
+    schedule = getattr(model, "schedule_artifact", None)
+    if not callable(schedule):
+        return "legacy_injection", []
+
+    compiled: list[dict[str, object]] = []
+    global_sample = 0
+    fs = float(sampling_rate_hz)
+    for stage_i, stage in enumerate(scenario.stages):
+        stage_samples = _stage_sample_count(stage.duration_s, fs)
+        entries = [
+            (
+                _artifact_identity_payload(artifact),
+                artifact_i,
+                artifact,
+            )
+            for artifact_i, artifact in enumerate(stage.artifacts)
+        ]
+        # Event order in a manifest is presentation, not causal authority. The
+        # canonical sort gives implicit stochastic events stable identities even
+        # when the artifact tuple is rearranged.
+        entries.sort(
+            key=lambda item: (
+                "" if item[2].event_id is None else str(item[2].event_id),
+                item[0],
+                item[1],
+            )
+        )
+        duplicate_ordinals: dict[str, int] = {}
+        for identity_payload, artifact_i, artifact in entries:
+            # First source sample at-or-after requested onset. If no source sample
+            # exists before stage end, reject rather than shift the event into the
+            # previous sample or silently assign it to the next stage.
+            onset_sample = int(np.ceil(artifact.at_s * fs - 1e-12))
+            if onset_sample >= stage_samples:
+                raise ValueError(
+                    f"artifact {artifact_i} in stage {stage.label!r} has no source sample "
+                    f"at-or-after onset {artifact.at_s:g}s at {fs:g} Hz"
+                )
+            if artifact.event_id is not None:
+                event_id = artifact.event_id
+            else:
+                digest = hashlib.sha256(identity_payload.encode("utf-8")).hexdigest()[:16]
+                ordinal = duplicate_ordinals.get(identity_payload, 0)
+                duplicate_ordinals[identity_payload] = ordinal + 1
+                event_id = f"{scenario.name}/stage-{stage_i}/{digest}/{ordinal}"
+            resolved = schedule(
+                artifact.kind,
+                event_id=event_id,
+                start_sample=global_sample + onset_sample,
+                duration_seconds=artifact.duration_s,
+                severity=artifact.severity * participant.artifact_gain,
+                channels=artifact.channels,
+                seed=artifact.seed,
+            )
+            event_payload = (
+                resolved.to_dict()
+                if hasattr(resolved, "to_dict") and callable(resolved.to_dict)
+                else {
+                    "event_id": event_id,
+                    "kind": artifact.kind,
+                    "start_sample": global_sample + onset_sample,
+                    "duration_seconds": artifact.duration_s,
+                    "severity": artifact.severity * participant.artifact_gain,
+                    "channels": None if artifact.channels is None else list(artifact.channels),
+                    "seed": artifact.seed,
+                }
+            )
+            compiled.append({
+                "stage": stage.label,
+                "stage_index": stage_i,
+                "artifact_index": artifact_i,
+                "requested_at_s": float(artifact.at_s),
+                **event_payload,
+            })
+        global_sample += stage_samples
+    return "sample_indexed", compiled
+
+
 def run_scenario(
     scenario: ArenaScenario,
     participant: ParticipantProfile,
@@ -117,21 +241,42 @@ def run_scenario(
     )
     evidence_card = evidence_card_for_model(model, model_profile.name)
     paradigm = scenario.metadata.get("paradigm", "ssvep")
+    artifact_execution, compiled_artifacts = _compile_artifact_schedule(
+        model,
+        scenario,
+        participant,
+        device.sampling_rate_hz,
+    )
 
-    block_samples = max(1, device.chunk_samples)
+    fs = float(device.sampling_rate_hz)
+    block_samples = WORLD_RENDER_CHUNK_SAMPLES
     data_blocks: list[np.ndarray] = []
     timestamp_blocks: list[np.ndarray] = []
     truth_blocks: list[np.ndarray] = []
     stage_blocks: list[np.ndarray] = []
     stage_intervals: list[StageInterval] = []
+    stage_timing: list[dict[str, float | int | str]] = []
     stimulus_traces: list[StimulusTrace] = []
     latent_stage_end: list[dict[str, float | str]] = []
-    global_start = 0.0
+    global_sample_start = 0
 
     for stage_i, stage in enumerate(scenario.stages):
-        stage_start = global_start
-        stage_end = stage_start + stage.duration_s
+        samples_total = _stage_sample_count(stage.duration_s, fs)
+        stage_start = global_sample_start / fs
+        stage_end = (global_sample_start + samples_total) / fs
+        resolved_duration = samples_total / fs
         stage_intervals.append(StageInterval(stage.label, stage_start, stage_end, stage.target_frequency_hz))
+        stage_timing.append({
+            "stage": stage.label,
+            "stage_index": stage_i,
+            "start_sample": global_sample_start,
+            "end_sample": global_sample_start + samples_total,
+            "resolved_start_s": float(stage_start),
+            "resolved_end_s": float(stage_end),
+            "requested_duration_s": float(stage.duration_s),
+            "resolved_duration_s": float(resolved_duration),
+            "duration_error_ms": float((resolved_duration - stage.duration_s) * 1000.0),
+        })
         trace = simulate_stimulus(
             stage.target_frequency_hz,
             stage.duration_s,
@@ -139,29 +284,30 @@ def run_scenario(
             seed=scenario.seed * 1009 + stage_i,
         )
         stimulus_traces.append(trace)
-        samples_total = max(1, int(round(stage.duration_s * device.sampling_rate_hz)))
         artifact_cursor: set[int] = set()
         produced = 0
         last_latent: dict[str, float] = {}
         while produced < samples_total:
             count = min(block_samples, samples_total - produced)
-            elapsed = produced / device.sampling_rate_hz
-            local_times = elapsed + np.arange(count, dtype=float) / device.sampling_rate_hz
-            global_times = stage_start + local_times
-            for artifact_i, artifact in enumerate(stage.artifacts):
-                if artifact_i not in artifact_cursor and elapsed <= artifact.at_s < elapsed + count / device.sampling_rate_hz:
-                    model.inject_artifact(
-                        artifact.kind,
-                        duration_seconds=artifact.duration_s,
-                        severity=artifact.severity * participant.artifact_gain,
-                    )
-                    artifact_cursor.add(artifact_i)
+            sample_offsets = produced + np.arange(count, dtype=np.int64)
+            local_times = sample_offsets.astype(float) / fs
+            global_times = (global_sample_start + sample_offsets).astype(float) / fs
+            elapsed = produced / fs
+            if artifact_execution == "legacy_injection":
+                for artifact_i, artifact in enumerate(stage.artifacts):
+                    if artifact_i not in artifact_cursor and elapsed <= artifact.at_s < elapsed + count / fs:
+                        model.inject_artifact(
+                            artifact.kind,
+                            duration_seconds=artifact.duration_s,
+                            severity=artifact.severity * participant.artifact_gain,
+                        )
+                        artifact_cursor.add(artifact_i)
             if stage.target_frequency_hz is None:
                 effective_gain = 0.0
             else:
                 after_delay = max(0.0, elapsed - participant.response_delay_s)
                 switch_gain = 0.0 if elapsed < participant.response_delay_s else 1.0 - np.exp(-after_delay / participant.switch_time_constant_s)
-                global_elapsed_min = (stage_start + elapsed) / 60.0
+                global_elapsed_min = float(global_times[0]) / 60.0
                 attenuation = max(0.0, 1.0 - participant.response_attenuation_per_minute * global_elapsed_min)
                 effective_gain = stage.attention_gain * participant.gaze_duty_cycle * switch_gain * attenuation
             emitted_drive = sample_stimulus(trace, local_times, display)
@@ -195,7 +341,7 @@ def run_scenario(
             stage_blocks.append(np.full(count, stage_i, dtype=np.int32))
             produced += count
         latent_stage_end.append({"stage": stage.label, **last_latent})
-        global_start = stage_end
+        global_sample_start += samples_total
 
     raw_data = np.concatenate(data_blocks, axis=1)
     raw_timestamps = np.concatenate(timestamp_blocks)
@@ -231,7 +377,7 @@ def run_scenario(
         })
 
     report = {
-        "schema": "neuros.synthetic_bci_arena.v1",
+        "schema": "neuros.synthetic_bci_arena.v2",
         "scenario": scenario.to_dict(),
         "paradigm": paradigm,
         "participant": asdict(participant),
@@ -248,9 +394,13 @@ def run_scenario(
             "target_snr_db": snr,
             "transport": transport_metrics,
             "display": display_metrics,
+            "stage_timing": stage_timing,
             "world_model": {
                 "name": model_profile.name,
                 "display_coupled": bool(any(item.get("stimulus_coupling", 0.0) > 0 for item in latent_stage_end)),
+                "render_chunk_samples": block_samples,
+                "artifact_execution": artifact_execution,
+                "compiled_artifact_schedule": compiled_artifacts,
                 "stage_end_latent": latent_stage_end,
             },
         },

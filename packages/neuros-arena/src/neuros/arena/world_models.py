@@ -12,11 +12,15 @@ human digital twins.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 
 import numpy as np
 
-from neuros.drivers.synthetic_eeg import SyntheticEEGConfig, SyntheticEEGGenerator
+from neuros.drivers.synthetic_eeg import (
+    ArtifactEvent as DriverArtifactEvent,
+    SyntheticEEGConfig,
+    SyntheticEEGGenerator,
+)
 
 from .specs import ParticipantProfile
 
@@ -35,7 +39,13 @@ class WorldModelEmission:
 
 
 class NeuralWorldModel(Protocol):
-    """Minimal contract implemented by Arena-compatible neural generators."""
+    """Minimal contract implemented by Arena-compatible neural generators.
+
+    `inject_artifact` remains the compatibility floor for external world-model
+    plugins. Built-in models additionally expose `schedule_artifact`; the Arena
+    runner detects that capability and uses sample-indexed compilation when it is
+    present rather than making it mandatory for older plugins.
+    """
 
     name: str
     channel_names: tuple[str, ...]
@@ -87,6 +97,27 @@ class LegacySyntheticWorldModel:
     def inject_artifact(self, kind: str, duration_seconds: float, severity: float) -> None:
         self.generator.inject_artifact(kind, duration_seconds=duration_seconds, severity=severity)
 
+    def schedule_artifact(
+        self,
+        kind: str,
+        *,
+        event_id: str,
+        start_sample: int,
+        duration_seconds: float,
+        severity: float,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> DriverArtifactEvent:
+        return self.generator.schedule_artifact(
+            kind,
+            event_id=event_id,
+            start_sample=start_sample,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            channels=channels,
+            seed=seed,
+        )
+
     def render(
         self,
         sample_times_s: np.ndarray,
@@ -111,66 +142,79 @@ class LegacySyntheticWorldModel:
 
 
 class _ArtifactEngine:
-    """Stateful artifact overlay shared by phenomenological world models."""
+    """Arena adapter over the canonical v3 sample-indexed artifact renderer.
+
+    Arena used to carry an independent mutable one-slot artifact engine. That
+    duplicated source-artifact semantics and reintroduced block-boundary dropout
+    leakage. This adapter deliberately delegates event timing/waveforms/seeding to
+    `SyntheticEEGGenerator` configured with zero background neural amplitudes.
+    Arena world models then overlay the returned additive signal and apply exact
+    dropout masks using the same event provenance.
+    """
 
     def __init__(self, sampling_rate_hz: float, seed: int) -> None:
         self.fs = float(sampling_rate_hz)
-        self.rng = np.random.default_rng(seed)
-        self.kind: str | None = None
-        self.remaining = 0
-        self.total = 0
-        self.severity = 1.0
+        self.generator = SyntheticEEGGenerator(SyntheticEEGConfig(
+            sampling_rate_hz=self.fs,
+            channel_names=SOURCE_CHANNELS,
+            colored_noise_uv=0.0,
+            white_noise_uv=0.0,
+            alpha_amplitude_uv=0.0,
+            ssvep_amplitude_uv=0.0,
+            seed=int(seed),
+        ))
 
     def inject(self, kind: str, duration_seconds: float, severity: float) -> None:
-        if kind not in {"blink", "jaw", "controller", "motion", "saturation", "dropout"}:
-            raise ValueError(f"unsupported artifact kind: {kind}")
-        if duration_seconds <= 0 or severity < 0:
-            raise ValueError("artifact duration must be positive and severity non-negative")
-        self.kind = kind
-        self.total = max(1, int(round(duration_seconds * self.fs)))
-        self.remaining = self.total
-        self.severity = float(severity)
+        self.generator.inject_artifact(kind, duration_seconds, severity)
 
-    def render(self, times_s: np.ndarray) -> tuple[np.ndarray, str | None]:
+    def schedule(
+        self,
+        kind: str,
+        *,
+        event_id: str,
+        start_sample: int,
+        duration_seconds: float,
+        severity: float,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> DriverArtifactEvent:
+        return self.generator.schedule_artifact(
+            kind,
+            event_id=event_id,
+            start_sample=start_sample,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            channels=channels,
+            seed=seed,
+        )
+
+    def render(
+        self,
+        times_s: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, tuple[DriverArtifactEvent, ...]]:
         samples = int(times_s.size)
-        output = np.zeros((8, samples), dtype=float)
-        if self.kind is None or self.remaining <= 0:
-            return output, None
-        kind = self.kind
-        count = min(samples, self.remaining)
-        start = self.total - self.remaining
-        phase = (np.arange(count, dtype=float) + start) / max(self.total - 1, 1)
-        severity = self.severity
-        if kind == "blink":
-            pulse = np.sin(np.pi * np.clip(phase, 0.0, 1.0)) ** 2
-            output[:, :count] += FRONTAL_WEIGHTS[:, None] * (120.0 * severity * pulse)
-        elif kind == "jaw":
-            t = times_s[:count]
-            hf = (
-                np.sin(2 * np.pi * 38.0 * t)
-                + 0.8 * np.sin(2 * np.pi * 53.0 * t + 0.7)
-                + 0.55 * np.sin(2 * np.pi * 71.0 * t + 1.1)
+        if samples == 0:
+            return (
+                np.empty((8, 0), dtype=float),
+                np.empty((8, 0), dtype=bool),
+                (),
             )
-            output[:, :count] += (0.55 * CENTRAL_WEIGHTS + 0.35)[:, None] * (48.0 * severity * hf)
-        elif kind == "controller":
-            t = times_s[:count]
-            hf = (
-                np.sin(2 * np.pi * 31.0 * t)
-                + 0.55 * np.sin(2 * np.pi * 46.0 * t + 0.4)
-                + 0.30 * self.rng.normal(size=count)
-            )
-            output[:, :count] += CENTRAL_WEIGHTS[:, None] * (24.0 * severity * hf)
-        elif kind == "motion":
-            drift = np.sin(np.pi * np.clip(phase, 0.0, 1.0)) * np.sign(np.sin(2 * np.pi * 2.2 * times_s[:count]))
-            output[:, :count] += (0.60 + 0.40 * FRONTAL_WEIGHTS)[:, None] * (55.0 * severity * drift)
-        elif kind == "saturation":
-            output[6, :count] += 480.0 * severity
-        elif kind == "dropout":
-            output[6, :count] = np.nan
-        self.remaining -= count
-        if self.remaining <= 0:
-            self.kind = None
-        return output, kind
+        block_start = self.generator.sample_index
+        block = self.generator.render(samples)
+        dropout_mask = np.zeros((8, samples), dtype=bool)
+        for event in block.artifact_events:
+            if event.kind != "dropout":
+                continue
+            overlap_start = max(block_start, event.start_sample)
+            overlap_end = min(block_start + samples, event.end_sample)
+            if overlap_start >= overlap_end:
+                continue
+            channels = event.channel_indices or (6,)
+            dropout_mask[
+                list(channels),
+                overlap_start - block_start : overlap_end - block_start,
+            ] = True
+        return block.data_uv.astype(float), dropout_mask, block.artifact_events
 
 
 class DrivenStateSpaceWorldModel:
@@ -223,6 +267,27 @@ class DrivenStateSpaceWorldModel:
     def inject_artifact(self, kind: str, duration_seconds: float, severity: float) -> None:
         self._artifact.inject(kind, duration_seconds, severity)
 
+    def schedule_artifact(
+        self,
+        kind: str,
+        *,
+        event_id: str,
+        start_sample: int,
+        duration_seconds: float,
+        severity: float,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> DriverArtifactEvent:
+        return self._artifact.schedule(
+            kind,
+            event_id=event_id,
+            start_sample=start_sample,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            channels=channels,
+            seed=seed,
+        )
+
     def render(
         self,
         sample_times_s: np.ndarray,
@@ -270,13 +335,9 @@ class DrivenStateSpaceWorldModel:
                 * self.participant.ssvep_amplitude_uv
                 * (self._resonator_x + self.participant.first_harmonic_ratio * self._entrainment * harmonic)
             )
-        artifact, artifact_kind = self._artifact.render(times)
-        dropout = artifact_kind == "dropout"
-        if dropout:
-            artifact = np.nan_to_num(artifact, nan=0.0)
+        artifact, dropout_mask, _artifact_events = self._artifact.render(times)
         data += artifact
-        if dropout:
-            data[6, :] = 0.0
+        data[dropout_mask] = 0.0
         return WorldModelEmission(
             data_uv=data.astype(np.float32),
             latent={

@@ -8,7 +8,9 @@ from typing import Any
 
 from .specs import ArenaScenario, DeviceProfile, DisplayProfile, ParticipantProfile, TransportProfile, WorldModelProfile
 
-SCHEMA = "neuros.synthetic_bci_arena.manifest.v1"
+SCHEMA_V1 = "neuros.synthetic_bci_arena.manifest.v1"
+SCHEMA = "neuros.synthetic_bci_arena.manifest.v2"
+SUPPORTED_SCHEMAS = frozenset({SCHEMA_V1, SCHEMA})
 
 
 @dataclass(frozen=True)
@@ -55,8 +57,9 @@ def _transport(raw: dict[str, Any]) -> TransportProfile:
 
 
 def manifest_from_dict(raw: dict[str, Any]) -> ArenaManifest:
-    if raw.get("schema") != SCHEMA:
-        raise ValueError(f"expected manifest schema {SCHEMA!r}")
+    schema = raw.get("schema")
+    if schema not in SUPPORTED_SCHEMAS:
+        raise ValueError(f"expected manifest schema in {sorted(SUPPORTED_SCHEMAS)!r}")
     manifest = ArenaManifest(
         scenario=ArenaScenario.from_dict(dict(raw["scenario"])),
         participant=ParticipantProfile(**dict(raw["participant"])),

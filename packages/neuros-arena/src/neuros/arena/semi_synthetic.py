@@ -16,9 +16,11 @@ model of the person represented by the background recording.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
+
+from neuros.drivers.synthetic_eeg import ArtifactEvent as DriverArtifactEvent
 
 from .specs import ParticipantProfile
 from .world_models import POSTERIOR_WEIGHTS, SOURCE_CHANNELS, WorldModelEmission, _ArtifactEngine
@@ -84,6 +86,27 @@ class SemiSyntheticReplayWorldModel:
     def inject_artifact(self, kind: str, duration_seconds: float, severity: float) -> None:
         self._artifact.inject(kind, duration_seconds, severity)
 
+    def schedule_artifact(
+        self,
+        kind: str,
+        *,
+        event_id: str,
+        start_sample: int,
+        duration_seconds: float,
+        severity: float,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> DriverArtifactEvent:
+        return self._artifact.schedule(
+            kind,
+            event_id=event_id,
+            start_sample=start_sample,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            channels=channels,
+            seed=seed,
+        )
+
     def _next_background(self, samples: int) -> np.ndarray:
         indices = (self._cursor + np.arange(samples)) % self._baseline.shape[1]
         block = self._baseline[:, indices].copy()
@@ -120,13 +143,9 @@ class SemiSyntheticReplayWorldModel:
             * self._response_scale
             * response[None, :]
         )
-        artifact, artifact_kind = self._artifact.render(times)
-        dropout = artifact_kind == "dropout"
-        if dropout:
-            artifact = np.nan_to_num(artifact, nan=0.0)
+        artifact, dropout_mask, _artifact_events = self._artifact.render(times)
         data += artifact
-        if dropout:
-            data[6, :] = 0.0
+        data[dropout_mask] = 0.0
         return WorldModelEmission(
             data_uv=data.astype(np.float32),
             latent={

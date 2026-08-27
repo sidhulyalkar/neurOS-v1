@@ -23,8 +23,12 @@ def _write_json(payload: dict, path: str | Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="portable neuros.synthetic_bci_arena.manifest.v2 JSON (v1 remains readable)",
+    )
     parser.add_argument("--preset", choices=list_presets(), default=None)
-    parser.add_argument("--manifest", default=None, help="portable neuros.synthetic_bci_arena.manifest.v1 JSON")
     parser.add_argument(
         "--benchmark-pack",
         default=None,

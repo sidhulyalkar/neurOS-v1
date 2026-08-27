@@ -84,4 +84,4 @@ def test_adversarial_search_returns_portable_worst_worlds():
     assert result.evaluated == 8
     assert len(result.counterexamples) == 3
     assert result.counterexamples[0].objective <= result.counterexamples[-1].objective
-    assert result.counterexamples[0].manifest["schema"] == "neuros.synthetic_bci_arena.manifest.v1"
+    assert result.counterexamples[0].manifest["schema"] == "neuros.synthetic_bci_arena.manifest.v2"

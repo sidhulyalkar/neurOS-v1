@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+import numpy as np
+
 
 def _validate_scalar_mapping(name: str, values: dict[str, Any]) -> None:
     for key, value in values.items():
@@ -11,6 +13,8 @@ def _validate_scalar_mapping(name: str, values: dict[str, Any]) -> None:
             raise ValueError(f"{name} keys must be non-empty strings")
         if not isinstance(value, (str, int, float, bool)) and value is not None:
             raise ValueError(f"{name}.{key} must be a JSON scalar")
+        if isinstance(value, float) and not np.isfinite(value):
+            raise ValueError(f"{name}.{key} must be finite")
 
 
 @dataclass(frozen=True)
@@ -32,12 +36,31 @@ class ParticipantProfile:
     def validate(self) -> None:
         if not self.name:
             raise ValueError("participant name is required")
+        numeric = (
+            self.colored_noise_uv,
+            self.white_noise_uv,
+            self.alpha_frequency_hz,
+            self.alpha_amplitude_uv,
+            self.ssvep_amplitude_uv,
+            self.first_harmonic_ratio,
+            self.response_delay_s,
+            self.switch_time_constant_s,
+            self.response_attenuation_per_minute,
+            self.gaze_duty_cycle,
+            self.artifact_gain,
+        )
+        if not all(np.isfinite(value) for value in numeric):
+            raise ValueError("participant numeric parameters must be finite")
+        if isinstance(self.seed, (bool, np.bool_)) or not isinstance(self.seed, (int, np.integer)) or int(self.seed) < 0:
+            raise ValueError("participant seed must be a non-negative integer")
         if self.colored_noise_uv < 0 or self.white_noise_uv < 0:
             raise ValueError("noise amplitudes must be non-negative")
         if self.alpha_frequency_hz <= 0 or self.alpha_amplitude_uv < 0:
             raise ValueError("alpha parameters are invalid")
         if self.ssvep_amplitude_uv < 0:
             raise ValueError("ssvep amplitude must be non-negative")
+        if not 0 <= self.first_harmonic_ratio <= 2:
+            raise ValueError("first_harmonic_ratio must be in [0, 2]")
         if self.response_delay_s < 0 or self.switch_time_constant_s <= 0:
             raise ValueError("response timing must be non-negative/positive")
         if not 0 <= self.response_attenuation_per_minute <= 1:
@@ -77,10 +100,30 @@ class DeviceProfile:
     chunk_samples: int = 5
 
     def validate(self) -> None:
+        numeric = (
+            self.sampling_rate_hz,
+            self.input_range_uv,
+            self.sensor_noise_uv,
+            self.line_frequency_hz,
+            self.line_noise_uv,
+            self.clock_offset_ms,
+            self.clock_drift_ppm,
+            self.timestamp_jitter_ms,
+        )
+        if not all(np.isfinite(value) for value in numeric):
+            raise ValueError("device numeric parameters must be finite")
         if self.sampling_rate_hz <= 0 or not self.channel_names:
             raise ValueError("device sample rate/channels are invalid")
+        if any(not isinstance(name, str) or not name for name in self.channel_names):
+            raise ValueError("device channel names must be non-empty strings")
+        if len(set(self.channel_names)) != len(self.channel_names):
+            raise ValueError("device channel names must be unique")
+        if isinstance(self.adc_bits, (bool, np.bool_)) or not isinstance(self.adc_bits, (int, np.integer)):
+            raise ValueError("adc_bits must be an integer")
         if self.adc_bits < 8 or self.adc_bits > 32:
             raise ValueError("adc_bits must be in [8, 32]")
+        if isinstance(self.chunk_samples, (bool, np.bool_)) or not isinstance(self.chunk_samples, (int, np.integer)):
+            raise ValueError("chunk_samples must be an integer")
         if self.input_range_uv <= 0 or self.sensor_noise_uv < 0 or self.line_noise_uv < 0:
             raise ValueError("device amplitude parameters are invalid")
         if self.line_frequency_hz <= 0 or self.chunk_samples <= 0:
@@ -100,6 +143,16 @@ class DisplayProfile:
     high_luminance: float = 1.0
 
     def validate(self) -> None:
+        numeric = (
+            self.refresh_hz,
+            self.response_lag_ms,
+            self.frame_jitter_ms,
+            self.frame_drop_probability,
+            self.low_luminance,
+            self.high_luminance,
+        )
+        if not all(np.isfinite(value) for value in numeric):
+            raise ValueError("display numeric parameters must be finite")
         if self.refresh_hz <= 0 or self.response_lag_ms < 0 or self.frame_jitter_ms < 0:
             raise ValueError("display timing parameters are invalid")
         if not 0 <= self.frame_drop_probability < 1:
@@ -120,11 +173,23 @@ class TransportProfile:
     clock_correction_noise_ms: float = 0.0
 
     def validate(self) -> None:
+        numeric = (
+            self.drop_probability,
+            self.jitter_ms,
+            self.reorder_probability,
+            self.clock_correction_offset_error_ms,
+            self.clock_correction_drift_error_ppm,
+            self.clock_correction_noise_ms,
+        )
+        if not all(np.isfinite(value) for value in numeric):
+            raise ValueError("transport numeric parameters must be finite")
         if not 0 <= self.drop_probability < 1 or not 0 <= self.reorder_probability < 1:
             raise ValueError("transport probabilities must be in [0, 1)")
         if self.jitter_ms < 0 or self.clock_correction_noise_ms < 0:
             raise ValueError("transport and clock-correction jitter must be non-negative")
         for start, duration in self.silence_windows:
+            if not np.isfinite(start) or not np.isfinite(duration):
+                raise ValueError("silence windows must be finite")
             if start < 0 or duration <= 0:
                 raise ValueError("silence windows require start >= 0 and duration > 0")
 
@@ -135,12 +200,29 @@ class ArtifactEvent:
     kind: str
     duration_s: float = 0.35
     severity: float = 1.0
+    event_id: str | None = None
+    channels: tuple[str, ...] | None = None
+    seed: int | None = None
 
     def validate(self, stage_duration_s: float) -> None:
+        if not all(np.isfinite(value) for value in (self.at_s, self.duration_s, self.severity)):
+            raise ValueError("artifact timing/severity must be finite")
         if not 0 <= self.at_s < stage_duration_s:
             raise ValueError("artifact onset must fall inside its stage")
         if self.duration_s <= 0 or self.severity < 0:
             raise ValueError("artifact duration/severity are invalid")
+        if not isinstance(self.kind, str) or not self.kind:
+            raise ValueError("artifact kind must be a non-empty string")
+        if self.event_id is not None and (not isinstance(self.event_id, str) or not self.event_id.strip()):
+            raise ValueError("artifact event_id must be a non-empty string when supplied")
+        if self.channels is not None:
+            if not self.channels or any(not isinstance(name, str) or not name for name in self.channels):
+                raise ValueError("artifact channels must contain non-empty channel names")
+            if len(set(self.channels)) != len(self.channels):
+                raise ValueError("artifact channels must be unique")
+        if self.seed is not None:
+            if isinstance(self.seed, (bool, np.bool_)) or not isinstance(self.seed, (int, np.integer)) or int(self.seed) < 0:
+                raise ValueError("artifact seed must be a non-negative integer")
 
 
 @dataclass(frozen=True)
@@ -154,12 +236,13 @@ class StageSpec:
     task_state: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
-        if not self.label or self.duration_s <= 0:
+        if not self.label or not np.isfinite(self.duration_s) or self.duration_s <= 0:
             raise ValueError("stage label/duration are required")
-        if self.target_frequency_hz is not None and self.target_frequency_hz <= 0:
-            raise ValueError("target frequency must be positive")
-        if self.attention_gain < 0:
-            raise ValueError("attention gain must be non-negative")
+        if self.target_frequency_hz is not None:
+            if not np.isfinite(self.target_frequency_hz) or self.target_frequency_hz <= 0:
+                raise ValueError("target frequency must be positive and finite")
+        if not np.isfinite(self.attention_gain) or self.attention_gain < 0:
+            raise ValueError("attention gain must be non-negative and finite")
         for event in self.artifacts:
             event.validate(self.duration_s)
         _validate_scalar_mapping("stage.target", self.target)
@@ -176,6 +259,8 @@ class ArenaScenario:
     def validate(self) -> None:
         if not self.name or not self.stages:
             raise ValueError("scenario name and at least one stage are required")
+        if isinstance(self.seed, (bool, np.bool_)) or not isinstance(self.seed, (int, np.integer)) or int(self.seed) < 0:
+            raise ValueError("scenario seed must be a non-negative integer")
         for stage in self.stages:
             stage.validate()
 
@@ -186,13 +271,18 @@ class ArenaScenario:
     def from_dict(cls, raw: dict[str, Any]) -> "ArenaScenario":
         stages = []
         for stage_raw in raw.get("stages", []):
-            artifacts = tuple(ArtifactEvent(**event) for event in stage_raw.get("artifacts", []))
+            artifacts = []
+            for event_raw in stage_raw.get("artifacts", []):
+                event_values = dict(event_raw)
+                if event_values.get("channels") is not None:
+                    event_values["channels"] = tuple(str(value) for value in event_values["channels"])
+                artifacts.append(ArtifactEvent(**event_values))
             stages.append(StageSpec(
                 label=stage_raw["label"],
                 duration_s=float(stage_raw["duration_s"]),
                 target_frequency_hz=(None if stage_raw.get("target_frequency_hz") is None else float(stage_raw["target_frequency_hz"])),
                 attention_gain=float(stage_raw.get("attention_gain", 1.0)),
-                artifacts=artifacts,
+                artifacts=tuple(artifacts),
                 target=dict(stage_raw.get("target", {})),
                 task_state=dict(stage_raw.get("task_state", {})),
             ))

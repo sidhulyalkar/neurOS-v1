@@ -12,14 +12,20 @@ This makes it useful before hardware access, between hardware sessions, in conti
 
 ## System layers
 
-A world manifest composes independently swappable layers:
+A world manifest composes independently testable causal layers:
 
 ```text
+scenario / experiment timeline
+        ↓
 participant response model
+        ↓
+source nuisances and artifacts
         ↓
 stimulus / display presentation
         ↓
-electrode + acquisition device
+sensor / contact state
+        ↓
+acquisition device
         ↓
 transport / clocks / packetization
         ↓
@@ -30,17 +36,44 @@ application / game / artwork
 closed-loop behavior
 ```
 
-The first Arena release provides dependency-light SSVEP participant simulation plus display, device and transport models. The contract is intentionally paradigm-neutral so P300, c-VEP, motor imagery and other generators can be added without changing application-facing scenario semantics.
+The rule is simple: a fault should belong to the lowest causal layer that actually owns it. A source dropout is not packet loss, a source offset is not physical ADC clipping, and packet chunk size must not reach backward and change the simulated neural source.
+
+The current Arena provides dependency-light SSVEP participant simulation plus display, source-artifact, device and transport models. The model boundary remains paradigm-neutral so P300, c-VEP, motor imagery and other generators can be added without changing application-facing scenario semantics.
+
+## Sample-indexed scenario authority
+
+Arena manifest v2 makes artifact identity and timing explicit. A stage artifact may carry:
+
+- an onset relative to its stage;
+- duration and severity;
+- an optional stable `event_id`;
+- optional channel support;
+- an optional event-local seed.
+
+For built-in world models, the runner compiles stage-relative events into one absolute source-sample timeline before neural rendering begins. The compiled schedule is recorded in the Arena report.
+
+The important invariants are:
+
+1. reordering a manifest's artifact list does not change the synthetic data;
+2. stochastic artifacts own independent deterministic seeds;
+3. dropout/channel masks are sample-exact and may cross stage boundaries;
+4. changing device packet/chunk size does not change the neural source;
+5. built-in world models share the canonical `neuros.synthetic_eeg.artifact_schedule.v1` renderer instead of maintaining separate artifact mathematics;
+6. older external world-model plugins that only implement `inject_artifact()` remain usable, but their report is explicitly labelled `legacy_injection` rather than being credited with sample-indexed semantics.
+
+Arena currently renders neural-world blocks at a fixed internal five-sample cadence. That execution cadence is reported as `render_chunk_samples` and is deliberately independent of `DeviceProfile.chunk_samples`. The latter belongs to acquisition/packetization only.
+
+This does not make the participant model physiologically exact. It makes the software timeline unambiguous.
 
 ## Verification ladder
 
 ### A0 — Determinism
 
-Same manifest + seed must produce the same synthetic signal, timestamps, stimulus trace, fault schedule and report.
+Same manifest + seed must produce the same synthetic signal, timestamps, stimulus trace, fault schedule and report. Equivalent event ordering must not alter source data.
 
 ### A1 — Controlled neural nuisance
 
-Sweep response strength, alpha overlap, switching delay, response attenuation, gaze duty cycle, blink/jaw/controller/motion contamination and electrode loss. The expected causal labels remain known.
+Sweep response strength, alpha overlap, switching delay, response attenuation, gaze duty cycle, blink/jaw/controller/motion contamination and channel loss. Expected causal labels remain known.
 
 ### A2 — Display fidelity
 
@@ -48,7 +81,7 @@ Simulate refresh quantization, response lag, jitter and dropped frames. Report t
 
 ### A3 — Device fidelity
 
-Apply montage selection, sensor noise, mains interference, ADC clipping/quantization, clock drift and device chunk size.
+Apply montage selection, sensor noise, mains interference, ADC clipping/quantization, clock drift and acquisition chunk size. Device chunk size must not alter upstream neural samples.
 
 ### A4 — Transport adversity
 
@@ -80,11 +113,13 @@ A real device replaces the synthetic source while every downstream boundary rema
 
 ## Portable creative worlds
 
-Arena manifests use schema:
+New Arena manifests are written as:
 
-`neuros.synthetic_bci_arena.manifest.v1`
+`neuros.synthetic_bci_arena.manifest.v2`
 
-They describe participant, scenario, device, display and transport state. A manifest should be small enough to paste into a bug report and complete enough to reproduce the run.
+The v2 schema extends artifact provenance while retaining read compatibility with frozen `neuros.synthetic_bci_arena.manifest.v1` files. Existing v1 examples intentionally remain in the repository as compatibility fixtures.
+
+A manifest describes participant, scenario, world model, device, display and transport state. It should be small enough to paste into a bug report and complete enough to reproduce the declared synthetic world.
 
 Example:
 
@@ -95,13 +130,19 @@ neuros-arena \
   --npz run.npz
 ```
 
-This enables shared challenge worlds for game jams, classroom assignments, accessibility research and benchmark suites.
+When `--write-manifest` is used, the resolved world is written as v2.
+
+## Evidence and replay boundary
+
+The manifest is the requested synthetic-world specification. The Arena report additionally records the resolved artifact schedule and operational metrics. Derived arrays may be exported to NPZ for inspection.
+
+These are synthetic-world regeneration artifacts, not substitutes for observed hardware or human recordings. When real recordings exist, the recorded samples remain evidence authority for what physically happened.
 
 ## What “verified synthetic” should mean
 
 A project may say:
 
-> “The application passed Synthetic Arena scenario X across seeds 1–1000, including specified display, device and transport faults.”
+> “The application passed Synthetic Arena scenario X across seeds 1–1000, including the specified display, source-artifact, device and transport faults.”
 
 It should not say:
 
@@ -109,9 +150,24 @@ It should not say:
 
 unless that claim is independently supported by human recordings under an appropriate protocol.
 
+## Known realism limits
+
+Current deterministic rigor must not be mistaken for physiological realism. Important open modeling gaps include:
+
+- slowly varying alpha frequency/amplitude rather than a stationary oscillator;
+- richer participant response variation and fatigue models;
+- measured rather than hand-authored spatial covariance for fully synthetic worlds;
+- measured artifact amplitude/population distributions;
+- sensor/contact dynamics distinct from source dropout;
+- population-informed SSVEP morphology;
+- physical display timing and headset observations;
+- participant-level closed-loop validation.
+
+Those are future evidence/modeling layers. They should not be hidden inside arbitrary constants merely to make a simulator look more lifelike.
+
 ## Roadmap
 
-1. SSVEP closed-loop conformance and portable manifests.
+1. Sample-indexed SSVEP closed-loop conformance and portable manifests.
 2. Application event adapters and generic decoder protocol.
 3. MNE-LSL/XDF replay adapter.
 4. MOABB reference-suite adapter for SSVEP/P300/MI datasets.
