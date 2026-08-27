@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import os
 import platform
 import subprocess
@@ -26,7 +27,8 @@ from neuros.contracts import (
 )
 
 
-ARCHIVE_SCHEMA_VERSION = 1
+ARCHIVE_SCHEMA_VERSION = 2
+SUPPORTED_ARCHIVE_SCHEMA_VERSIONS = frozenset({1, ARCHIVE_SCHEMA_VERSION})
 
 
 def _jsonable(value: Any) -> Any:
@@ -38,7 +40,7 @@ def _jsonable(value: Any) -> Any:
         return value.value
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
+    if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     return value
 
@@ -87,7 +89,11 @@ def _descriptor_to_dict(descriptor: StreamDescriptor) -> dict[str, Any]:
     }
 
 
-def _descriptor_from_dict(raw: Mapping[str, Any]) -> StreamDescriptor:
+def _descriptor_from_dict(
+    raw: Mapping[str, Any],
+    *,
+    require_fingerprint: bool = False,
+) -> StreamDescriptor:
     descriptor = StreamDescriptor(
         stream_id=str(raw["stream_id"]),
         modality=str(raw["modality"]),
@@ -101,9 +107,35 @@ def _descriptor_from_dict(raw: Mapping[str, Any]) -> StreamDescriptor:
         metadata=raw.get("metadata", {}),
     )
     expected = raw.get("fingerprint_sha256")
+    if require_fingerprint and expected is None:
+        raise IOError("Archive v2 StreamDescriptor is missing fingerprint_sha256")
     if expected is not None and str(expected) != descriptor.fingerprint():
         raise IOError("StreamDescriptor fingerprint mismatch")
     return descriptor
+
+
+def _validate_legacy_frame(descriptor: StreamDescriptor, frame: SignalFrame) -> None:
+    """Validate only invariants that archive v1 actually encoded unambiguously.
+
+    v1 did not require explicit multidimensional axis metadata or bind frames to
+    a descriptor fingerprint. Reading an old archive must not retroactively
+    claim those stronger v2 guarantees.
+    """
+
+    if frame.stream_id != descriptor.stream_id:
+        raise ValueError("SignalFrame stream_id does not match StreamDescriptor")
+    if not math.isclose(
+        frame.sample_rate_hz,
+        descriptor.sample_rate_hz,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("SignalFrame sample_rate_hz does not match StreamDescriptor")
+    if (
+        descriptor.clock_domain is not ClockDomain.UNKNOWN
+        and frame.clock_domain is not descriptor.clock_domain
+    ):
+        raise ValueError("SignalFrame clock_domain does not match StreamDescriptor")
 
 
 @dataclass(slots=True)
@@ -128,15 +160,15 @@ class SessionManifest:
 class SessionArchiveWriter:
     """Append SignalFrames to a lossless, dependency-free directory archive.
 
-    Data arrays are stored as individual NPY payloads so arbitrary frame shapes
-    are preserved. An NDJSON index records every timing/provenance field and a
-    SHA-256 hash of each data payload. This is the canonical replay source; NWB
-    and Zarr are export formats rather than the authority for neurOS semantics.
+    Archive v2 binds every registered stream to a deterministic descriptor
+    fingerprint and validates each frame against that descriptor before bytes
+    are written. The canonical archive therefore cannot silently mix stream
+    IDs, sample rates, asserted clock domains, or channel geometries under one
+    v2 stream identity.
 
-    Once a stream is registered, every frame is validated against that exact
-    descriptor before bytes are written. The archive therefore cannot silently
-    mix stream IDs, sample rates, clock domains, or channel geometries under one
-    stream identity.
+    Data arrays remain individual NPY payloads so exact dtype/shape are
+    preserved. NWB and Zarr remain interoperability exports rather than the
+    authority for exact neurOS replay semantics.
     """
 
     def __init__(
@@ -285,20 +317,26 @@ class SessionArchiveReader:
     def __init__(self, root: str | Path, *, verify_hashes: bool = True) -> None:
         self.root = Path(root)
         raw = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
-        if int(raw.get("schema_version", -1)) != ARCHIVE_SCHEMA_VERSION:
-            raise ValueError("Unsupported neurOS archive schema")
+        schema_version = int(raw.get("schema_version", -1))
+        if schema_version not in SUPPORTED_ARCHIVE_SCHEMA_VERSIONS:
+            raise ValueError(f"Unsupported neurOS archive schema: {schema_version}")
         self.manifest = raw
+        self.schema_version = schema_version
         self.verify_hashes = verify_hashes
 
     @property
     def stream_ids(self) -> tuple[str, ...]:
         return tuple(self.manifest.get("streams", {}).keys())
 
+    @property
+    def descriptor_integrity(self) -> str:
+        return "sha256-bound" if self.schema_version >= 2 else "legacy-unbound"
+
     def descriptor(self, stream_id: str) -> StreamDescriptor:
         raw = json.loads(
             (self.root / "streams" / stream_id / "descriptor.json").read_text(encoding="utf-8")
         )
-        return _descriptor_from_dict(raw)
+        return _descriptor_from_dict(raw, require_fingerprint=self.schema_version >= 2)
 
     def iter_frames(self, stream_id: str) -> Iterable[SignalFrame]:
         stream_root = self.root / "streams" / stream_id
@@ -331,7 +369,10 @@ class SessionArchiveReader:
                 quality=QualityFlag(int(row["quality"])),
                 metadata=row.get("metadata", {}),
             )
-            validate_frame_against_descriptor(descriptor, frame)
+            if self.schema_version >= 2:
+                validate_frame_against_descriptor(descriptor, frame)
+            else:
+                _validate_legacy_frame(descriptor, frame)
             yield frame
 
     def summary(self) -> dict[str, Any]:
@@ -339,6 +380,8 @@ class SessionArchiveReader:
             "session_id": self.manifest["session_id"],
             "status": self.manifest["status"],
             "created_at": self.manifest["created_at"],
+            "schema_version": self.schema_version,
+            "descriptor_integrity": self.descriptor_integrity,
             "git_sha": self.manifest.get("git_sha"),
             "config_hash": self.manifest.get("config_hash"),
             "streams": {
