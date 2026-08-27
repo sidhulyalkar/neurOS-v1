@@ -8,10 +8,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from neuros.contracts import StreamDescriptor
 from neuros.models import (
     EEGNetModel,
     InterpretabilityManifest,
     ModelInputContract,
+    ModelOutputContract,
     export_model_artifact,
     load_model_artifact,
     verify_model_artifact,
@@ -44,7 +46,18 @@ def _trained_eegnet() -> tuple[EEGNetModel, np.ndarray, np.ndarray]:
     return model, X, y
 
 
-def _contract() -> ModelInputContract:
+def _descriptor() -> StreamDescriptor:
+    return StreamDescriptor(
+        stream_id="fixture-eeg",
+        modality="eeg",
+        sample_rate_hz=256.0,
+        channel_names=("C3", "C4"),
+        units=("uV", "uV"),
+    )
+
+
+def _contract(*, bind_descriptor: bool = False) -> ModelInputContract:
+    descriptor = _descriptor()
     return ModelInputContract(
         axes=("batch", "channel", "time"),
         shape=(None, 2, 64),
@@ -52,17 +65,18 @@ def _contract() -> ModelInputContract:
         channel_names=("C3", "C4"),
         sample_rate_hz=256.0,
         signal_unit="uV",
+        stream_descriptor_sha256=descriptor.fingerprint() if bind_descriptor else None,
         metadata={"montage": "fixture-two-channel"},
     )
 
 
-def _export(path: Path):
+def _export(path: Path, *, contract: ModelInputContract | None = None):
     model, X, y = _trained_eegnet()
     manifest = export_model_artifact(
         model,
         path,
         artifact_id="fixture-eegnet-v1",
-        input_contract=_contract(),
+        input_contract=_contract() if contract is None else contract,
         git_sha=GIT_SHA,
         training_authority_sha256s=(TRAIN_SHA,),
         evaluation_authority_sha256s=(EVAL_SHA,),
@@ -112,6 +126,8 @@ def test_export_verify_and_reload_are_content_addressed_and_equivalent(tmp_path:
     assert verified.training_authority_sha256s == (TRAIN_SHA,)
     assert verified.evaluation_authority_sha256s == (EVAL_SHA,)
     assert verified.scientific_study_sha256 == STUDY_SHA
+    assert verified.output_contract.probability_semantics == "uncalibrated_softmax"
+    assert verified.output_contract.class_labels == ("0", "1")
     assert {path.name for path in (tmp_path / "artifact-a").iterdir()} == {
         "manifest.json",
         "weights.safetensors",
@@ -131,6 +147,8 @@ def test_export_verify_and_reload_are_content_addressed_and_equivalent(tmp_path:
     assert output.metadata["interpretability_manifest_sha256"] == (
         verified.interpretability_manifest_sha256
     )
+    assert output.metadata["probability_semantics"] == "uncalibrated_softmax"
+    assert tuple(output.metadata["class_labels"]) == ("0", "1")
 
 
 def test_same_model_state_and_provenance_have_same_artifact_identity(tmp_path: Path):
@@ -159,7 +177,7 @@ def test_same_model_state_and_provenance_have_same_artifact_identity(tmp_path: P
     ).read_bytes()
 
 
-def test_promoted_artifact_is_immutable_and_enforces_input_contract(tmp_path: Path):
+def test_promoted_artifact_is_read_only_and_enforces_input_contract(tmp_path: Path):
     _model, X, y, _manifest = _export(tmp_path / "artifact")
     loaded = load_model_artifact(tmp_path / "artifact")
     assert loaded.capabilities.online_fit is False
@@ -183,6 +201,72 @@ def test_promoted_artifact_is_immutable_and_enforces_input_contract(tmp_path: Pa
         )
 
 
+def test_analysis_model_is_a_detached_snapshot_not_live_deployment_state(tmp_path: Path):
+    _model, X, _y, manifest = _export(tmp_path / "artifact")
+    loaded = load_model_artifact(tmp_path / "artifact")
+    before = loaded.predict_logits(X[:3]).copy()
+
+    snapshot = loaded.analysis_model()
+    assert all(parameter.requires_grad is False for parameter in snapshot.parameters())
+    # Deliberately destroy the detached analysis snapshot.
+    for parameter in snapshot.parameters():
+        parameter.zero_()
+
+    after = loaded.predict_logits(X[:3])
+    np.testing.assert_allclose(after, before, rtol=0, atol=0)
+    assert loaded.artifact_manifest.artifact_sha256 == manifest.artifact_sha256
+
+
+def test_stream_descriptor_authority_can_be_bound_and_checked(tmp_path: Path):
+    descriptor = _descriptor()
+    _model, X, _y, _manifest = _export(
+        tmp_path / "artifact", contract=_contract(bind_descriptor=True)
+    )
+    loaded = load_model_artifact(tmp_path / "artifact")
+    loaded.validate_stream_descriptor(descriptor)
+    loaded.predict(X[:1])
+
+    wrong_channels = StreamDescriptor(
+        stream_id="fixture-eeg",
+        modality="eeg",
+        sample_rate_hz=256.0,
+        channel_names=("F3", "F4"),
+        units=("uV", "uV"),
+    )
+    with pytest.raises(ValueError, match="descriptor SHA-256"):
+        loaded.validate_stream_descriptor(wrong_channels)
+
+
+def test_builtin_v1_cannot_claim_calibrated_probabilities_without_qualified_factory(tmp_path: Path):
+    model, _X, _y = _trained_eegnet()
+    calibrated = ModelOutputContract(
+        class_labels=("left", "right"),
+        probability_semantics="calibrated_probability",
+        probability_calibration_method="temperature-scaling",
+        probability_calibration_sha256="e" * 64,
+    )
+    with pytest.raises(ValueError, match="uncalibrated softmax"):
+        export_model_artifact(
+            model,
+            tmp_path / "artifact",
+            artifact_id="false-calibration-claim",
+            input_contract=_contract(),
+            output_contract=calibrated,
+            git_sha=GIT_SHA,
+        )
+
+
+def test_output_contract_rejects_semantic_contradictions():
+    with pytest.raises(ValueError, match="only be declared"):
+        ModelOutputContract(
+            class_labels=("0", "1"),
+            probability_semantics="uncalibrated_softmax",
+            probability_calibration_method="temperature-scaling",
+        )
+    with pytest.raises(ValueError, match="at least two unique"):
+        ModelOutputContract(class_labels=("same", "same"))
+
+
 def test_manifest_tampering_is_rejected_before_model_construction(tmp_path: Path):
     _model, _X, _y, _manifest = _export(tmp_path / "artifact")
     payload = json.loads((tmp_path / "artifact" / "manifest.json").read_text())
@@ -192,7 +276,7 @@ def test_manifest_tampering_is_rejected_before_model_construction(tmp_path: Path
         verify_model_artifact(tmp_path / "artifact")
 
 
-def test_weight_tampering_and_extra_payloads_are_rejected(tmp_path: Path):
+def test_weight_tampering_extra_payloads_and_root_symlinks_are_rejected(tmp_path: Path):
     _model, _X, _y, _manifest = _export(tmp_path / "original")
 
     tampered = tmp_path / "tampered"
@@ -209,6 +293,14 @@ def test_weight_tampering_and_extra_payloads_are_rejected(tmp_path: Path):
     (extra / "payload.pkl").write_bytes(b"not accepted")
     with pytest.raises(ValueError, match="exactly"):
         verify_model_artifact(extra)
+
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(tmp_path / "original", target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks are unavailable on this platform")
+    with pytest.raises(ValueError, match="root cannot be a symbolic link"):
+        verify_model_artifact(linked)
 
 
 def test_unknown_factory_cannot_turn_manifest_data_into_an_import(tmp_path: Path):
