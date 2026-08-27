@@ -36,6 +36,8 @@ class ObservationSetAuthority:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("ObservationSetAuthority schema_version must be 2")
+        if not isinstance(self.role, ObservationRole):
+            raise TypeError("role must be ObservationRole")
         object.__setattr__(self, "authority_id", nonempty("authority_id", self.authority_id))
         object.__setattr__(
             self,
@@ -93,6 +95,14 @@ class TargetObservationBudget:
             value = self.labeled_examples_per_class
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError("labeled_examples_per_class must be a non-negative integer or None")
+            if value > 0 and self.labeled_examples == 0:
+                raise ValueError(
+                    "positive labeled_examples_per_class is inconsistent with zero labeled_examples"
+                )
+            if value > self.labeled_examples:
+                raise ValueError(
+                    "labeled_examples_per_class cannot exceed total labeled_examples"
+                )
         if self.unlabeled_seconds is not None:
             value = self.unlabeled_seconds
             if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
@@ -101,6 +111,15 @@ class TargetObservationBudget:
             if not math.isfinite(number) or number < 0:
                 raise ValueError("unlabeled_seconds must be finite and non-negative")
             object.__setattr__(self, "unlabeled_seconds", number)
+
+    @property
+    def has_target_information(self) -> bool:
+        return bool(
+            self.labeled_examples
+            or (self.labeled_examples_per_class or 0)
+            or self.unlabeled_examples
+            or (self.unlabeled_seconds or 0.0)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,23 +143,31 @@ class ObservationConsumption:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("ObservationConsumption schema_version must be 2")
+        if not isinstance(self.operation, OperationKind):
+            raise TypeError("operation must be OperationKind")
         object.__setattr__(self, "operation_id", nonempty("operation_id", self.operation_id))
         shas = tuple(
             require_sha256("observation authority SHA-256", value)
             for value in self.observation_authority_sha256s
         )
+        if not shas:
+            raise ValueError("observation consumption must contain at least one observation authority")
         if len(set(shas)) != len(shas):
             raise ValueError("observation_authority_sha256s cannot contain duplicates")
-        if len(shas) != len(self.roles):
+        roles = tuple(self.roles)
+        if any(not isinstance(role, ObservationRole) for role in roles):
+            raise TypeError("roles must contain only ObservationRole values")
+        if len(shas) != len(roles):
             raise ValueError("roles must align one-to-one with observation authorities")
         allowed = ALLOWED_ROLES[self.operation]
-        unauthorized = sorted({role.value for role in self.roles if role not in allowed})
+        unauthorized = sorted({role.value for role in roles if role not in allowed})
         if unauthorized:
             raise ValueError(
                 f"{self.operation.value} cannot consume observation roles {unauthorized}; "
                 f"allowed={sorted(role.value for role in allowed)}"
             )
         object.__setattr__(self, "observation_authority_sha256s", shas)
+        object.__setattr__(self, "roles", roles)
 
     @classmethod
     def bind(
@@ -150,11 +177,14 @@ class ObservationConsumption:
         operation: OperationKind,
         observations: Sequence[ObservationSetAuthority],
     ) -> "ObservationConsumption":
+        observations_tuple = tuple(observations)
+        if any(not isinstance(item, ObservationSetAuthority) for item in observations_tuple):
+            raise TypeError("observations must contain only ObservationSetAuthority objects")
         return cls(
             operation_id=operation_id,
             operation=operation,
-            observation_authority_sha256s=tuple(item.authority_sha256 for item in observations),
-            roles=tuple(item.role for item in observations),
+            observation_authority_sha256s=tuple(item.authority_sha256 for item in observations_tuple),
+            roles=tuple(item.role for item in observations_tuple),
         )
 
     @property
@@ -207,6 +237,8 @@ class PreprocessingFitAuthority:
         elif self.fit_kind is TransformFitKind.DATA_FITTED:
             if self.consumption is None:
                 raise ValueError("data-fitted transforms require observation consumption authority")
+            if not isinstance(self.consumption, ObservationConsumption):
+                raise TypeError("consumption must be ObservationConsumption")
             if self.consumption.operation is not OperationKind.PREPROCESSING_FIT:
                 raise ValueError("data-fitted preprocessing must use preprocessing_fit consumption")
         else:
