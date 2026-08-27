@@ -13,14 +13,18 @@ def _frames():
         SignalFrame(
             stream_id="eeg",
             sequence_id=index,
-            data=np.arange(6, dtype=np.float32).reshape(2, 3) + index,
+            data=np.arange(6, dtype=np.float32).reshape(3, 2) + index,
             sample_rate_hz=250.0,
             host_receive_time_ns=1_000_000 + index,
             device_time_ns=2_000_000 + index,
             synchronized_time_ns=3_000_000 + index,
             clock_domain=ClockDomain.SYNCHRONIZED,
             quality=QualityFlag.ARTIFACT_SUSPECTED if index == 1 else QualityFlag.GOOD,
-            metadata={"trial": index, "label": "left" if index % 2 == 0 else "right"},
+            metadata={
+                "trial": index,
+                "label": "left" if index % 2 == 0 else "right",
+                "axis_order": ("sample", "channel"),
+            },
         )
         for index in range(3)
     ]
@@ -55,11 +59,13 @@ async def test_session_archive_round_trips_exact_frame_semantics(tmp_path: Path)
 
     reader = SessionArchiveReader(root)
     assert reader.descriptor("eeg") == descriptor
+    assert reader.descriptor("eeg").fingerprint() == descriptor.fingerprint()
     restored = list(reader.iter_frames("eeg"))
     assert len(restored) == len(original)
     for expected, actual in zip(original, restored):
         assert actual.sequence_id == expected.sequence_id
         np.testing.assert_array_equal(actual.data, expected.data)
+        assert not actual.data.flags.writeable
         assert actual.sample_rate_hz == expected.sample_rate_hz
         assert actual.host_receive_time_ns == expected.host_receive_time_ns
         assert actual.device_time_ns == expected.device_time_ns
@@ -74,6 +80,10 @@ async def test_session_archive_round_trips_exact_frame_semantics(tmp_path: Path)
     assert summary["runtime_metrics"]["dropped"] == 0
     manifest = json.loads((root / "manifest.json").read_text())
     assert manifest["status"] == "complete"
+    assert (
+        manifest["streams"]["eeg"]["descriptor_fingerprint_sha256"]
+        == descriptor.fingerprint()
+    )
 
 
 @pytest.mark.asyncio
