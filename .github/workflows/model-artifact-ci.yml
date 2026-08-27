@@ -49,15 +49,17 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          source = Path("packages/neuros-models/src/neuros/models/artifact.py").read_text()
-          assert "import pickle" not in source
-          assert "pickle.load(" not in source
-          assert "pickle.loads(" not in source
+          for filename in ("artifact.py", "artifact_v1.py"):
+              source = Path("packages/neuros-models/src/neuros/models", filename).read_text()
+              assert "import pickle" not in source
+              assert "pickle.load(" not in source
+              assert "pickle.loads(" not in source
           PY
       - name: Compile artifact surface
         run: |
           python -m compileall -q \
             packages/neuros-models/src/neuros/models/artifact.py \
+            packages/neuros-models/src/neuros/models/artifact_v1.py \
             packages/neuros-models/src/neuros/models/artifact_store.py \
             packages/neuros-models/src/neuros/models/analysis.py
 
