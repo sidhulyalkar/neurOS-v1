@@ -78,32 +78,34 @@ def _optional_nonnegative_integer(value: Any, *, field_name: str) -> int | None:
 
 
 def _freeze_metadata(value: Any, *, path: str = "metadata") -> Any:
-    """Recursively detach mutable provenance containers from caller ownership.
+    """Recursively detach provenance values from caller-owned mutable state.
 
-    Metadata is intentionally constrained to deterministic provenance-like
-    values. Arrays are copied and made read-only; nested mappings and sequences
-    are recursively frozen. Opaque Python objects are rejected instead of being
-    retained by reference inside a supposedly immutable scientific record.
+    The metadata contract intentionally remains JSON-like. That is stricter
+    than accepting arbitrary Python objects, but it guarantees that a static
+    stream identity has the same scientific meaning before and after archival
+    serialization. NumPy arrays are accepted as convenient input and frozen as
+    nested tuples of values; dtype-specific identity belongs in a dedicated
+    typed contract rather than an incidental metadata container.
     """
 
-    if value is None or isinstance(value, (str, bytes, bool, int)):
-        return value
+    if isinstance(value, Enum):
+        return _freeze_metadata(value.value, path=path)
     if isinstance(value, np.generic):
         return _freeze_metadata(value.item(), path=path)
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError(f"{path} contains a non-finite float")
         return value
-    if isinstance(value, Enum):
-        return _freeze_metadata(value.value, path=path)
+    if isinstance(value, bytes):
+        raise TypeError(f"{path} cannot contain bytes; encode them explicitly as text")
     if isinstance(value, np.ndarray):
         if value.dtype.kind == "O":
             raise TypeError(f"{path} cannot contain object-dtype arrays")
         if value.dtype.kind in "fc" and not np.isfinite(value).all():
             raise ValueError(f"{path} contains a non-finite array")
-        copied = np.array(value, copy=True, subok=False)
-        copied.setflags(write=False)
-        return copied
+        return _freeze_metadata(value.tolist(), path=path)
     if isinstance(value, Mapping):
         frozen: dict[str, Any] = {}
         for key, item in value.items():
@@ -117,7 +119,7 @@ def _freeze_metadata(value: Any, *, path: str = "metadata") -> Any:
             for index, item in enumerate(value)
         )
     if isinstance(value, (set, frozenset)):
-        return frozenset(_freeze_metadata(item, path=f"{path}[]") for item in value)
+        raise TypeError(f"{path} cannot contain unordered set values")
     raise TypeError(
         f"{path} contains unsupported value type {type(value).__module__}."
         f"{type(value).__qualname__}; use deterministic provenance primitives"
@@ -125,38 +127,24 @@ def _freeze_metadata(value: Any, *, path: str = "metadata") -> Any:
 
 
 def _canonical_value(value: Any) -> Any:
-    """Convert frozen contract values into a deterministic JSON representation."""
+    """Convert frozen contract values into deterministic JSON values."""
 
+    if isinstance(value, Enum):
+        return _canonical_value(value.value)
+    if isinstance(value, np.generic):
+        return _canonical_value(value.item())
     if value is None or isinstance(value, (str, bool, int)):
         return value
-    if isinstance(value, bytes):
-        return {"__bytes_hex__": value.hex()}
     if isinstance(value, float):
         if not math.isfinite(value):
             raise ValueError("canonical identity cannot contain NaN or infinity")
         return value
-    if isinstance(value, np.generic):
-        return _canonical_value(value.item())
-    if isinstance(value, Enum):
-        return _canonical_value(value.value)
     if isinstance(value, np.ndarray):
-        return {
-            "__ndarray__": {
-                "dtype": str(value.dtype),
-                "shape": list(value.shape),
-                "values": _canonical_value(value.tolist()),
-            }
-        }
+        return _canonical_value(value.tolist())
     if isinstance(value, Mapping):
         return {str(key): _canonical_value(item) for key, item in sorted(value.items())}
     if isinstance(value, (list, tuple)):
         return [_canonical_value(item) for item in value]
-    if isinstance(value, (set, frozenset)):
-        items = [_canonical_value(item) for item in value]
-        return sorted(
-            items,
-            key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
-        )
     raise TypeError(f"Unsupported canonical identity value: {type(value)!r}")
 
 
@@ -312,7 +300,7 @@ class SignalFrame:
             raise ValueError("clock_domain='synchronized' requires synchronized_time_ns")
         object.__setattr__(self, "clock_domain", domain)
 
-        quality_value = _nonnegative_integer(int(self.quality), field_name="quality")
+        quality_value = _nonnegative_integer(self.quality, field_name="quality")
         object.__setattr__(self, "quality", QualityFlag(quality_value))
 
         arr = np.array(self.data, copy=True, subok=False)
