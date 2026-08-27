@@ -4,11 +4,18 @@ import pytest
 
 from orion.scientific_authority import (
     DatasetLineage,
+    FailureAggregationPolicy,
     IdentityAvailability,
     IdentitySet,
     LineageCompleteness,
+    MetricDirection,
+    MetricSpec,
     ModelLineage,
     OverlapStatus,
+    PretrainingOverlapAudit,
+    ProbabilityRequirement,
+    RepeatedMeasuresAuthority,
+    ScientificStudyAuthority,
     audit_pretraining_overlap,
 )
 
@@ -18,6 +25,33 @@ def _participant(*ids: str) -> IdentitySet:
         level="participant",
         availability=IdentityAvailability.AVAILABLE,
         identifiers=ids,
+    )
+
+
+def _metric() -> MetricSpec:
+    return MetricSpec(
+        metric_id="balanced_accuracy",
+        version="fixture-v1",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        averaging="macro recall",
+        class_semantics="two declared classes with equal weighting",
+        probability_requirement=ProbabilityRequirement.NONE,
+        estimator="fixture",
+        estimator_version="1",
+        aggregation_unit="participant-session case",
+        failure_policy=FailureAggregationPolicy.PRESERVE,
+        uncertainty_method="participant-cluster bootstrap",
+        primary=True,
+    )
+
+
+def _repeated() -> RepeatedMeasuresAuthority:
+    return RepeatedMeasuresAuthority(
+        hierarchy=("participant", "session", "trial"),
+        independent_unit="participant",
+        case_unit="participant-session",
+        cluster_units=("participant",),
+        inference_method="participant-cluster bootstrap",
     )
 
 
@@ -126,6 +160,41 @@ def test_known_dataset_mapping_cannot_relabel_a_different_lineage_object():
             model,
             child,
             known_datasets={"declared-parent": parent},
+        )
+
+
+def test_study_recomputes_overlap_and_rejects_forged_disjoint_verdict():
+    dataset = DatasetLineage(
+        dataset_id="shared-domain",
+        upstream_source="evaluation",
+        lineage_completeness=LineageCompleteness.COMPLETE,
+    )
+    model = ModelLineage(
+        model_id="pretrained-model",
+        upstream_source="checkpoint",
+        pretraining_dataset_ids=("shared-domain",),
+        pretraining_lineage_completeness=LineageCompleteness.COMPLETE,
+    )
+    forged = PretrainingOverlapAudit(
+        status=OverlapStatus.DISJOINT_VERIFIED,
+        model_id=model.model_id,
+        evaluation_dataset_id=dataset.dataset_id,
+        model_lineage_sha256=model.lineage_sha256,
+        evaluation_dataset_lineage_sha256=dataset.lineage_sha256,
+        reason="caller-supplied clean verdict",
+    )
+
+    with pytest.raises(ValueError, match="independently recomputed study lineage"):
+        ScientificStudyAuthority(
+            study_id="forged-overlap-verdict",
+            protocol_sha256="d" * 64,
+            datasets=(dataset,),
+            models=(model,),
+            observations=(),
+            preprocessing=(),
+            metrics=(_metric(),),
+            repeated_measures=_repeated(),
+            overlap_audits=(forged,),
         )
 
 
