@@ -423,7 +423,7 @@ def test_metric_spec_is_not_just_a_metric_name():
     assert payload["aggregation_unit"] == "participant-session case"
     assert payload["failure_policy"] == "preserve"
     assert len(payload["metric_sha256"]) == 64
-    with pytest.raises(ValueError, match="finite target_value"):
+    with pytest.raises(ValueError, match="finite numeric target_value"):
         MetricSpec(
             metric_id="distance-to-target",
             version="1",
