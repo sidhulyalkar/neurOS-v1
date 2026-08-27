@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from .common import (
@@ -47,6 +48,14 @@ class EvidenceClaim:
             raise ValueError("evidence_sha256s cannot contain duplicates")
         if not isinstance(self.zero_shot_claim, bool):
             raise ValueError("zero_shot_claim must be boolean")
+        if self.model_id is not None:
+            object.__setattr__(self, "model_id", nonempty("model_id", self.model_id))
+        if self.evaluation_dataset_id is not None:
+            object.__setattr__(
+                self,
+                "evaluation_dataset_id",
+                nonempty("evaluation_dataset_id", self.evaluation_dataset_id),
+            )
         if self.target_budget_id is not None:
             object.__setattr__(self, "target_budget_id", nonempty("target_budget_id", self.target_budget_id))
         object.__setattr__(self, "evidence_sha256s", shas)
@@ -96,36 +105,61 @@ class ScientificStudyAuthority:
         object.__setattr__(self, "study_id", nonempty("study_id", self.study_id))
         object.__setattr__(self, "protocol_sha256", require_sha256("protocol_sha256", self.protocol_sha256))
 
-        for name, values, key in (
-            ("datasets", self.datasets, lambda item: item.dataset_id),
-            ("models", self.models, lambda item: item.model_id),
-            ("observations", self.observations, lambda item: item.authority_id),
-            ("preprocessing", self.preprocessing, lambda item: item.transform_id),
-            ("metrics", self.metrics, lambda item: item.metric_id),
-            ("claims", self.claims, lambda item: item.claim_id),
+        datasets_tuple = tuple(self.datasets)
+        models_tuple = tuple(self.models)
+        observations_tuple = tuple(self.observations)
+        preprocessing_tuple = tuple(self.preprocessing)
+        metrics_tuple = tuple(self.metrics)
+        audits_tuple = tuple(self.overlap_audits)
+        result_sets_tuple = tuple(self.result_sets)
+        claims_tuple = tuple(self.claims)
+        object.__setattr__(self, "datasets", datasets_tuple)
+        object.__setattr__(self, "models", models_tuple)
+        object.__setattr__(self, "observations", observations_tuple)
+        object.__setattr__(self, "preprocessing", preprocessing_tuple)
+        object.__setattr__(self, "metrics", metrics_tuple)
+        object.__setattr__(self, "overlap_audits", audits_tuple)
+        object.__setattr__(self, "result_sets", result_sets_tuple)
+        object.__setattr__(self, "claims", claims_tuple)
+
+        for name, values, expected_type, key in (
+            ("datasets", datasets_tuple, DatasetLineage, lambda item: item.dataset_id),
+            ("models", models_tuple, ModelLineage, lambda item: item.model_id),
+            ("observations", observations_tuple, ObservationSetAuthority, lambda item: item.authority_id),
+            ("preprocessing", preprocessing_tuple, PreprocessingFitAuthority, lambda item: item.transform_id),
+            ("metrics", metrics_tuple, MetricSpec, lambda item: item.metric_id),
+            ("claims", claims_tuple, EvidenceClaim, lambda item: item.claim_id),
         ):
+            if any(not isinstance(item, expected_type) for item in values):
+                raise TypeError(f"{name} contains an invalid authority type")
             keys = [key(item) for item in values]
             if len(set(keys)) != len(keys):
                 raise ValueError(f"{name} cannot contain duplicate identities")
-        if not self.datasets:
+        if any(not isinstance(item, PretrainingOverlapAudit) for item in audits_tuple):
+            raise TypeError("overlap_audits contains an invalid authority type")
+        if any(not isinstance(item, FailurePreservingResultSet) for item in result_sets_tuple):
+            raise TypeError("result_sets contains an invalid authority type")
+        if not datasets_tuple:
             raise ValueError("a scientific study requires at least one dataset lineage")
-        if not self.metrics:
+        if not metrics_tuple:
             raise ValueError("a scientific study requires at least one metric spec")
-        if sum(1 for metric in self.metrics if metric.primary) != 1:
+        if sum(1 for metric in metrics_tuple if metric.primary) != 1:
             raise ValueError("a promoted scientific study requires exactly one primary metric")
+        if not isinstance(self.repeated_measures, RepeatedMeasuresAuthority):
+            raise TypeError("repeated_measures must be RepeatedMeasuresAuthority")
 
-        datasets = {item.dataset_id: item for item in self.datasets}
-        dataset_shas = {item.lineage_sha256 for item in self.datasets}
-        models = {item.model_id: item for item in self.models}
-        observation_shas = {item.authority_sha256 for item in self.observations}
+        datasets = {item.dataset_id: item for item in datasets_tuple}
+        dataset_shas = {item.lineage_sha256 for item in datasets_tuple}
+        models = {item.model_id: item for item in models_tuple}
+        observation_shas = {item.authority_sha256 for item in observations_tuple}
 
-        for observation in self.observations:
+        for observation in observations_tuple:
             if observation.dataset_lineage_sha256 not in dataset_shas:
                 raise ValueError(
                     f"observation {observation.authority_id!r} references a dataset lineage "
                     "that is not part of the study"
                 )
-        for transform in self.preprocessing:
+        for transform in preprocessing_tuple:
             if transform.consumption is None:
                 continue
             unknown = set(transform.consumption.observation_authority_sha256s) - observation_shas
@@ -135,10 +169,10 @@ class ScientificStudyAuthority:
                     "authority outside the declared study universe"
                 )
 
-        audits = {(item.model_id, item.evaluation_dataset_id): item for item in self.overlap_audits}
-        if len(audits) != len(self.overlap_audits):
+        audits = {(item.model_id, item.evaluation_dataset_id): item for item in audits_tuple}
+        if len(audits) != len(audits_tuple):
             raise ValueError("overlap_audits cannot repeat a model/evaluation-dataset pair")
-        for audit in self.overlap_audits:
+        for audit in audits_tuple:
             model = models.get(audit.model_id)
             dataset = datasets.get(audit.evaluation_dataset_id)
             if model is None or dataset is None:
@@ -148,10 +182,12 @@ class ScientificStudyAuthority:
             if audit.evaluation_dataset_lineage_sha256 != dataset.lineage_sha256:
                 raise ValueError("overlap audit dataset lineage SHA-256 is stale or forged")
 
-        for result in self.result_sets:
-            result.require_metric_specs(self.metrics)
-        result_shas = {item.result_sha256 for item in self.result_sets}
+        for result in result_sets_tuple:
+            result.require_metric_specs(metrics_tuple)
+        result_shas = {item.result_sha256 for item in result_sets_tuple}
 
+        if not isinstance(self.target_budgets, Mapping):
+            raise TypeError("target_budgets must be a mapping")
         budgets: dict[str, TargetObservationBudget] = {}
         for key, budget in self.target_budgets.items():
             normalized = nonempty("target budget id", str(key))
@@ -160,9 +196,10 @@ class ScientificStudyAuthority:
             if not isinstance(budget, TargetObservationBudget):
                 raise TypeError("target_budgets values must be TargetObservationBudget objects")
             budgets[normalized] = budget
-        object.__setattr__(self, "target_budgets", budgets)
+        frozen_budgets = MappingProxyType(budgets)
+        object.__setattr__(self, "target_budgets", frozen_budgets)
 
-        for claim in self.claims:
+        for claim in claims_tuple:
             if claim.domain is EvidenceDomain.TASK_UTILITY:
                 if not result_shas.intersection(claim.evidence_sha256s):
                     raise ValueError(
