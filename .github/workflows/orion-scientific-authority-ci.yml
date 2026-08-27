@@ -8,6 +8,7 @@ on:
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "tests/test_orion_scientific_result_integrity.py"
+      - "tests/test_orion_scientific_observation_integrity.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -19,6 +20,7 @@ on:
       - "packages/orion/src/orion/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "tests/test_orion_scientific_result_integrity.py"
+      - "tests/test_orion_scientific_observation_integrity.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -54,6 +56,7 @@ jobs:
           pytest -q \
             tests/test_orion_scientific_authority.py \
             tests/test_orion_scientific_result_integrity.py \
+            tests/test_orion_scientific_observation_integrity.py \
             tests/test_orion_adaptation_integrity.py \
             tests/test_orion_assessment.py
       - name: Prove deterministic machine-readable report
@@ -76,7 +79,9 @@ jobs:
           assert report["pretraining_overlap"][0]["status"] == "disjoint_verified"
           assert report["result_sets"][0]["status_counts"]["ok"] == 1
           assert report["target_observation_budgets"]["zero-target-observation"]["labeled_examples"] == 0
+          assert report["target_observation_budgets"]["zero-target-observation"]["labeled_examples_per_class"] in (0, None)
           assert report["target_observation_budgets"]["zero-target-observation"]["unlabeled_examples"] == 0
+          assert report["target_observation_budgets"]["zero-target-observation"]["unlabeled_seconds"] in (0, 0.0, None)
           PY
       - name: Compile scientific authority surface
         run: |
