@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +12,7 @@ from neuros.contracts import (
     frame_channel_count,
     validate_frame_against_descriptor,
 )
-from neuros.recording import SessionArchiveReader, SessionArchiveWriter
+from neuros.recording import ARCHIVE_SCHEMA_VERSION, SessionArchiveReader, SessionArchiveWriter
 
 
 def _frame(**overrides):
@@ -67,6 +68,24 @@ def test_signal_frame_recursively_detaches_metadata():
         frame.metadata["nested"]["new"] = 1
 
 
+def test_provenance_metadata_rejects_unstable_python_values():
+    with pytest.raises(TypeError, match="bytes"):
+        _descriptor(metadata={"blob": b"opaque"})
+    with pytest.raises(TypeError, match="set"):
+        _descriptor(metadata={"unordered": {"C3", "C4"}})
+    with pytest.raises(ValueError, match="non-finite"):
+        _descriptor(metadata={"value": float("nan")})
+
+
+def test_numpy_metadata_is_detached_into_archive_stable_values():
+    source = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    descriptor = _descriptor(metadata={"coordinates": source})
+    before = descriptor.fingerprint()
+    source[0, 0] = 99.0
+    assert descriptor.metadata["coordinates"] == ((1.0, 2.0), (3.0, 4.0))
+    assert descriptor.fingerprint() == before
+
+
 @pytest.mark.parametrize("bad_rate", [float("nan"), float("inf"), 0.0, -1.0])
 def test_sample_rates_must_be_finite_and_positive(bad_rate):
     with pytest.raises(ValueError):
@@ -88,6 +107,13 @@ def test_sample_rates_do_not_accept_boolean_or_string_coercion(bad_rate):
 def test_frame_integer_identity_fields_reject_lossy_coercion(field, bad_value):
     with pytest.raises(TypeError):
         _frame(**{field: bad_value})
+
+
+def test_quality_flags_do_not_accept_lossy_numeric_coercion():
+    with pytest.raises(TypeError):
+        _frame(quality=1.5)
+    with pytest.raises(TypeError):
+        _frame(quality=True)
 
 
 def test_declared_clock_domain_requires_corresponding_timestamp():
@@ -126,9 +152,17 @@ def test_frame_rejects_nonfinite_and_object_signal_payloads():
 
 def test_stream_descriptor_requires_unique_nonempty_channel_identity():
     with pytest.raises(ValueError, match="unique"):
-        _descriptor(channel_names=("C3", "C3"), channel_types=("eeg", "eeg"), units=("uV", "uV"))
+        _descriptor(
+            channel_names=("C3", "C3"),
+            channel_types=("eeg", "eeg"),
+            units=("uV", "uV"),
+        )
     with pytest.raises(ValueError, match="non-empty"):
-        _descriptor(channel_names=("C3", ""), channel_types=("eeg", "eeg"), units=("uV", "uV"))
+        _descriptor(
+            channel_names=("C3", ""),
+            channel_types=("eeg", "eeg"),
+            units=("uV", "uV"),
+        )
 
 
 def test_descriptor_fingerprint_is_deterministic_and_semantically_sensitive():
@@ -181,8 +215,8 @@ def test_descriptor_frame_validator_checks_declared_channel_names():
 
 
 @pytest.mark.asyncio
-async def test_archive_persists_and_verifies_descriptor_identity(tmp_path: Path):
-    descriptor = _descriptor()
+async def test_archive_v2_persists_and_verifies_descriptor_identity(tmp_path: Path):
+    descriptor = _descriptor(metadata={"coordinates": np.arange(4).reshape(2, 2)})
     frame = _frame()
     root = tmp_path / "session"
 
@@ -194,10 +228,60 @@ async def test_archive_persists_and_verifies_descriptor_identity(tmp_path: Path)
     reader = SessionArchiveReader(root)
     restored_descriptor = reader.descriptor("eeg")
     restored_frame = list(reader.iter_frames("eeg"))[0]
+    assert reader.schema_version == ARCHIVE_SCHEMA_VERSION == 2
+    assert reader.descriptor_integrity == "sha256-bound"
     assert restored_descriptor.fingerprint() == descriptor.fingerprint()
     assert not restored_frame.data.flags.writeable
     np.testing.assert_array_equal(restored_frame.data, frame.data)
     assert restored_frame.timestamp_ns == frame.timestamp_ns
+
+
+def _downgrade_archive_to_legacy_v1(root: Path) -> None:
+    manifest_path = root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = 1
+    for stream in manifest["streams"].values():
+        stream.pop("descriptor_fingerprint_sha256", None)
+        stream["descriptor"].pop("fingerprint_sha256", None)
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    descriptor_path = root / "streams" / "eeg" / "descriptor.json"
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    descriptor.pop("fingerprint_sha256", None)
+    descriptor_path.write_text(json.dumps(descriptor, sort_keys=True), encoding="utf-8")
+
+
+def test_archive_v2_descriptor_tampering_is_detected(tmp_path: Path):
+    root = tmp_path / "session"
+    writer = SessionArchiveWriter(root, session_id="tamper")
+    writer.register_stream(_descriptor())
+
+    descriptor_path = root / "streams" / "eeg" / "descriptor.json"
+    encoded = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    encoded["sample_rate_hz"] = 200.0
+    descriptor_path.write_text(json.dumps(encoded), encoding="utf-8")
+
+    reader = SessionArchiveReader(root)
+    with pytest.raises(IOError, match="fingerprint mismatch"):
+        reader.descriptor("eeg")
+
+
+@pytest.mark.asyncio
+async def test_archive_v1_remains_readable_without_claiming_v2_integrity(tmp_path: Path):
+    root = tmp_path / "legacy"
+    writer = SessionArchiveWriter(root, session_id="legacy")
+    writer.register_stream(_descriptor())
+    await writer.write(_frame())
+    await writer.close()
+    _downgrade_archive_to_legacy_v1(root)
+
+    reader = SessionArchiveReader(root)
+    assert reader.schema_version == 1
+    assert reader.descriptor_integrity == "legacy-unbound"
+    assert len(list(reader.iter_frames("eeg"))) == 1
+    summary = reader.summary()
+    assert summary["schema_version"] == 1
+    assert summary["descriptor_integrity"] == "legacy-unbound"
 
 
 @pytest.mark.asyncio
