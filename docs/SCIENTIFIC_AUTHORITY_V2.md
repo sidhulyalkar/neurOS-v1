@@ -6,17 +6,40 @@ The core invariant is:
 
 > A promoted comparison must make it mechanically difficult to consume observations outside the declared authority and mechanically obvious when a pretrained model has already seen the evaluation domain.
 
-## What it governs
+The implementation is split into focused modules under `orion.scientific` for lineage, observation/preprocessing authority, evaluation/inference authority, study claims, and longitudinal integration. `orion.scientific_authority` remains a compatibility facade.
 
-### Dataset and model lineage
+## Scientific identity
 
-`DatasetLineage` and `ModelLineage` retain canonical upstream identity, version/revision, content or checkpoint SHA-256 where available, declared parent datasets, participant/session/site/device/run identity availability, preprocessing/input assumptions, licensing/citation provenance, and an explicit lineage-completeness state.
+Promoted scientific identities are full 64-character SHA-256 digests. Sixteen-character fingerprints are display conveniences only.
 
-Scientific identities are full 64-character SHA-256 digests. Sixteen-character fingerprints are display conveniences only.
+A short fingerprint may appear in a table or UI, but it is not sufficient durable identity for a dataset lineage, model lineage, observation authority, fitted preprocessing state, result set, or study.
+
+## Dataset and model lineage
+
+`DatasetLineage` retains:
+
+- canonical dataset ID and upstream source;
+- version/revision;
+- content SHA-256 where available;
+- parent dataset/domain identities;
+- participant/session/site/device/run identity availability;
+- preprocessing history;
+- sampling/channel assumptions;
+- license/citation provenance;
+- explicit lineage completeness.
+
+`ModelLineage` retains the equivalent model/checkpoint identity plus:
+
+- checkpoint SHA-256 where available;
+- declared pretraining datasets/domains;
+- declared pretraining participant/session/site/device/run identity sets when available;
+- pretraining preprocessing history;
+- model input assumptions;
+- explicit pretraining-lineage completeness.
 
 Unknown lineage is not disjoint lineage.
 
-### Pretraining overlap
+## Pretraining overlap
 
 `audit_pretraining_overlap()` emits exactly one of:
 
@@ -25,9 +48,15 @@ Unknown lineage is not disjoint lineage.
 - `possible_overlap`
 - `unknown_lineage`
 
-The first regression fixture treats BENDR pretraining on TUEG as overlapping TUAB/TUEV when those evaluation datasets declare TUEG ancestry. An overlap does not forbid evaluation. It changes the permitted claim qualification.
+The audit walks transitive dataset ancestry. A checkpoint pretrained on TUEG therefore overlaps an evaluation dataset whose parent or grandparent domain is TUEG.
 
-A model/evaluation claim marked `clean` requires an explicit `disjoint_verified` audit. Known overlap requires `contaminated_pretraining_overlap`. Possible or unknown lineage requires `unknown_pretraining_lineage`.
+If a declared parent dataset cannot be resolved, a complete-looking leaf dataset does not receive `disjoint_verified`; the result is `possible_overlap`.
+
+The audit also checks declared entity identities. If pretraining and evaluation expose an overlapping participant/session/site/device/run identity at the same level, the overlap is machine-visible even when the top-level dataset names differ.
+
+The regression suite treats BENDR pretraining on TUEG as overlapping TUAB/TUEV when those evaluation datasets declare TUEG ancestry. An overlap does not forbid evaluation. It changes the permitted claim qualification.
+
+A model/evaluation claim marked `clean` requires an explicit `disjoint_verified` audit whose full model/dataset lineage SHA-256 values still match the study. A stale or forged audit is rejected. Known overlap requires `contaminated_pretraining_overlap`. Possible or unknown lineage requires `unknown_pretraining_lineage`.
 
 ## Observation roles
 
@@ -56,19 +85,24 @@ The default role policy is intentionally strict:
 | mechanistic discovery | mechanistic-discovery authority only |
 | final assessment | final-assessment authority only |
 
-In particular, final-assessment observations cannot be silently consumed by normalization, source weighting, adaptation, early stopping, model selection, or mechanistic discovery.
+Final-assessment observations therefore cannot be silently consumed by normalization, source weighting, adaptation, early stopping, model selection, or mechanistic discovery.
 
-## Target-observation budget
+The top-level `ScientificStudyAuthority` also verifies that every observation references a dataset lineage actually declared by the study, and that every data-fitted preprocessing transform consumes only observation authorities in the declared study universe.
+
+## Target-observation budget and zero-shot semantics
 
 `TargetObservationBudget` reports labeled and unlabeled information independently:
 
 ```text
 labeled_examples
+labeled_examples_per_class
 unlabeled_examples
 unlabeled_seconds
 ```
 
-Zero labeled calibration is therefore not automatically zero-shot. A method that observes an unlabeled target distribution has a nonzero target-observation budget even when `labeled_examples == 0`.
+Zero labeled calibration is not automatically zero-shot. A method that observes target-session statistics, target covariance, embeddings, moments, or other unlabeled target information has a nonzero target-observation budget even when `labeled_examples == 0`.
+
+A claim explicitly marked `zero_shot_claim=True` must point to a declared target budget with zero labeled examples, zero unlabeled examples, and zero unlabeled seconds. Otherwise study construction fails.
 
 ## Fitted preprocessing
 
@@ -86,7 +120,7 @@ Promoted metrics are immutable `MetricSpec` objects rather than bare strings. A 
 - ID and version;
 - optimization direction;
 - averaging and class semantics;
-- positive class when relevant;
+- positive class where relevant;
 - probability/calibration requirement;
 - estimator implementation and version;
 - aggregation unit;
@@ -94,15 +128,17 @@ Promoted metrics are immutable `MetricSpec` objects rather than bare strings. A 
 - uncertainty/inference method;
 - primary/secondary status.
 
-The failure policy deliberately has no silent `drop` option.
+The failure policy deliberately has no silent `drop` option. Probability-dependent metrics must make their probability/calibration semantics explicit.
+
+A promoted study must declare exactly one primary metric.
 
 ## Repeated measures
 
 `RepeatedMeasuresAuthority` records the deployment hierarchy and inference unit explicitly. The Kumar2024 study should use participant as the independent unit while preserving participant -> session -> run -> trial hierarchy, GR/PAR strata, and target-session structure.
 
-Ninety participant-session cases are not ninety independent participants.
+The declared clustering authority must include the independent experimental unit. Ninety participant-session cases are not ninety independent participants.
 
-## Failure preservation
+## Failure preservation and result evidence
 
 `FailurePreservingResultSet` requires a complete Cartesian product of declared methods and declared cases. Each method/case pair must be represented by an explicit `CaseOutcome`, including:
 
@@ -113,11 +149,15 @@ Ninety participant-session cases are not ninety independent participants.
 - `nonconverged`
 - `unavailable`
 
-A method therefore cannot improve its aggregate by disappearing from difficult cases.
+Successful rows must report the declared metric scorecard. Unknown metric names are rejected. A method therefore cannot improve its aggregate by disappearing from difficult cases or changing its scorecard case by case.
+
+Task-utility claims must cite at least one embedded failure-preserving **result-set SHA-256**. A metric-definition SHA says how the study intended to score; it is not evidence that the model actually achieved a result.
 
 ## Longitudinal #26/#27 integration
 
 `bind_longitudinal_case_authority()` consumes the existing serialized `LongitudinalCaseAuthority` produced by the longitudinal benchmark. It does not regenerate or alter the split.
+
+The bridge derives a full SHA-256 over the exact serialized frozen case authority after removing only derived identity fields. If a future longitudinal authority supplies its own full `authority_sha256`, the bridge verifies it rather than trusting it. The legacy 16-character `authority_fingerprint` is preserved only as display metadata.
 
 For a declared calibration budget it binds:
 
@@ -126,9 +166,13 @@ For a declared calibration budget it binds:
 - `evaluation_indices` -> `final_assessment`;
 - optional separately declared unlabeled target indices -> `unlabeled_target_observation`.
 
-The adapter fails if source/calibration/final sets overlap. It also refuses to use final-assessment rows as unlabeled target observations. This preserves the frozen Kumar2024 protocol while adding information-budget governance.
+Indices must be actual non-negative integers. Floats and booleans are not silently coerced. When `n_samples` is present, every index is range-checked.
 
-## Evidence domains
+Source, labeled calibration, unlabeled target observation, and final assessment must remain disjoint. In particular, the adapter refuses to relabel source-history or final-assessment rows as unlabeled target observations.
+
+This preserves the frozen Kumar2024 protocol while adding full identity and information-budget governance.
+
+## Evidence domains and claim scope
 
 `ScientificStudyAuthority.report()` separates claims into:
 
@@ -143,13 +187,26 @@ Representation similarity is not task utility. Task utility is not mechanism evi
 
 This separation is intentional and should remain visible in Studio/Evidence rather than collapsed into one generic confidence score.
 
+## Structural immutability
+
+Scientific authorities detach caller-owned sequences and recursively freeze provenance mappings where they cross the authority boundary. The top-level study stores target budgets as a read-only mapping. A study identity must not change because a caller still holds a mutable alias.
+
 ## Example
 
 ```bash
 python examples/orion/scientific_authority_v2.py
 ```
 
-The example emits deterministic `orion.scientific_authority.v2` JSON with a full study SHA-256 and display fingerprint.
+The example emits deterministic `orion.scientific_authority.v2` JSON with:
+
+- full study SHA-256;
+- display fingerprint;
+- explicit zero-target information budget;
+- failure-preserving result-set SHA-256;
+- overlap status;
+- separated evidence domains and claim scope.
+
+The example's numeric score is a deterministic report-shape fixture, not real-data evidence.
 
 ## Evidence boundary
 
