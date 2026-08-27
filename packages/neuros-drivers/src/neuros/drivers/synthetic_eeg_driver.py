@@ -3,15 +3,21 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Sequence
 
 import numpy as np
 
 from neuros.contracts import ClockDomain, StreamDescriptor
 from neuros.drivers.base_driver import BaseDriver
-from neuros.drivers.synthetic_eeg import ArtifactKind, SyntheticEEGConfig, SyntheticEEGGenerator
+from neuros.drivers.synthetic_eeg import (
+    ArtifactEvent,
+    ArtifactKind,
+    SyntheticEEGConfig,
+    SyntheticEEGGenerator,
+)
 
-SYNTHETIC_EEG_GENERATOR_CONTRACT = "neuros.synthetic_eeg.v2"
+SYNTHETIC_EEG_GENERATOR_CONTRACT = "neuros.synthetic_eeg.v3"
+SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT = "neuros.synthetic_eeg.artifact_schedule.v1"
 
 
 class SyntheticEEGDriver(BaseDriver):
@@ -48,10 +54,16 @@ class SyntheticEEGDriver(BaseDriver):
                 "synthetic": True,
                 "units": "microvolts",
                 "generator": SYNTHETIC_EEG_GENERATOR_CONTRACT,
+                "artifact_scheduler": SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT,
+                # Artifact/control schedules are dynamic experiment inputs and
+                # are intentionally not implied by this static stream descriptor.
+                # Recorded samples remain replay authority; scenario manifests
+                # should persist dynamic schedules separately when regeneration
+                # rather than replay is required.
+                "artifact_schedule_in_descriptor": False,
                 # Persist the stochastic-world inputs beside the stream identity.
-                # Recorded samples remain the replay authority, but a seed without
-                # these parameters or a generator contract is not sufficient to
-                # reconstruct the same synthetic world across software revisions.
+                # A seed without these parameters or a generator contract is not
+                # sufficient to reconstruct the same world across revisions.
                 "generator_config": {
                     "sampling_rate_hz": float(config.sampling_rate_hz),
                     "channel_names": list(config.channel_names),
@@ -76,6 +88,36 @@ class SyntheticEEGDriver(BaseDriver):
         severity: float = 1.0,
     ) -> None:
         self.generator.inject_artifact(kind, duration_seconds, severity)
+
+    def schedule_artifact(
+        self,
+        kind: ArtifactKind,
+        *,
+        event_id: str,
+        duration_seconds: float = 0.35,
+        severity: float = 1.0,
+        start_sample: int | None = None,
+        delay_seconds: float = 0.0,
+        channels: str | int | Sequence[str | int] | None = None,
+        seed: int | None = None,
+    ) -> ArtifactEvent:
+        return self.generator.schedule_artifact(
+            kind,
+            event_id=event_id,
+            duration_seconds=duration_seconds,
+            severity=severity,
+            start_sample=start_sample,
+            delay_seconds=delay_seconds,
+            channels=channels,
+            seed=seed,
+        )
+
+    def cancel_artifact(self, event_id: str) -> bool:
+        return self.generator.cancel_artifact(event_id)
+
+    @property
+    def scheduled_artifacts(self) -> tuple[ArtifactEvent, ...]:
+        return self.generator.scheduled_artifacts
 
     def set_channel_gain(self, channel: str | int, gain: float) -> None:
         self.generator.set_channel_gain(channel, gain)
