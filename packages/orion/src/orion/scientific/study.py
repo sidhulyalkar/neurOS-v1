@@ -18,7 +18,12 @@ from .common import (
     thaw_json,
 )
 from .evaluation import FailurePreservingResultSet, MetricSpec, RepeatedMeasuresAuthority
-from .lineage import DatasetLineage, ModelLineage, PretrainingOverlapAudit
+from .lineage import (
+    DatasetLineage,
+    ModelLineage,
+    PretrainingOverlapAudit,
+    audit_pretraining_overlap,
+)
 from .observations import ObservationSetAuthority, PreprocessingFitAuthority, TargetObservationBudget
 
 
@@ -39,6 +44,10 @@ class EvidenceClaim:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("EvidenceClaim schema_version must be 2")
+        if not isinstance(self.domain, EvidenceDomain):
+            raise TypeError("domain must be EvidenceDomain")
+        if not isinstance(self.qualification, ClaimQualification):
+            raise TypeError("qualification must be ClaimQualification")
         object.__setattr__(self, "claim_id", nonempty("claim_id", self.claim_id))
         object.__setattr__(self, "scope", nonempty("scope", self.scope))
         shas = tuple(require_sha256("evidence SHA-256", value) for value in self.evidence_sha256s)
@@ -182,6 +191,22 @@ class ScientificStudyAuthority:
             if audit.evaluation_dataset_lineage_sha256 != dataset.lineage_sha256:
                 raise ValueError("overlap audit dataset lineage SHA-256 is stale or forged")
 
+            # Do not trust the supplied verdict merely because its lineage SHAs
+            # are current. Recompute from the study's own embedded lineage graph.
+            expected = audit_pretraining_overlap(
+                model,
+                dataset,
+                known_datasets=datasets,
+            )
+            if (
+                audit.status is not expected.status
+                or audit.matched_dataset_ids != expected.matched_dataset_ids
+                or audit.matched_identity_levels != expected.matched_identity_levels
+            ):
+                raise ValueError(
+                    "overlap audit verdict does not match independently recomputed study lineage"
+                )
+
         for result in result_sets_tuple:
             result.require_metric_specs(metrics_tuple)
         result_shas = {item.result_sha256 for item in result_sets_tuple}
@@ -211,11 +236,7 @@ class ScientificStudyAuthority:
                 budget = budgets.get(claim.target_budget_id)
                 if budget is None:
                     raise ValueError("zero-shot claim references an unknown target budget")
-                if (
-                    budget.labeled_examples != 0
-                    or budget.unlabeled_examples != 0
-                    or (budget.unlabeled_seconds or 0.0) != 0.0
-                ):
+                if budget.has_target_information:
                     raise ValueError(
                         "zero-shot claim is invalid because target information budget is nonzero"
                     )
