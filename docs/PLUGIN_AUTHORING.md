@@ -123,6 +123,16 @@ Prefer this order:
 
 Keep vendor SDKs, large ML frameworks, and optional scientific stacks in plugin-specific dependencies or extras. `neuros-core` should never need a new concrete hardware/model dependency merely because one external plugin uses it.
 
+## Namespace and file ownership
+
+An external plugin does **not** need to place its code inside the `neuros` namespace. A normal top-level package such as `my_neuros_plugin` plus neurOS entry points is usually the safest design.
+
+If a package deliberately contributes a `neuros.<submodule>` namespace portion, use PEP 420 implicit namespaces and do not ship `neuros/__init__.py`. The public `neuros` SDK is the sole owner of that root initializer because it defines the documented top-level API.
+
+More generally, two Python distributions must not own the same installed file. Package managers track files per distribution, so an overlapping path can be overwritten by install order and deleted when either distribution is uninstalled. neurOS release qualification scans built wheel payloads and fails on cross-distribution ownership collisions.
+
+Entry points are therefore preferred over placing plugin implementation inside neurOS-owned package paths. They keep implementation ownership obvious while preserving runtime discovery.
+
 ## Compatibility contract
 
 For each release of an external plugin:

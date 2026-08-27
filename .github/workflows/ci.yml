@@ -45,6 +45,37 @@ jobs:
             python -m build --wheel --outdir "${DIST}" "${package}"
           done
           test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq "${#PACKAGES[@]}"
+      - name: Enforce wheel ownership and component namespace
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-wheels"
+          python scripts/check_wheel_ownership.py "${DIST}" \
+            --output "${RUNNER_TEMP}/wheel-ownership.json"
+
+          ENV="${RUNNER_TEMP}/component-namespace-ci"
+          python -m venv "${ENV}"
+          PY="${ENV}/bin/python"
+          "${PY}" -m pip install --upgrade pip
+          CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
+          test -n "${CORE_WHEEL}"
+          test -n "${DRIVERS_WHEEL}"
+          test -n "${MODELS_WHEEL}"
+          "${PY}" -m pip install "${CORE_WHEEL}" "${DRIVERS_WHEEL}" "${MODELS_WHEEL}"
+          "${PY}" -m pip check
+          "${PY}" - <<'PY'
+          import neuros
+          import neuros.contracts
+          import neuros.drivers
+          import neuros.models
+          import neuros.runtime
+
+          if getattr(neuros, "__file__", None) is not None:
+              raise SystemExit(
+                  f"component-only neuros must be an implicit namespace; got {neuros.__file__}"
+              )
+          PY
 
   kernel-contracts:
     name: Kernel contracts / Python ${{ matrix.python-version }}

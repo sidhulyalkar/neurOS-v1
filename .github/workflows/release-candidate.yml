@@ -5,10 +5,12 @@ on:
     paths:
       - ".github/workflows/release-candidate.yml"
       - "packages/*/pyproject.toml"
+      - "packages/*/src/neuros/__init__.py"
       - "CITATION.cff"
       - "docs/RELEASE_POLICY.md"
       - "docs/SCIENTIFIC_CLAIMS.md"
       - "scripts/check_public_contracts.py"
+      - "scripts/check_wheel_ownership.py"
       - "scripts/list_workspace_packages.py"
       - "mkdocs.yml"
   workflow_dispatch:
@@ -56,6 +58,38 @@ jobs:
           done
           test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq "${#PACKAGES[@]}"
           python -m twine check "${DIST}"/*.whl
+          python scripts/check_wheel_ownership.py "${DIST}" \
+            --output "${DIST}/wheel-ownership.json"
+      - name: Prove component namespace without the SDK
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-release"
+          ENV="${RUNNER_TEMP}/component-namespace-smoke"
+          python -m venv "${ENV}"
+          PY="${ENV}/bin/python"
+          "${PY}" -m pip install --upgrade pip
+          CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
+          test -n "${CORE_WHEEL}"
+          test -n "${DRIVERS_WHEEL}"
+          test -n "${MODELS_WHEEL}"
+          "${PY}" -m pip install "${CORE_WHEEL}" "${DRIVERS_WHEEL}" "${MODELS_WHEEL}"
+          "${PY}" -m pip check
+          "${PY}" - <<'PY'
+          import neuros
+          import neuros.contracts
+          import neuros.drivers
+          import neuros.models
+          import neuros.runtime
+
+          if getattr(neuros, "__file__", None) is not None:
+              raise SystemExit(
+                  f"component-only neuros must be an implicit namespace; got {neuros.__file__}"
+              )
+          if not neuros.__spec__ or not neuros.__spec__.submodule_search_locations:
+              raise SystemExit("component-only neuros namespace has no search locations")
+          PY
       - name: Generate component and checksum manifests
         run: |
           set -euo pipefail
@@ -99,19 +133,36 @@ jobs:
               raise SystemExit(f"expected {expected_count} wheels, found {len(artifacts)}")
           if len({item["name"] for item in artifacts}) != expected_count:
               raise SystemExit("release contains duplicate distribution names")
+
+          ownership_path = dist / "wheel-ownership.json"
+          if not ownership_path.is_file():
+              raise SystemExit("wheel ownership manifest is missing")
+          ownership_payload = json.loads(ownership_path.read_text(encoding="utf-8"))
+          if ownership_payload.get("schema") != "neuros.wheel_ownership.v1":
+              raise SystemExit("unexpected wheel ownership schema")
+          if ownership_payload.get("status") != "pass":
+              raise SystemExit("wheel ownership manifest is not passing")
+          ownership_sha = hashlib.sha256(ownership_path.read_bytes()).hexdigest()
+
           manifest = {
               "schema_version": 1,
               "git_sha": os.environ["GITHUB_SHA"],
               "git_ref": os.environ["GITHUB_REF"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
+              "wheel_ownership": {
+                  "file": ownership_path.name,
+                  "sha256": ownership_sha,
+                  "schema": ownership_payload["schema"],
+              },
           }
           (dist / "release-manifest.json").write_text(
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
           (dist / "SHA256SUMS").write_text(
-              "".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts),
+              "".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts)
+              + f"{ownership_sha}  {ownership_path.name}\n",
               encoding="utf-8",
           )
           PY
@@ -152,6 +203,16 @@ jobs:
             "${SDK_WHEEL}" \
             "${ARENA_WHEEL}"
           "${PY}" -m pip check
+          "${PY}" - <<'PY'
+          import neuros
+
+          required = {"SignalFrame", "Pipeline", "BaseDriver", "BaseModel", "load_plugin"}
+          missing = sorted(name for name in required if not hasattr(neuros, name))
+          if missing:
+              raise SystemExit(f"public neuros SDK root is missing exports: {missing}")
+          if not getattr(neuros, "__file__", None):
+              raise SystemExit("public neuros SDK must own the root package initializer")
+          PY
           "${NEUROS}" doctor --json
           "${NEUROS}" compatibility --json
           "${ARENA}" --preset dual-target-smoke --output "${RUNNER_TEMP}/arena-wheel-smoke.json"
@@ -164,6 +225,7 @@ jobs:
             ${{ runner.temp }}/neuros-release/*.whl
             ${{ runner.temp }}/neuros-release/SHA256SUMS
             ${{ runner.temp }}/neuros-release/release-manifest.json
+            ${{ runner.temp }}/neuros-release/wheel-ownership.json
           if-no-files-found: error
           retention-days: 30
 

@@ -1,0 +1,136 @@
+name: Packaging Uninstall Contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/packaging-uninstall.yml"
+      - ".github/workflows/release-candidate.yml"
+      - "packages/neuros/pyproject.toml"
+      - "packages/neuros-core/pyproject.toml"
+      - "packages/neuros-drivers/pyproject.toml"
+      - "packages/neuros-models/pyproject.toml"
+      - "packages/neuros-cloud/pyproject.toml"
+      - "packages/*/src/neuros/__init__.py"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/packaging-uninstall.yml"
+      - ".github/workflows/release-candidate.yml"
+      - "packages/neuros/pyproject.toml"
+      - "packages/neuros-core/pyproject.toml"
+      - "packages/neuros-drivers/pyproject.toml"
+      - "packages/neuros-models/pyproject.toml"
+      - "packages/neuros-cloud/pyproject.toml"
+      - "packages/*/src/neuros/__init__.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-uninstall-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  optional-leaf-uninstall-survival:
+    name: Optional leaf uninstall preserves SDK root
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Build exact wheel set
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          DIST="${RUNNER_TEMP}/uninstall-wheels"
+          mkdir -p "${DIST}"
+          for package in \
+            packages/neuros-core \
+            packages/neuros-drivers \
+            packages/neuros-models \
+            packages/neuros \
+            packages/neuros-cloud
+          do
+            python -m build --wheel --outdir "${DIST}" "${package}"
+          done
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq 5
+      - name: Install SDK from exact local wheels
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/uninstall-wheels"
+          ENV="${RUNNER_TEMP}/uninstall-smoke"
+          python -m venv "${ENV}"
+          PY="${ENV}/bin/python"
+          "${PY}" -m pip install --upgrade pip
+
+          CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
+          DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
+          MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
+          SDK_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
+          test -n "${CORE_WHEEL}"
+          test -n "${DRIVERS_WHEEL}"
+          test -n "${MODELS_WHEEL}"
+          test -n "${SDK_WHEEL}"
+
+          "${PY}" -m pip install \
+            "${CORE_WHEEL}" \
+            "${DRIVERS_WHEEL}" \
+            "${MODELS_WHEEL}" \
+            "${SDK_WHEEL}"
+          "${PY}" -m pip check
+      - name: Prove optional leaf uninstall cannot delete SDK-owned files
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/uninstall-wheels"
+          PY="${RUNNER_TEMP}/uninstall-smoke/bin/python"
+          CLOUD_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_cloud-*.whl' -print -quit)"
+          test -n "${CLOUD_WHEEL}"
+
+          SDK_ROOT="$("${PY}" -c 'import pathlib, neuros; print(pathlib.Path(neuros.__file__).resolve())')"
+          test -f "${SDK_ROOT}"
+          BEFORE="$(sha256sum "${SDK_ROOT}" | awk '{print $1}')"
+
+          "${PY}" -m pip install --no-deps "${CLOUD_WHEEL}"
+          "${PY}" -m pip show neuros-cloud >/dev/null
+          test "$(sha256sum "${SDK_ROOT}" | awk '{print $1}')" = "${BEFORE}"
+          "${PY}" - <<'PY'
+          import neuros
+          import neuros.cloud
+
+          required = {"SignalFrame", "Pipeline", "BaseDriver", "BaseModel", "load_plugin"}
+          missing = sorted(name for name in required if not hasattr(neuros, name))
+          if missing:
+              raise SystemExit(f"SDK root lost exports after optional leaf install: {missing}")
+          PY
+
+          "${PY}" -m pip uninstall -y neuros-cloud
+          if "${PY}" -m pip show neuros-cloud >/dev/null 2>&1; then
+              echo "neuros-cloud still registered after uninstall" >&2
+              exit 1
+          fi
+
+          test -f "${SDK_ROOT}"
+          AFTER="$(sha256sum "${SDK_ROOT}" | awk '{print $1}')"
+          test "${AFTER}" = "${BEFORE}"
+          "${PY}" -m pip check
+          "${PY}" - <<'PY'
+          import importlib.util
+          import pathlib
+          import neuros
+          import neuros.contracts
+          import neuros.drivers
+          import neuros.models
+          import neuros.runtime
+
+          required = {"SignalFrame", "Pipeline", "BaseDriver", "BaseModel", "load_plugin"}
+          missing = sorted(name for name in required if not hasattr(neuros, name))
+          if missing:
+              raise SystemExit(f"SDK root lost exports after optional leaf uninstall: {missing}")
+          if not neuros.__file__ or not pathlib.Path(neuros.__file__).is_file():
+              raise SystemExit("SDK root initializer disappeared after optional leaf uninstall")
+          if importlib.util.find_spec("neuros.cloud") is not None:
+              raise SystemExit("neuros.cloud remains importable after neuros-cloud uninstall")
+          PY
