@@ -39,6 +39,9 @@ def _ref_name(value: str) -> str:
 
 
 def _strict_ref_payload(path: Path) -> Mapping[str, Any]:
+    if path.is_symlink():
+        raise ValueError("artifact refs cannot be symbolic links")
+
     def pairs(values: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
         for key, value in values:
@@ -64,17 +67,21 @@ class ModelArtifactStore:
     """Immutable artifact objects with atomic mutable references.
 
     Artifacts are stored under ``artifacts/<artifact_sha256>`` and never
-    overwritten. A reference such as ``active`` is a tiny JSON pointer that can
-    move between existing artifacts. Rollback therefore mutates only the
-    pointer, never model bytes or provenance.
+    overwritten through this API. A reference such as ``active`` is a tiny JSON
+    pointer that can move between existing artifacts. Rollback therefore mutates
+    only the pointer, never model bytes or provenance.
     """
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
+        if self.root.exists() and self.root.is_symlink():
+            raise ValueError("artifact store root cannot be a symbolic link")
         self.artifacts_dir = self.root / "artifacts"
         self.refs_dir = self.root / "refs"
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.refs_dir.mkdir(parents=True, exist_ok=True)
+        if self.artifacts_dir.is_symlink() or self.refs_dir.is_symlink():
+            raise ValueError("artifact store authority directories cannot be symbolic links")
 
     def artifact_path(self, artifact_sha256: str) -> Path:
         return self.artifacts_dir / _sha256(artifact_sha256)
@@ -85,6 +92,8 @@ class ModelArtifactStore:
         source_path = Path(source)
         manifest = verify_model_artifact(source_path)
         destination = self.artifact_path(manifest.artifact_sha256)
+        if destination.is_symlink():
+            raise ValueError("content-addressed artifact destination cannot be a symbolic link")
         if destination.exists():
             existing = verify_model_artifact(destination)
             if existing.artifact_sha256 != manifest.artifact_sha256:
@@ -96,10 +105,7 @@ class ModelArtifactStore:
         )
         try:
             shutil.copy2(source_path / "manifest.json", temporary / "manifest.json")
-            shutil.copy2(
-                source_path / "weights.safetensors",
-                temporary / "weights.safetensors",
-            )
+            shutil.copy2(source_path / "weights.safetensors", temporary / "weights.safetensors")
             staged = verify_model_artifact(temporary)
             if staged.artifact_sha256 != manifest.artifact_sha256:
                 raise ValueError("staged artifact identity changed during publication")
@@ -108,6 +114,10 @@ class ModelArtifactStore:
                 temporary = None
             except OSError:
                 # A concurrent publisher may have won the same content address.
+                if destination.is_symlink():
+                    raise ValueError(
+                        "content-addressed artifact destination became a symbolic link"
+                    )
                 if not destination.exists():
                     raise
                 existing = verify_model_artifact(destination)
@@ -125,11 +135,18 @@ class ModelArtifactStore:
 
         name = _ref_name(ref)
         sha = _sha256(artifact_sha256)
-        manifest = verify_model_artifact(self.artifact_path(sha))
+        artifact_path = self.artifact_path(sha)
+        if artifact_path.is_symlink():
+            raise ValueError("artifact content addresses cannot resolve through symbolic links")
+        manifest = verify_model_artifact(artifact_path)
         if manifest.artifact_sha256 != sha:
             raise ValueError("artifact directory identity does not match requested SHA")
 
         target = self.refs_dir / f"{name}.json"
+        if target.is_symlink():
+            # os.replace would replace the link rather than follow it, but fail
+            # closed so the store never silently normalizes a tampered ref.
+            raise ValueError("artifact refs cannot be symbolic links")
         fd, temporary_name = tempfile.mkstemp(
             prefix=f".{name}.", suffix=".tmp", dir=str(self.refs_dir)
         )
@@ -167,6 +184,8 @@ class ModelArtifactStore:
         else:
             name = _ref_name(ref_or_sha256)
             ref_path = self.refs_dir / f"{name}.json"
+            if ref_path.is_symlink():
+                raise ValueError("artifact refs cannot be symbolic links")
             if not ref_path.is_file():
                 raise FileNotFoundError(f"artifact ref not found: {name}")
             payload = _strict_ref_payload(ref_path)
@@ -175,6 +194,8 @@ class ModelArtifactStore:
             sha = _sha256(payload["artifact_sha256"])
 
         path = self.artifact_path(sha)
+        if path.is_symlink():
+            raise ValueError("artifact content addresses cannot resolve through symbolic links")
         manifest = verify_model_artifact(path)
         if manifest.artifact_sha256 != sha:
             raise ValueError("resolved artifact content does not match its content address")
@@ -190,6 +211,8 @@ class ModelArtifactStore:
     def list_artifacts(self) -> tuple[str, ...]:
         values: list[str] = []
         for entry in self.artifacts_dir.iterdir():
+            if entry.is_symlink():
+                raise ValueError("artifact store cannot contain symbolic-link entries")
             if entry.is_dir() and _SHA256_RE.fullmatch(entry.name):
                 manifest = verify_model_artifact(entry)
                 if manifest.artifact_sha256 != entry.name:
