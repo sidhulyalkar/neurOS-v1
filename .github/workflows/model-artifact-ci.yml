@@ -43,7 +43,8 @@ jobs:
         run: |
           pytest -q \
             packages/neuros-models/tests/test_model_artifact_v1.py \
-            packages/neuros-models/tests/test_model_artifact_store.py
+            packages/neuros-models/tests/test_model_artifact_store.py \
+            packages/neuros-models/tests/test_model_artifact_security.py
       - name: Prove promoted loader has no pickle execution path
         run: |
           python - <<'PY'
@@ -93,4 +94,5 @@ jobs:
           "${PY}" -m pip check
           "${PY}" -m pytest -q \
             packages/neuros-models/tests/test_model_artifact_v1.py \
-            packages/neuros-models/tests/test_model_artifact_store.py
+            packages/neuros-models/tests/test_model_artifact_store.py \
+            packages/neuros-models/tests/test_model_artifact_security.py
