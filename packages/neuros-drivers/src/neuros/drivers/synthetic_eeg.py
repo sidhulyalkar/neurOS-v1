@@ -15,6 +15,11 @@ The source-level ``saturation`` and ``dropout`` artifact names are retained for
 backward compatibility as synthetic stress conveniences. They are not claims
 about physical Unicorn amplifier saturation or transport loss; device clipping
 and transport semantics belong to the Unicorn/device layer.
+
+Every declared oscillatory component must also be representable at the configured
+sample rate. The generator fails closed instead of silently aliasing alpha, SSVEP
+fundamental/harmonic, or fixed artifact carrier frequencies into a different
+synthetic cause.
 """
 from __future__ import annotations
 
@@ -28,6 +33,11 @@ ArtifactKind = Literal["blink", "jaw", "controller", "motion", "saturation", "dr
 SUPPORTED_ARTIFACTS = frozenset(
     {"blink", "jaw", "controller", "motion", "saturation", "dropout"}
 )
+_ARTIFACT_MAX_FREQUENCY_HZ: dict[ArtifactKind, float] = {
+    "jaw": 71.0,
+    "controller": 46.0,
+    "motion": 2.2,
+}
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,12 @@ class SyntheticEEGConfig:
             raise ValueError("noise amplitudes must be non-negative")
         if self.alpha_frequency_hz <= 0 or self.alpha_amplitude_uv < 0:
             raise ValueError("alpha parameters must be positive/non-negative")
+        nyquist_hz = 0.5 * float(self.sampling_rate_hz)
+        if self.alpha_frequency_hz >= nyquist_hz:
+            raise ValueError(
+                "alpha_frequency_hz must be strictly below the configured Nyquist frequency "
+                f"({nyquist_hz:g} Hz)"
+            )
         if self.ssvep_amplitude_uv < 0:
             raise ValueError("ssvep_amplitude_uv must be non-negative")
         if not 0 <= self.first_harmonic_ratio <= 2:
@@ -166,6 +182,18 @@ class SyntheticEEGGenerator:
             raise ValueError(f"{name} must be an integer")
         return int(value)
 
+    @property
+    def nyquist_hz(self) -> float:
+        return 0.5 * float(self.config.sampling_rate_hz)
+
+    def _require_representable_frequency(self, frequency_hz: float, *, component: str) -> None:
+        if frequency_hz >= self.nyquist_hz:
+            raise ValueError(
+                f"{component} frequency {frequency_hz:g} Hz must be strictly below the "
+                f"configured Nyquist frequency ({self.nyquist_hz:g} Hz); refusing to "
+                "silently alias the declared synthetic component"
+            )
+
     def _channel_index(self, channel: str | int) -> int:
         if isinstance(channel, str):
             try:
@@ -188,6 +216,12 @@ class SyntheticEEGGenerator:
             raise ValueError("frequency_hz must be positive and finite")
         if not np.isfinite(gain_value):
             raise ValueError("gain must be finite")
+        self._require_representable_frequency(frequency, component="SSVEP fundamental")
+        if self.config.first_harmonic_ratio > 0:
+            self._require_representable_frequency(
+                2.0 * frequency,
+                component="SSVEP first harmonic",
+            )
         self.target_frequency_hz = frequency
         self.attention_gain = float(np.clip(gain_value, 0.0, 1.5))
 
@@ -262,6 +296,12 @@ class SyntheticEEGGenerator:
 
         if kind not in SUPPORTED_ARTIFACTS:
             raise ValueError(f"unsupported artifact kind: {kind}")
+        max_frequency_hz = _ARTIFACT_MAX_FREQUENCY_HZ.get(kind)
+        if max_frequency_hz is not None:
+            self._require_representable_frequency(
+                max_frequency_hz,
+                component=f"{kind} artifact carrier",
+            )
         if not isinstance(event_id, str) or not event_id.strip():
             raise ValueError("event_id must be a non-empty string")
         if not np.isfinite(duration_seconds) or duration_seconds <= 0:
@@ -540,11 +580,14 @@ class SyntheticEEGGenerator:
             fundamental = np.sin(
                 2 * np.pi * frequency * time_s[None, :] + self._phase[:, None]
             )
-            harmonic = np.sin(
-                2 * np.pi * 2 * frequency * time_s[None, :]
-                + 0.5 * self._phase[:, None]
-            )
-            ssvep = fundamental + self.config.first_harmonic_ratio * harmonic
+            if self.config.first_harmonic_ratio > 0:
+                harmonic = np.sin(
+                    2 * np.pi * 2 * frequency * time_s[None, :]
+                    + 0.5 * self._phase[:, None]
+                )
+                ssvep = fundamental + self.config.first_harmonic_ratio * harmonic
+            else:
+                ssvep = fundamental
             data += (
                 self.posterior_weights[:, None]
                 * self.config.ssvep_amplitude_uv
