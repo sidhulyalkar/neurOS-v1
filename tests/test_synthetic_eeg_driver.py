@@ -346,7 +346,15 @@ def test_driver_exposes_versioned_replay_configuration():
     assert descriptor.metadata["artifact_scheduler"] == SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT
     assert descriptor.metadata["artifact_scheduler"] == "neuros.synthetic_eeg.artifact_schedule.v1"
     assert descriptor.metadata["artifact_schedule_in_descriptor"] is False
-    assert descriptor.metadata["generator_config"] == _expected_generator_config()
+
+    generator_config = descriptor.metadata["generator_config"]
+    expected = _expected_generator_config()
+    assert generator_config["channel_names"] == tuple(expected["channel_names"])
+    for key, value in expected.items():
+        if key != "channel_names":
+            assert generator_config[key] == value
+    with pytest.raises(TypeError):
+        generator_config["seed"] = 42
 
 
 def test_driver_exposes_composable_scheduler_without_bypassing_generator_contract():

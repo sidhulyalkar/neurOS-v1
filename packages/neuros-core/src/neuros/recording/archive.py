@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import os
 import platform
 import subprocess
@@ -16,10 +17,18 @@ from typing import Any, AsyncIterator, Iterable, Mapping
 
 import numpy as np
 
-from neuros.contracts import ClockDomain, QualityFlag, SignalFrame, StreamDescriptor
+from neuros.contracts import (
+    ClockDomain,
+    QualityFlag,
+    SignalFrame,
+    StreamDescriptor,
+    frame_channel_count,
+    validate_frame_against_descriptor,
+)
 
 
-ARCHIVE_SCHEMA_VERSION = 1
+ARCHIVE_SCHEMA_VERSION = 2
+SUPPORTED_ARCHIVE_SCHEMA_VERSIONS = frozenset({1, ARCHIVE_SCHEMA_VERSION})
 
 
 def _jsonable(value: Any) -> Any:
@@ -76,10 +85,37 @@ def _descriptor_to_dict(descriptor: StreamDescriptor) -> dict[str, Any]:
         "manufacturer": descriptor.manufacturer,
         "clock_domain": descriptor.clock_domain.value,
         "metadata": _jsonable(dict(descriptor.metadata)),
+        "fingerprint_sha256": descriptor.fingerprint(),
     }
 
 
-def _descriptor_from_dict(raw: Mapping[str, Any]) -> StreamDescriptor:
+def _descriptor_from_dict(
+    raw: Mapping[str, Any],
+    *,
+    require_fingerprint: bool = False,
+) -> StreamDescriptor:
+    if require_fingerprint:
+        expected = raw.get("fingerprint_sha256")
+        if not isinstance(expected, str):
+            raise IOError("Archive v2 StreamDescriptor requires string fingerprint_sha256")
+        descriptor = StreamDescriptor(
+            stream_id=raw["stream_id"],
+            modality=raw["modality"],
+            sample_rate_hz=raw["sample_rate_hz"],
+            channel_names=tuple(raw.get("channel_names", [])),
+            channel_types=tuple(raw.get("channel_types", [])),
+            units=tuple(raw.get("units", [])),
+            device=raw.get("device"),
+            manufacturer=raw.get("manufacturer"),
+            clock_domain=ClockDomain(raw.get("clock_domain", ClockDomain.UNKNOWN.value)),
+            metadata=raw.get("metadata", {}),
+        )
+        if expected != descriptor.fingerprint():
+            raise IOError("StreamDescriptor fingerprint mismatch")
+        return descriptor
+
+    # Archive v1 historically decoded these scalar fields permissively. Keep
+    # that read path for compatibility without crediting it with v2 integrity.
     return StreamDescriptor(
         stream_id=str(raw["stream_id"]),
         modality=str(raw["modality"]),
@@ -91,6 +127,62 @@ def _descriptor_from_dict(raw: Mapping[str, Any]) -> StreamDescriptor:
         manufacturer=raw.get("manufacturer"),
         clock_domain=ClockDomain(raw.get("clock_domain", ClockDomain.UNKNOWN.value)),
         metadata=raw.get("metadata", {}),
+    )
+
+
+def _validate_legacy_frame(descriptor: StreamDescriptor, frame: SignalFrame) -> None:
+    """Validate only invariants that archive v1 actually encoded unambiguously."""
+
+    if frame.stream_id != descriptor.stream_id:
+        raise ValueError("SignalFrame stream_id does not match StreamDescriptor")
+    if not math.isclose(
+        frame.sample_rate_hz,
+        descriptor.sample_rate_hz,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError("SignalFrame sample_rate_hz does not match StreamDescriptor")
+    if (
+        descriptor.clock_domain is not ClockDomain.UNKNOWN
+        and frame.clock_domain is not descriptor.clock_domain
+    ):
+        raise ValueError("SignalFrame clock_domain does not match StreamDescriptor")
+
+
+def _frame_from_row(
+    *,
+    stream_id: str,
+    row: Mapping[str, Any],
+    data: np.ndarray,
+    schema_version: int,
+) -> SignalFrame:
+    if schema_version >= 2:
+        return SignalFrame(
+            stream_id=stream_id,
+            sequence_id=row["sequence_id"],
+            data=data,
+            sample_rate_hz=row["sample_rate_hz"],
+            host_receive_time_ns=row["host_receive_time_ns"],
+            device_time_ns=row["device_time_ns"],
+            synchronized_time_ns=row["synchronized_time_ns"],
+            clock_domain=ClockDomain(row["clock_domain"]),
+            quality=row["quality"],
+            metadata=row.get("metadata", {}),
+        )
+
+    return SignalFrame(
+        stream_id=stream_id,
+        sequence_id=int(row["sequence_id"]),
+        data=data,
+        sample_rate_hz=float(row["sample_rate_hz"]),
+        host_receive_time_ns=int(row["host_receive_time_ns"]),
+        device_time_ns=None if row["device_time_ns"] is None else int(row["device_time_ns"]),
+        synchronized_time_ns=None
+        if row["synchronized_time_ns"] is None
+        else int(row["synchronized_time_ns"]),
+        clock_domain=ClockDomain(row["clock_domain"]),
+        quality=QualityFlag(int(row["quality"])),
+        metadata=row.get("metadata", {}),
     )
 
 
@@ -116,10 +208,15 @@ class SessionManifest:
 class SessionArchiveWriter:
     """Append SignalFrames to a lossless, dependency-free directory archive.
 
-    Data arrays are stored as individual NPY payloads so arbitrary frame shapes
-    are preserved. An NDJSON index records every timing/provenance field and a
-    SHA-256 hash of each data payload. This is the canonical replay source; NWB
-    and Zarr are export formats rather than the authority for neurOS semantics.
+    Archive v2 binds every registered stream to a deterministic descriptor
+    fingerprint and validates each frame against that descriptor before bytes
+    are written. The canonical archive therefore cannot silently mix stream
+    IDs, sample rates, asserted clock domains, or channel geometries under one
+    v2 stream identity.
+
+    Data arrays remain individual NPY payloads so exact dtype/shape are
+    preserved. NWB and Zarr remain interoperability exports rather than the
+    authority for exact neurOS replay semantics.
     """
 
     def __init__(
@@ -170,8 +267,10 @@ class SessionArchiveWriter:
         self._write_json_atomic(self.root / "manifest.json", self.manifest.to_dict())
 
     def register_stream(self, descriptor: StreamDescriptor) -> None:
+        if not isinstance(descriptor, StreamDescriptor):
+            raise TypeError("register_stream requires a StreamDescriptor")
         existing = self._descriptors.get(descriptor.stream_id)
-        if existing is not None and existing != descriptor:
+        if existing is not None and existing.fingerprint() != descriptor.fingerprint():
             raise ValueError(f"Conflicting descriptor for stream {descriptor.stream_id}")
         if existing is not None:
             return
@@ -179,12 +278,36 @@ class SessionArchiveWriter:
         self._counts[descriptor.stream_id] = 0
         stream_root = self.root / "streams" / descriptor.stream_id
         (stream_root / "frames").mkdir(parents=True, exist_ok=True)
-        self._write_json_atomic(stream_root / "descriptor.json", _descriptor_to_dict(descriptor))
+        encoded = _descriptor_to_dict(descriptor)
+        self._write_json_atomic(stream_root / "descriptor.json", encoded)
         self.manifest.streams[descriptor.stream_id] = {
-            "descriptor": _descriptor_to_dict(descriptor),
+            "descriptor": encoded,
+            "descriptor_fingerprint_sha256": descriptor.fingerprint(),
             "frame_count": 0,
         }
         self._flush_manifest()
+
+    def _descriptor_from_unregistered_frame(self, item: SignalFrame) -> StreamDescriptor:
+        channels = frame_channel_count(item)
+        metadata_names = tuple(item.metadata.get("channel_names", ()))
+        metadata_types = tuple(item.metadata.get("channel_types", ()))
+        metadata_units = tuple(item.metadata.get("units", ()))
+        if metadata_names and len(metadata_names) != channels:
+            raise ValueError("SignalFrame channel_names do not match its channel axis")
+        if metadata_types and len(metadata_types) != channels:
+            raise ValueError("SignalFrame channel_types do not match its channel axis")
+        if metadata_units and len(metadata_units) != channels:
+            raise ValueError("SignalFrame units do not match its channel axis")
+        return StreamDescriptor(
+            stream_id=item.stream_id,
+            modality=str(item.metadata.get("modality", "unknown")),
+            sample_rate_hz=item.sample_rate_hz,
+            channel_names=metadata_names or tuple(f"ch{i}" for i in range(channels)),
+            channel_types=metadata_types,
+            units=metadata_units,
+            clock_domain=item.clock_domain,
+            metadata={"auto_registered_from_frame": True},
+        )
 
     async def write(self, item: SignalFrame) -> None:
         if self._closed:
@@ -193,23 +316,17 @@ class SessionArchiveWriter:
             raise TypeError("SessionArchiveWriter accepts SignalFrame objects")
         async with self._lock:
             if item.stream_id not in self._descriptors:
-                channels = int(np.asarray(item.data).shape[0]) if np.asarray(item.data).ndim else 1
-                self.register_stream(
-                    StreamDescriptor(
-                        stream_id=item.stream_id,
-                        modality=str(item.metadata.get("modality", "unknown")),
-                        sample_rate_hz=item.sample_rate_hz,
-                        channel_names=tuple(f"ch{i}" for i in range(channels)),
-                        clock_domain=item.clock_domain,
-                    )
-                )
+                self.register_stream(self._descriptor_from_unregistered_frame(item))
+            descriptor = self._descriptors[item.stream_id]
+            validate_frame_against_descriptor(descriptor, item)
+
             index = self._counts[item.stream_id]
             stream_root = self.root / "streams" / item.stream_id
             relative_data = Path("frames") / f"{index:012d}.npy"
             data_path = stream_root / relative_data
             temporary = data_path.with_suffix(".npy.tmp")
             with temporary.open("wb") as handle:
-                np.save(handle, np.asarray(item.data), allow_pickle=False)
+                np.save(handle, item.data, allow_pickle=False)
                 handle.flush()
                 os.fsync(handle.fileno())
             temporary.replace(data_path)
@@ -248,26 +365,35 @@ class SessionArchiveReader:
     def __init__(self, root: str | Path, *, verify_hashes: bool = True) -> None:
         self.root = Path(root)
         raw = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
-        if int(raw.get("schema_version", -1)) != ARCHIVE_SCHEMA_VERSION:
-            raise ValueError("Unsupported neurOS archive schema")
+        schema_version = raw.get("schema_version")
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+            raise ValueError("neurOS archive schema_version must be an integer")
+        if schema_version not in SUPPORTED_ARCHIVE_SCHEMA_VERSIONS:
+            raise ValueError(f"Unsupported neurOS archive schema: {schema_version}")
         self.manifest = raw
+        self.schema_version = schema_version
         self.verify_hashes = verify_hashes
 
     @property
     def stream_ids(self) -> tuple[str, ...]:
         return tuple(self.manifest.get("streams", {}).keys())
 
+    @property
+    def descriptor_integrity(self) -> str:
+        return "sha256-bound" if self.schema_version >= 2 else "legacy-unbound"
+
     def descriptor(self, stream_id: str) -> StreamDescriptor:
         raw = json.loads(
             (self.root / "streams" / stream_id / "descriptor.json").read_text(encoding="utf-8")
         )
-        return _descriptor_from_dict(raw)
+        return _descriptor_from_dict(raw, require_fingerprint=self.schema_version >= 2)
 
     def iter_frames(self, stream_id: str) -> Iterable[SignalFrame]:
         stream_root = self.root / "streams" / stream_id
         index_path = stream_root / "index.ndjson"
         if not index_path.exists():
             return
+        descriptor = self.descriptor(stream_id)
         for line in index_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
@@ -279,26 +405,25 @@ class SessionArchiveReader:
                     raise IOError(f"Data hash mismatch: {data_path}")
             with data_path.open("rb") as handle:
                 data = np.load(handle, allow_pickle=False)
-            yield SignalFrame(
+            frame = _frame_from_row(
                 stream_id=stream_id,
-                sequence_id=int(row["sequence_id"]),
+                row=row,
                 data=data,
-                sample_rate_hz=float(row["sample_rate_hz"]),
-                host_receive_time_ns=int(row["host_receive_time_ns"]),
-                device_time_ns=None if row["device_time_ns"] is None else int(row["device_time_ns"]),
-                synchronized_time_ns=None
-                if row["synchronized_time_ns"] is None
-                else int(row["synchronized_time_ns"]),
-                clock_domain=ClockDomain(row["clock_domain"]),
-                quality=QualityFlag(int(row["quality"])),
-                metadata=row.get("metadata", {}),
+                schema_version=self.schema_version,
             )
+            if self.schema_version >= 2:
+                validate_frame_against_descriptor(descriptor, frame)
+            else:
+                _validate_legacy_frame(descriptor, frame)
+            yield frame
 
     def summary(self) -> dict[str, Any]:
         return {
             "session_id": self.manifest["session_id"],
             "status": self.manifest["status"],
             "created_at": self.manifest["created_at"],
+            "schema_version": self.schema_version,
+            "descriptor_integrity": self.descriptor_integrity,
             "git_sha": self.manifest.get("git_sha"),
             "config_hash": self.manifest.get("config_hash"),
             "streams": {
