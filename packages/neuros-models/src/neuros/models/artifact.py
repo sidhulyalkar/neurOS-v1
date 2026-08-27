@@ -1,9 +1,12 @@
 """Public authority surface for the hardened Model Artifact v1 implementation.
 
-The implementation module owns canonical serialization. This facade adds the
-promotion/load policy that must remain true for every built-in v1 decoder:
-required reconstruction packages, honest PyTorch/output semantics, and bounded
-resource requests before trusted factory code is constructed.
+The implementation module owns canonical serialization. This facade keeps two
+separate authorities explicit:
+
+- envelope verification: bounded, strict content/integrity inspection without
+  constructing a model;
+- runtime authority: required reconstruction packages, honest output/backend
+  semantics, and bounded constructor resources before trusted factory code runs.
 """
 
 from __future__ import annotations
@@ -56,10 +59,10 @@ def _bounded_product(name: str, *values: int, maximum: int = _MAX_PARAMETER_BUDG
 
 
 def _validate_factory_resource_budget(manifest: ModelArtifactManifest) -> None:
-    """Reject malicious/accidental constructor geometries before model allocation.
+    """Reject malicious/accidental constructor geometries before allocation.
 
-    These are software resource-safety limits for the compact built-in v1
-    factories, not scientific limits on future neurOS model families. Larger
+    These are software resource-safety limits for compact built-in v1 factories,
+    not scientific limits on future neurOS model families. Larger
     foundation/compiled models need their own qualified artifact profile.
     """
 
@@ -216,8 +219,10 @@ def _preflight_bundle_size(path: str | Path) -> None:
 
 @wraps(_verify_model_artifact)
 def verify_model_artifact(path: str | Path) -> ModelArtifactManifest:
+    """Verify bounded envelope/content identity without approving execution."""
+
     _preflight_bundle_size(path)
-    return _validate_runtime_authority(_verify_model_artifact(path))
+    return _verify_model_artifact(path)
 
 
 @wraps(_export_model_artifact)
@@ -258,9 +263,10 @@ def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
 
 @wraps(_load_model_artifact)
 def load_model_artifact(path: str | Path, *, device: str = "cpu") -> ArtifactBackedDecoder:
-    # Preflight policy happens before the implementation constructs any trusted
-    # factory, protecting against malicious constructor geometry/resource use.
-    verify_model_artifact(path)
+    """Verify envelope then authorize runtime before any trusted allocation."""
+
+    manifest = verify_model_artifact(path)
+    _validate_runtime_authority(manifest)
     return _load_model_artifact(path, device=device)
 
 
