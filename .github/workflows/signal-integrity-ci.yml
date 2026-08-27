@@ -1,0 +1,62 @@
+name: Signal Integrity Contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-core/src/neuros/contracts/signal.py"
+      - "packages/neuros-core/src/neuros/contracts/__init__.py"
+      - "packages/neuros-core/src/neuros/recording/archive.py"
+      - "packages/neuros-core/src/neuros/recording/exporters.py"
+      - "tests/test_signal_integrity_v2.py"
+      - "tests/test_kernel_contracts.py"
+      - "tests/test_session_archive.py"
+      - "tests/test_recording_exports.py"
+      - "tests/test_replay.py"
+      - "tests/test_clock_sync.py"
+      - ".github/workflows/signal-integrity-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/neuros-core/src/neuros/contracts/signal.py"
+      - "packages/neuros-core/src/neuros/contracts/__init__.py"
+      - "packages/neuros-core/src/neuros/recording/archive.py"
+      - "packages/neuros-core/src/neuros/recording/exporters.py"
+      - "tests/test_signal_integrity_v2.py"
+      - "tests/test_kernel_contracts.py"
+      - "tests/test_session_archive.py"
+      - "tests/test_recording_exports.py"
+      - "tests/test_replay.py"
+      - "tests/test_clock_sync.py"
+      - ".github/workflows/signal-integrity-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  signal-integrity:
+    name: Signal integrity / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install neurOS recording test profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[recording,test]"
+      - name: Prove immutable signal and archive semantics
+        run: |
+          pytest -q \
+            tests/test_signal_integrity_v2.py \
+            tests/test_kernel_contracts.py \
+            tests/test_session_archive.py \
+            tests/test_replay.py \
+            tests/test_clock_sync.py \
+            tests/test_recording_exports.py
