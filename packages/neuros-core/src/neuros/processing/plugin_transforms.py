@@ -24,8 +24,14 @@ def _map(item: Any, data: np.ndarray, *, representation: str) -> Any:
 
 
 class BandpassTransform:
+    """Plugin adapter for the causal stateful live bandpass filter."""
+
     def __init__(self, lowcut: float, highcut: float, fs: float, order: int = 4) -> None:
         self.filter = BandpassFilter(lowcut=lowcut, highcut=highcut, fs=fs, order=order)
+
+    def reset(self) -> None:
+        """Start a new acquisition/filter epoch with zero filter state."""
+        self.filter.reset()
 
     def transform(self, item: Any) -> Any:
         data = np.asarray(item.data if isinstance(item, SignalFrame) else item)
@@ -33,8 +39,14 @@ class BandpassTransform:
 
 
 class SmoothingTransform:
+    """Plugin adapter for the causal stateful live moving average."""
+
     def __init__(self, window_size: int = 5) -> None:
         self.filter = SmoothingFilter(window_size=window_size)
+
+    def reset(self) -> None:
+        """Start a new acquisition/filter epoch with zero smoothing history."""
+        self.filter.reset()
 
     def transform(self, item: Any) -> Any:
         data = np.asarray(item.data if isinstance(item, SignalFrame) else item)
