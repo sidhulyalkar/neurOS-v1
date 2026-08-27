@@ -106,6 +106,33 @@ jobs:
           required = {"session", "qualification", "arena_report"}
           assert required <= set(payload["artifacts"])
           PY
+      - name: Exercise installed display-evidence entry point
+        run: |
+          set -euo pipefail
+          ENV="${RUNNER_TEMP}/developer-preview-env"
+          OUT="${RUNNER_TEMP}/developer-preview-report"
+          DISPLAY_CLI="${ENV}/bin/neuros-arena-display"
+          PY="${ENV}/bin/python"
+          test -x "${DISPLAY_CLI}"
+          "${DISPLAY_CLI}" \
+            --manifest examples/arena/dual_target_custom.json \
+            --observation examples/arena/display_observation_synthetic_fixture.csv \
+            --epoch 1 \
+            --units volts \
+            --evidence-class synthetic_fixture \
+            --output "${OUT}/display-qualification.json"
+          test -s "${OUT}/display-qualification.json"
+          "${PY}" - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = Path(os.environ["RUNNER_TEMP"]) / "developer-preview-report" / "display-qualification.json"
+          payload = json.loads(report.read_text(encoding="utf-8"))
+          assert payload["schema"] == "neuros.arena.display_qualification.v1"
+          assert payload["observation"]["evidence_class"] == "synthetic_fixture"
+          assert payload["aligned_comparison"] is None
+          PY
       - name: Upload developer-preview evidence
         if: always()
         uses: actions/upload-artifact@v4

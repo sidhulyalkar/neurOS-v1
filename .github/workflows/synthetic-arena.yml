@@ -49,6 +49,8 @@ jobs:
             tests/test_arena_world_input.py \
             tests/test_arena_participant_state.py \
             tests/test_arena_presentation.py \
+            tests/test_arena_display_evidence.py \
+            tests/test_arena_display_cli.py \
             tests/test_arena_world_models.py \
             tests/test_arena_leadfield.py \
             tests/test_arena_population.py \
@@ -58,18 +60,27 @@ jobs:
             tests/test_arena_recording_metadata.py \
             tests/test_unicorn_arena_profile.py \
             tests/test_plugin_registry.py
-      - name: Exercise preset, manifest, and benchmark CLI
+      - name: Exercise preset, manifest, benchmark, and display-evidence CLI
         run: |
           OUT="${RUNNER_TEMP}/arena"
           mkdir -p "${OUT}"
           neuros-arena --preset dual-target-smoke --output "${OUT}/smoke.json" --write-manifest "${OUT}/world.json"
           neuros-arena --manifest examples/arena/dual_target_custom.json --output "${OUT}/custom.json" --npz "${OUT}/custom.npz"
           neuros-arena --benchmark-pack examples/arena/benchmark_packs/eeg_game_system_v1.json --output "${OUT}/benchmark.json"
+          neuros-arena-display \
+            --manifest examples/arena/dual_target_custom.json \
+            --observation examples/arena/display_observation_synthetic_fixture.csv \
+            --epoch 1 \
+            --units volts \
+            --evidence-class synthetic_fixture \
+            --output "${OUT}/display.json"
           test -s "${OUT}/smoke.json"
           test -s "${OUT}/world.json"
           test -s "${OUT}/custom.json"
           test -s "${OUT}/custom.npz"
           test -s "${OUT}/benchmark.json"
+          test -s "${OUT}/display.json"
+          python -c 'import json,sys; p=json.load(open(sys.argv[1])); assert p["observation"]["evidence_class"] == "synthetic_fixture"; assert p["aligned_comparison"] is None' "${OUT}/display.json"
 
   reality-anchor:
     name: Arena real-domain anchoring

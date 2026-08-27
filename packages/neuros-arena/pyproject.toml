@@ -29,6 +29,7 @@ test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
 
 [project.scripts]
 neuros-arena = "neuros.arena.cli:main"
+neuros-arena-display = "neuros.arena.display_cli:main"
 
 [project.entry-points."neuros.world_models"]
 legacy_synthetic = "neuros.arena.world_models:LegacySyntheticWorldModel"
