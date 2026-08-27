@@ -30,6 +30,8 @@ class IdentitySet:
     unavailable_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.availability, IdentityAvailability):
+            raise TypeError("availability must be IdentityAvailability")
         level = nonempty("identity level", self.level)
         identifiers = strings("identity identifiers", self.identifiers)
         reason = self.unavailable_reason
@@ -42,8 +44,6 @@ class IdentitySet:
             if identifiers:
                 raise ValueError("unavailable identity sets cannot carry identifiers")
             reason = nonempty("unavailable_reason", reason or "")
-        else:
-            raise ValueError("availability must be an IdentityAvailability")
         object.__setattr__(self, "level", level)
         object.__setattr__(self, "identifiers", identifiers)
         object.__setattr__(self, "unavailable_reason", reason)
@@ -79,12 +79,17 @@ class DatasetLineage:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("DatasetLineage schema_version must be 2")
+        if not isinstance(self.lineage_completeness, LineageCompleteness):
+            raise TypeError("lineage_completeness must be LineageCompleteness")
         dataset_id = nonempty("dataset_id", self.dataset_id)
         upstream_source = nonempty("upstream_source", self.upstream_source)
         parents = strings("parent_dataset_ids", self.parent_dataset_ids)
         if dataset_id in parents:
             raise ValueError("dataset cannot list itself as a parent")
-        if len({item.level for item in self.identity_sets}) != len(self.identity_sets):
+        identity_sets = tuple(self.identity_sets)
+        if any(not isinstance(item, IdentitySet) for item in identity_sets):
+            raise TypeError("identity_sets must contain only IdentitySet objects")
+        if len({item.level for item in identity_sets}) != len(identity_sets):
             raise ValueError("identity_sets cannot repeat an identity level")
         history = strings("preprocessing_history", self.preprocessing_history)
         sampling = freeze_json(self.sampling_assumptions)
@@ -95,6 +100,7 @@ class DatasetLineage:
         object.__setattr__(self, "upstream_source", upstream_source)
         object.__setattr__(self, "content_sha256", optional_sha256("content_sha256", self.content_sha256))
         object.__setattr__(self, "parent_dataset_ids", parents)
+        object.__setattr__(self, "identity_sets", identity_sets)
         object.__setattr__(self, "preprocessing_history", history)
         object.__setattr__(self, "sampling_assumptions", sampling)
         object.__setattr__(self, "metadata", metadata)
@@ -152,12 +158,21 @@ class ModelLineage:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("ModelLineage schema_version must be 2")
+        if not isinstance(self.pretraining_lineage_completeness, LineageCompleteness):
+            raise TypeError(
+                "pretraining_lineage_completeness must be LineageCompleteness"
+            )
         model_id = nonempty("model_id", self.model_id)
         source = nonempty("upstream_source", self.upstream_source)
         datasets = strings("pretraining_dataset_ids", self.pretraining_dataset_ids)
-        history = strings("preprocessing_history", self.preprocessing_history)
-        if len({item.level for item in self.pretraining_identity_sets}) != len(self.pretraining_identity_sets):
+        identity_sets = tuple(self.pretraining_identity_sets)
+        if any(not isinstance(item, IdentitySet) for item in identity_sets):
+            raise TypeError(
+                "pretraining_identity_sets must contain only IdentitySet objects"
+            )
+        if len({item.level for item in identity_sets}) != len(identity_sets):
             raise ValueError("pretraining_identity_sets cannot repeat an identity level")
+        history = strings("preprocessing_history", self.preprocessing_history)
         assumptions = freeze_json(self.input_assumptions)
         metadata = freeze_json(self.metadata)
         if not isinstance(assumptions, Mapping) or not isinstance(metadata, Mapping):
@@ -166,6 +181,7 @@ class ModelLineage:
         object.__setattr__(self, "upstream_source", source)
         object.__setattr__(self, "checkpoint_sha256", optional_sha256("checkpoint_sha256", self.checkpoint_sha256))
         object.__setattr__(self, "pretraining_dataset_ids", datasets)
+        object.__setattr__(self, "pretraining_identity_sets", identity_sets)
         object.__setattr__(self, "preprocessing_history", history)
         object.__setattr__(self, "input_assumptions", assumptions)
         object.__setattr__(self, "metadata", metadata)
@@ -218,6 +234,8 @@ class PretrainingOverlapAudit:
     def __post_init__(self) -> None:
         if self.schema_version != 2:
             raise ValueError("PretrainingOverlapAudit schema_version must be 2")
+        if not isinstance(self.status, OverlapStatus):
+            raise TypeError("status must be OverlapStatus")
         object.__setattr__(self, "model_id", nonempty("model_id", self.model_id))
         object.__setattr__(self, "evaluation_dataset_id", nonempty("evaluation_dataset_id", self.evaluation_dataset_id))
         object.__setattr__(self, "model_lineage_sha256", require_sha256("model_lineage_sha256", self.model_lineage_sha256))
@@ -259,8 +277,9 @@ class PretrainingOverlapAudit:
 def _dataset_domain_closure(
     dataset: DatasetLineage,
     known_datasets: Mapping[str, DatasetLineage],
-) -> tuple[tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[DatasetLineage, ...]]:
     found: list[str] = []
+    lineages: list[DatasetLineage] = []
     visited: set[str] = set()
     visiting: set[str] = set()
     unresolved: set[str] = set()
@@ -276,36 +295,44 @@ def _dataset_domain_closure(
             return
         visiting.add(current.dataset_id)
         add_found(current.dataset_id)
+        lineages.append(current)
         for parent_id in current.parent_dataset_ids:
             add_found(parent_id)
             parent = known_datasets.get(parent_id)
             if parent is None:
                 unresolved.add(parent_id)
             else:
+                if parent.dataset_id != parent_id:
+                    raise ValueError(
+                        "known_datasets key must match the referenced DatasetLineage.dataset_id"
+                    )
                 visit(parent)
         visiting.remove(current.dataset_id)
         visited.add(current.dataset_id)
 
     visit(dataset)
-    return tuple(found), tuple(sorted(unresolved))
+    return tuple(found), tuple(sorted(unresolved)), tuple(lineages)
 
 
-def _identity_overlap(model: ModelLineage, dataset: DatasetLineage) -> tuple[str, ...]:
+def _identity_overlap(
+    model: ModelLineage,
+    evaluation_lineages: tuple[DatasetLineage, ...],
+) -> tuple[str, ...]:
     model_sets = {
         item.level: set(item.identifiers)
         for item in model.pretraining_identity_sets
         if item.availability is IdentityAvailability.AVAILABLE
     }
-    dataset_sets = {
-        item.level: set(item.identifiers)
-        for item in dataset.identity_sets
-        if item.availability is IdentityAvailability.AVAILABLE
-    }
+    evaluation_sets: dict[str, set[str]] = {}
+    for dataset in evaluation_lineages:
+        for item in dataset.identity_sets:
+            if item.availability is IdentityAvailability.AVAILABLE:
+                evaluation_sets.setdefault(item.level, set()).update(item.identifiers)
     return tuple(
         sorted(
             level
-            for level in model_sets.keys() & dataset_sets.keys()
-            if model_sets[level] & dataset_sets[level]
+            for level in model_sets.keys() & evaluation_sets.keys()
+            if model_sets[level] & evaluation_sets[level]
         )
     )
 
@@ -318,11 +345,29 @@ def audit_pretraining_overlap(
 ) -> PretrainingOverlapAudit:
     """Assess overlap without turning partial/unknown ancestry into disjointness."""
 
-    known = dict(known_datasets or {})
-    known.setdefault(evaluation_dataset.dataset_id, evaluation_dataset)
-    evaluation_domains, unresolved = _dataset_domain_closure(evaluation_dataset, known)
+    if not isinstance(model, ModelLineage):
+        raise TypeError("model must be ModelLineage")
+    if not isinstance(evaluation_dataset, DatasetLineage):
+        raise TypeError("evaluation_dataset must be DatasetLineage")
+    if known_datasets is not None and not isinstance(known_datasets, Mapping):
+        raise TypeError("known_datasets must be a mapping")
+    known: dict[str, DatasetLineage] = {}
+    for raw_key, value in (known_datasets or {}).items():
+        key = nonempty("known dataset ID", raw_key)
+        if not isinstance(value, DatasetLineage):
+            raise TypeError("known_datasets values must be DatasetLineage objects")
+        if value.dataset_id != key:
+            raise ValueError(
+                "known_datasets key must match the referenced DatasetLineage.dataset_id"
+            )
+        known[key] = value
+    known[evaluation_dataset.dataset_id] = evaluation_dataset
+
+    evaluation_domains, unresolved, evaluation_lineages = _dataset_domain_closure(
+        evaluation_dataset, known
+    )
     matched_datasets = tuple(sorted(set(evaluation_domains) & set(model.pretraining_dataset_ids)))
-    matched_identity_levels = _identity_overlap(model, evaluation_dataset)
+    matched_identity_levels = _identity_overlap(model, evaluation_lineages)
 
     if matched_datasets or matched_identity_levels:
         status = OverlapStatus.OVERLAP_DETECTED
