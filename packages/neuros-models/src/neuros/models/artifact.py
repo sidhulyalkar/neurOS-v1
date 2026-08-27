@@ -8,6 +8,7 @@ resource requests before trusted factory code is constructed.
 
 from __future__ import annotations
 
+import shutil
 from functools import wraps
 from pathlib import Path
 from typing import Any, Mapping
@@ -64,8 +65,7 @@ def _validate_factory_resource_budget(manifest: ModelArtifactManifest) -> None:
 
     config = dict(manifest.model_config)
     factory = manifest.factory_id
-    classes = _positive_int(config, "n_classes", maximum=4096)
-    del classes
+    _positive_int(config, "n_classes", maximum=4096)
 
     if factory == "neuros.eegnet.v1":
         channels = _positive_int(config, "n_channels", maximum=8192)
@@ -94,7 +94,6 @@ def _validate_factory_resource_budget(manifest: ModelArtifactManifest) -> None:
         units = _positive_int(config, "lstm_units", maximum=4096)
         layers = _positive_int(config, "n_lstm_layers", maximum=64)
         directions = 2 if config.get("bidirectional") is True else 1
-        # Four gates per recurrent layer. This is a conservative upper estimate.
         _bounded_product(
             "LSTM recurrent state",
             4,
@@ -179,9 +178,7 @@ def _validate_runtime_authority(manifest: ModelArtifactManifest) -> ModelArtifac
     if manifest.backend != "pytorch":
         raise ValueError("built-in Model Artifact v1 factories require backend='pytorch'")
     if manifest.backend_version != manifest.package_versions["torch"]:
-        raise ValueError(
-            "artifact backend_version must exactly match package_versions['torch']"
-        )
+        raise ValueError("artifact backend_version must exactly match package_versions['torch']")
 
     output = manifest.output_contract
     if output.task != "classification":
@@ -189,9 +186,7 @@ def _validate_runtime_authority(manifest: ModelArtifactManifest) -> ModelArtifac
     if output.score_semantics != "class_logits":
         raise ValueError("built-in Model Artifact v1 factories emit class_logits")
     if output.probability_semantics != "uncalibrated_softmax":
-        raise ValueError(
-            "built-in Model Artifact v1 factories emit uncalibrated_softmax only"
-        )
+        raise ValueError("built-in Model Artifact v1 factories emit uncalibrated_softmax only")
     if output.uncertainty_semantics != "none":
         raise ValueError(
             "built-in Model Artifact v1 factories do not emit a qualified uncertainty estimate"
@@ -246,22 +241,17 @@ def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
         if output_contract.score_semantics != "class_logits":
             raise ValueError("built-in Model Artifact v1 factories emit class_logits")
         if output_contract.uncertainty_semantics != "none":
-            raise ValueError(
-                "built-in Model Artifact v1 factories do not emit qualified uncertainty"
-            )
+            raise ValueError("built-in Model Artifact v1 factories do not emit qualified uncertainty")
     manifest = _export_model_artifact(*args, **kwargs)
     try:
         return _validate_runtime_authority(manifest)
     except Exception:
-        # The implementation exported atomically, but a facade-level policy
-        # failure means the destination must not remain promoted.
         output_dir = kwargs.get("output_dir")
         if output_dir is None and len(args) >= 2:
             output_dir = args[1]
         if output_dir is not None:
             destination = Path(output_dir)
             if destination.is_dir() and not destination.is_symlink():
-                shutil = __import__("shutil")
                 shutil.rmtree(destination)
         raise
 
