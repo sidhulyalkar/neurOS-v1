@@ -94,7 +94,29 @@ def _descriptor_from_dict(
     *,
     require_fingerprint: bool = False,
 ) -> StreamDescriptor:
-    descriptor = StreamDescriptor(
+    if require_fingerprint:
+        expected = raw.get("fingerprint_sha256")
+        if not isinstance(expected, str):
+            raise IOError("Archive v2 StreamDescriptor requires string fingerprint_sha256")
+        descriptor = StreamDescriptor(
+            stream_id=raw["stream_id"],
+            modality=raw["modality"],
+            sample_rate_hz=raw["sample_rate_hz"],
+            channel_names=tuple(raw.get("channel_names", [])),
+            channel_types=tuple(raw.get("channel_types", [])),
+            units=tuple(raw.get("units", [])),
+            device=raw.get("device"),
+            manufacturer=raw.get("manufacturer"),
+            clock_domain=ClockDomain(raw.get("clock_domain", ClockDomain.UNKNOWN.value)),
+            metadata=raw.get("metadata", {}),
+        )
+        if expected != descriptor.fingerprint():
+            raise IOError("StreamDescriptor fingerprint mismatch")
+        return descriptor
+
+    # Archive v1 historically decoded these scalar fields permissively. Keep
+    # that read path for compatibility without crediting it with v2 integrity.
+    return StreamDescriptor(
         stream_id=str(raw["stream_id"]),
         modality=str(raw["modality"]),
         sample_rate_hz=float(raw["sample_rate_hz"]),
@@ -106,21 +128,10 @@ def _descriptor_from_dict(
         clock_domain=ClockDomain(raw.get("clock_domain", ClockDomain.UNKNOWN.value)),
         metadata=raw.get("metadata", {}),
     )
-    expected = raw.get("fingerprint_sha256")
-    if require_fingerprint and expected is None:
-        raise IOError("Archive v2 StreamDescriptor is missing fingerprint_sha256")
-    if expected is not None and str(expected) != descriptor.fingerprint():
-        raise IOError("StreamDescriptor fingerprint mismatch")
-    return descriptor
 
 
 def _validate_legacy_frame(descriptor: StreamDescriptor, frame: SignalFrame) -> None:
-    """Validate only invariants that archive v1 actually encoded unambiguously.
-
-    v1 did not require explicit multidimensional axis metadata or bind frames to
-    a descriptor fingerprint. Reading an old archive must not retroactively
-    claim those stronger v2 guarantees.
-    """
+    """Validate only invariants that archive v1 actually encoded unambiguously."""
 
     if frame.stream_id != descriptor.stream_id:
         raise ValueError("SignalFrame stream_id does not match StreamDescriptor")
@@ -136,6 +147,43 @@ def _validate_legacy_frame(descriptor: StreamDescriptor, frame: SignalFrame) -> 
         and frame.clock_domain is not descriptor.clock_domain
     ):
         raise ValueError("SignalFrame clock_domain does not match StreamDescriptor")
+
+
+def _frame_from_row(
+    *,
+    stream_id: str,
+    row: Mapping[str, Any],
+    data: np.ndarray,
+    schema_version: int,
+) -> SignalFrame:
+    if schema_version >= 2:
+        return SignalFrame(
+            stream_id=stream_id,
+            sequence_id=row["sequence_id"],
+            data=data,
+            sample_rate_hz=row["sample_rate_hz"],
+            host_receive_time_ns=row["host_receive_time_ns"],
+            device_time_ns=row["device_time_ns"],
+            synchronized_time_ns=row["synchronized_time_ns"],
+            clock_domain=ClockDomain(row["clock_domain"]),
+            quality=row["quality"],
+            metadata=row.get("metadata", {}),
+        )
+
+    return SignalFrame(
+        stream_id=stream_id,
+        sequence_id=int(row["sequence_id"]),
+        data=data,
+        sample_rate_hz=float(row["sample_rate_hz"]),
+        host_receive_time_ns=int(row["host_receive_time_ns"]),
+        device_time_ns=None if row["device_time_ns"] is None else int(row["device_time_ns"]),
+        synchronized_time_ns=None
+        if row["synchronized_time_ns"] is None
+        else int(row["synchronized_time_ns"]),
+        clock_domain=ClockDomain(row["clock_domain"]),
+        quality=QualityFlag(int(row["quality"])),
+        metadata=row.get("metadata", {}),
+    )
 
 
 @dataclass(slots=True)
@@ -317,7 +365,9 @@ class SessionArchiveReader:
     def __init__(self, root: str | Path, *, verify_hashes: bool = True) -> None:
         self.root = Path(root)
         raw = json.loads((self.root / "manifest.json").read_text(encoding="utf-8"))
-        schema_version = int(raw.get("schema_version", -1))
+        schema_version = raw.get("schema_version")
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+            raise ValueError("neurOS archive schema_version must be an integer")
         if schema_version not in SUPPORTED_ARCHIVE_SCHEMA_VERSIONS:
             raise ValueError(f"Unsupported neurOS archive schema: {schema_version}")
         self.manifest = raw
@@ -355,19 +405,11 @@ class SessionArchiveReader:
                     raise IOError(f"Data hash mismatch: {data_path}")
             with data_path.open("rb") as handle:
                 data = np.load(handle, allow_pickle=False)
-            frame = SignalFrame(
+            frame = _frame_from_row(
                 stream_id=stream_id,
-                sequence_id=int(row["sequence_id"]),
+                row=row,
                 data=data,
-                sample_rate_hz=float(row["sample_rate_hz"]),
-                host_receive_time_ns=int(row["host_receive_time_ns"]),
-                device_time_ns=None if row["device_time_ns"] is None else int(row["device_time_ns"]),
-                synchronized_time_ns=None
-                if row["synchronized_time_ns"] is None
-                else int(row["synchronized_time_ns"]),
-                clock_domain=ClockDomain(row["clock_domain"]),
-                quality=QualityFlag(int(row["quality"])),
-                metadata=row.get("metadata", {}),
+                schema_version=self.schema_version,
             )
             if self.schema_version >= 2:
                 validate_frame_against_descriptor(descriptor, frame)
