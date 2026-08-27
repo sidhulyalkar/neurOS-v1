@@ -79,12 +79,12 @@ def test_envelope_verify_remains_separate_from_runtime_authority(tmp_path: Path)
         load_model_artifact(tmp_path / "artifact")
 
 
-def test_backend_version_cannot_disagree_with_required_torch_identity(tmp_path: Path):
+def test_backend_version_cannot_disagree_with_active_framework_runtime(tmp_path: Path):
     manifest = _export(tmp_path / "artifact")
     forged = replace(manifest, backend_version="0.0.0-forged")
     _rewrite(tmp_path / "artifact", forged)
     verify_model_artifact(tmp_path / "artifact")
-    with pytest.raises(ValueError, match="backend_version"):
+    with pytest.raises(RuntimeError, match="backend_version"):
         load_model_artifact(tmp_path / "artifact")
 
 
@@ -101,6 +101,23 @@ def test_custom_package_versions_cannot_omit_reconstruction_authority(tmp_path: 
             input_contract=_contract(),
             git_sha=GIT_SHA,
             package_versions=weakened,
+        )
+    assert not destination.exists()
+
+
+def test_custom_package_versions_must_describe_actual_promotion_environment(tmp_path: Path):
+    baseline = _export(tmp_path / "baseline")
+    forged_versions = dict(baseline.package_versions)
+    forged_versions["numpy"] = "0.0.0-forged"
+    destination = tmp_path / "forged-environment"
+    with pytest.raises(ValueError, match="does not match"):
+        export_model_artifact(
+            _trained_model(),
+            destination,
+            artifact_id="forged-environment",
+            input_contract=_contract(),
+            git_sha=GIT_SHA,
+            package_versions=forged_versions,
         )
     assert not destination.exists()
 
