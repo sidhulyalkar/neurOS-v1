@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 
 from orion import (
+    CaseOutcome,
+    CaseStatus,
     ClaimQualification,
     DatasetLineage,
     EvidenceClaim,
     EvidenceDomain,
     FailureAggregationPolicy,
+    FailurePreservingResultSet,
     LineageCompleteness,
     MetricDirection,
     MetricSpec,
@@ -17,6 +20,7 @@ from orion import (
     ProbabilityRequirement,
     RepeatedMeasuresAuthority,
     ScientificStudyAuthority,
+    TargetObservationBudget,
     audit_pretraining_overlap,
 )
 
@@ -62,14 +66,35 @@ def main() -> None:
         inference_method="participant-cluster bootstrap",
         strata=("original_protocol", "held_out_session"),
     )
+    result = FailurePreservingResultSet(
+        declared_case_ids=("subject-1-session-1",),
+        method_ids=(model.model_id,),
+        rows=(
+            CaseOutcome(
+                case_id="subject-1-session-1",
+                method_id=model.model_id,
+                status=CaseStatus.OK,
+                metrics={"balanced_accuracy": 0.68},
+                metadata={"fixture": True},
+            ),
+        ),
+    )
+    zero_target = TargetObservationBudget(
+        labeled_examples=0,
+        labeled_examples_per_class=0,
+        unlabeled_examples=0,
+        unlabeled_seconds=0.0,
+    )
     claim = EvidenceClaim(
         claim_id="prospective-session-task-utility",
         domain=EvidenceDomain.TASK_UTILITY,
         scope="offline prospective next-session motor-imagery classification",
         qualification=ClaimQualification.CLEAN,
-        evidence_sha256s=(metric.metric_sha256,),
+        evidence_sha256s=(result.result_sha256,),
         model_id=model.model_id,
         evaluation_dataset_id=dataset.dataset_id,
+        target_budget_id="zero-target-observation",
+        zero_shot_claim=True,
     )
     study = ScientificStudyAuthority(
         study_id="kumar2024-scientific-authority-example",
@@ -81,11 +106,13 @@ def main() -> None:
         metrics=(metric,),
         repeated_measures=repeated,
         overlap_audits=(overlap,),
+        result_sets=(result,),
+        target_budgets={"zero-target-observation": zero_target},
         claims=(claim,),
         metadata={
             "evidence_boundary": (
-                "offline software scientific-governance example only; not hardware, "
-                "closed-loop, physiological, or clinical evidence"
+                "synthetic report-shape example only; the numeric result is not real-data "
+                "evidence and does not support hardware, closed-loop, physiological, or clinical claims"
             )
         },
     )
