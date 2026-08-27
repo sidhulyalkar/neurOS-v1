@@ -38,6 +38,9 @@ class WorldModelEvidenceCard:
         return asdict(self)
 
 
+PARTICIPANT_STREAM_CONTRACT = "sample-indexed participant-response / render-partition invariance"
+
+
 _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
     "legacy_synthetic": WorldModelEvidenceCard(
         model_name="legacy_synthetic",
@@ -57,8 +60,12 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
         ),
         unsupported_claims=(
             "display-to-cortex causality",
+            "sample-indexed participant-response fidelity",
             "human response distribution",
             "anatomical source realism",
+        ),
+        notes=(
+            "W0 intentionally retains the historical scalar attention adapter; it is a regression fixture, not the Arena participant-dynamics authority.",
         ),
     ),
     "driven_state_space": WorldModelEvidenceCard(
@@ -74,6 +81,7 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
         validated_against=(
             "internal deterministic contracts",
             "display-causality metamorphic tests",
+            PARTICIPANT_STREAM_CONTRACT,
         ),
         intended_uses=(
             "closed-loop systems qualification",
@@ -87,6 +95,7 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
         ),
         notes=(
             "Phenomenological oscillator/background dynamics are chosen for causal controllability rather than cortical-mechanism fidelity.",
+            "Participant response delay/switching/gaze/fatigue are synthetic control assumptions compiled onto the source sample clock.",
         ),
     ),
     "semi_synthetic_replay": WorldModelEvidenceCard(
@@ -102,6 +111,7 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
         validated_against=(
             "portable recorded-background contract",
             "internal intervention-causality contracts",
+            PARTICIPANT_STREAM_CONTRACT,
         ),
         intended_uses=(
             "real-background decoder stress tests",
@@ -112,6 +122,9 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
             "the injected response occurred in the recorded participant",
             "full physiological interaction between intervention and background",
             "human closed-loop performance",
+        ),
+        notes=(
+            "The recorded background preserves observed nuisance/covariance structure, while the participant-response intervention remains synthetic and explicitly controlled.",
         ),
     ),
     "leadfield_driven": WorldModelEvidenceCard(
@@ -128,6 +141,7 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
             "portable lead-field contract",
             "explicit source-selection provenance",
             "internal display-causality contracts",
+            PARTICIPANT_STREAM_CONTRACT,
         ),
         intended_uses=(
             "montage/topography sensitivity studies",
@@ -138,6 +152,9 @@ _BUILTIN_CARDS: dict[str, WorldModelEvidenceCard] = {
             "subject-specific source localization unless the bundle is subject-specific and independently validated",
             "human response amplitude distribution",
             "human closed-loop performance",
+        ),
+        notes=(
+            "Lead-field projection is spatial structure, not evidence that the synthetic temporal participant dynamics match a human participant.",
         ),
     ),
 }

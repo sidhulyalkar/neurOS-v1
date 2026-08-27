@@ -21,6 +21,7 @@ import numpy as np
 from neuros.drivers.synthetic_eeg import ArtifactEvent as DriverArtifactEvent
 
 from .specs import ParticipantProfile
+from .world_input import WorldInputBlock
 from .world_models import WorldModelEmission, _ArtifactEngine
 
 
@@ -141,7 +142,14 @@ def export_mne_forward_bundle(
 
 
 class LeadFieldDrivenWorldModel:
-    """Display-driven neural dynamics projected through a frozen lead field."""
+    """Display-driven neural dynamics projected through a frozen lead field.
+
+    Arena's rich path supplies participant attention per source sample. Random
+    nuisance draws are also advanced one source sample at a time so internal
+    render partitioning cannot reassign stochastic values across channels/time.
+    The historical scalar ``render(...)`` surface remains available for callers
+    outside Arena and expands its scalar attention value across the block.
+    """
 
     name = "leadfield_driven"
 
@@ -212,6 +220,96 @@ class LeadFieldDrivenWorldModel:
             seed=seed,
         )
 
+    def _render_with_attention_stream(
+        self,
+        sample_times_s: np.ndarray,
+        emitted_stimulus: np.ndarray,
+        target_frequency_hz: float | None,
+        attention_gain: np.ndarray,
+    ) -> WorldModelEmission:
+        times = np.asarray(sample_times_s, dtype=float)
+        drive = np.asarray(emitted_stimulus, dtype=float)
+        gain = np.asarray(attention_gain, dtype=float)
+        if times.ndim != 1 or drive.shape != times.shape or gain.shape != times.shape:
+            raise ValueError("sample times, emitted stimulus and attention gain must be matching 1-D arrays")
+        if not np.all(np.isfinite(gain)) or np.any(gain < 0):
+            raise ValueError("attention gain stream must be finite and non-negative")
+
+        n_channels = len(self.channel_names)
+        samples = times.size
+        data = np.empty((n_channels, samples), dtype=float)
+        dt = 1.0 / self.fs
+        target_gain = gain if target_frequency_hz is not None else np.zeros(samples, dtype=float)
+        alpha_gain = np.abs(self.visual_topography).astype(float)
+        alpha_gain /= max(float(np.max(alpha_gain)), 1e-12)
+        persistence = 0.995
+        innovation = np.sqrt(1.0 - persistence**2)
+
+        for i in range(samples):
+            # Draw channel noise in source-sample order. A channels x block draw
+            # would assign the same RNG stream differently when blocks are split.
+            sample = self.rng.normal(0.0, self.participant.white_noise_uv, size=n_channels)
+            self._entrainment += (float(target_gain[i]) - self._entrainment) * min(1.0, dt / self._tau_s)
+            desired = float(np.clip(drive[i], -1.0, 1.0)) * self._entrainment
+            self._response_state += (desired - self._response_state) * min(1.0, dt / self._response_tau_s)
+            sample += (
+                self.visual_topography
+                * self.participant.ssvep_amplitude_uv
+                * self._response_state
+            )
+
+            if self.nuisance_topographies.size:
+                self._nuisance_state = (
+                    persistence * self._nuisance_state
+                    + innovation * self.rng.normal(size=self._nuisance_state.size)
+                )
+                sample += self.participant.colored_noise_uv * (
+                    self._nuisance_state @ self.nuisance_topographies
+                )
+            else:
+                sample += self.rng.normal(
+                    0.0,
+                    self.participant.colored_noise_uv,
+                    size=n_channels,
+                )
+
+            sample += (
+                alpha_gain
+                * self.participant.alpha_amplitude_uv
+                * np.sin(
+                    2 * np.pi * self.participant.alpha_frequency_hz * times[i]
+                    + self._alpha_phase
+                )
+            )
+            data[:, i] = sample
+
+        if self._artifact is not None:
+            artifact, dropout_mask, _artifact_events = self._artifact.render(times)
+            data += artifact
+            data[dropout_mask] = 0.0
+
+        return WorldModelEmission(
+            data_uv=data.astype(np.float32),
+            latent={
+                "attention_gain": float(target_gain[-1]) if target_gain.size else 0.0,
+                "entrainment": float(self._entrainment),
+                "stimulus_coupling": 1.0,
+                "participant_stream_coupling": 1.0,
+                "leadfield_projection": 1.0,
+            },
+        )
+
+    def render_world(self, block: WorldInputBlock) -> WorldModelEmission:
+        block.validate()
+        raw_frequency = block.target.get("frequency_hz")
+        target_frequency_hz = None if raw_frequency is None else float(raw_frequency)
+        return self._render_with_attention_stream(
+            block.sample_times_s,
+            block.visual_luminance,
+            target_frequency_hz,
+            block.attention_gain,
+        )
+
     def render(
         self,
         sample_times_s: np.ndarray,
@@ -220,52 +318,10 @@ class LeadFieldDrivenWorldModel:
         attention_gain: float,
     ) -> WorldModelEmission:
         times = np.asarray(sample_times_s, dtype=float)
-        drive = np.asarray(emitted_stimulus, dtype=float)
-        if times.ndim != 1 or drive.shape != times.shape:
-            raise ValueError("sample_times_s and emitted_stimulus must match")
-        n_channels = len(self.channel_names)
-        data = self.rng.normal(0.0, self.participant.white_noise_uv, size=(n_channels, times.size))
-        dt = 1.0 / self.fs
-        target_gain = max(0.0, float(attention_gain)) if target_frequency_hz is not None else 0.0
-        visual_response = np.zeros(times.size, dtype=float)
-        for i in range(times.size):
-            self._entrainment += (target_gain - self._entrainment) * min(1.0, dt / self._tau_s)
-            desired = float(np.clip(drive[i], -1.0, 1.0)) * self._entrainment
-            self._response_state += (desired - self._response_state) * min(1.0, dt / self._response_tau_s)
-            visual_response[i] = self._response_state
-        data += (
-            self.visual_topography[:, None]
-            * self.participant.ssvep_amplitude_uv
-            * visual_response[None, :]
-        )
-        # Use frozen lead-field nuisance topographies for low-frequency background
-        # sources, then add a global endogenous alpha component with channel gain
-        # derived from the absolute visual topography.
-        if self.nuisance_topographies.size:
-            persistence = 0.995
-            innovation = np.sqrt(1.0 - persistence**2)
-            for i in range(times.size):
-                self._nuisance_state = persistence * self._nuisance_state + innovation * self.rng.normal(size=self._nuisance_state.size)
-                data[:, i] += self.participant.colored_noise_uv * (self._nuisance_state @ self.nuisance_topographies)
-        else:
-            data += self.rng.normal(0.0, self.participant.colored_noise_uv, size=data.shape)
-        alpha_gain = np.abs(self.visual_topography)
-        alpha_gain /= max(float(np.max(alpha_gain)), 1e-12)
-        data += (
-            alpha_gain[:, None]
-            * self.participant.alpha_amplitude_uv
-            * np.sin(2 * np.pi * self.participant.alpha_frequency_hz * times + self._alpha_phase)[None, :]
-        )
-        if self._artifact is not None:
-            artifact, dropout_mask, _artifact_events = self._artifact.render(times)
-            data += artifact
-            data[dropout_mask] = 0.0
-        return WorldModelEmission(
-            data_uv=data.astype(np.float32),
-            latent={
-                "attention_gain": target_gain,
-                "entrainment": float(self._entrainment),
-                "stimulus_coupling": 1.0,
-                "leadfield_projection": 1.0,
-            },
+        gain = np.full(times.size, max(0.0, float(attention_gain)), dtype=float)
+        return self._render_with_attention_stream(
+            times,
+            emitted_stimulus,
+            target_frequency_hz,
+            gain,
         )

@@ -10,6 +10,7 @@ import numpy as np
 from neuros.plugins import PluginKind, load_plugin
 
 from .evidence import evidence_card_for_model
+from .participant import compile_participant_state_trace
 from .simulators import DeviceOutput, StimulusTrace, TransportPacket, apply_device, packetize, sample_stimulus, simulate_stimulus
 from .specs import ArenaScenario, DeviceProfile, DisplayProfile, ParticipantProfile, TransportProfile, WorldModelProfile
 from .world_input import WorldInputBlock
@@ -63,8 +64,6 @@ def _spectral_snr_db(data_uv: np.ndarray, fs: float, target_hz: float) -> float:
 
 
 def _stage_sample_count(duration_s: float, sampling_rate_hz: float) -> int:
-    """Resolve a requested stage duration onto the source sample clock."""
-
     return max(1, int(round(float(duration_s) * float(sampling_rate_hz))))
 
 
@@ -110,13 +109,6 @@ def _render_world_model(
 
 
 def _artifact_identity_payload(artifact) -> str:
-    """Canonical semantic identity for an Arena artifact without an explicit ID.
-
-    Tuple/list position is deliberately excluded. Exact duplicate events remain
-    meaningful, so the compiler adds a deterministic duplicate ordinal after
-    sorting by this canonical payload.
-    """
-
     payload = {
         "at_s": float(artifact.at_s),
         "channels": None if artifact.channels is None else sorted(str(name) for name in artifact.channels),
@@ -134,13 +126,6 @@ def _compile_artifact_schedule(
     participant: ParticipantProfile,
     sampling_rate_hz: float,
 ) -> tuple[str, list[dict[str, object]]]:
-    """Compile Arena stage artifacts to an absolute sample-indexed timeline.
-
-    Built-in v3-aware world models expose ``schedule_artifact``. Older/external
-    plugins may implement only ``inject_artifact``; those stay on the historical
-    block-triggered fallback and are labelled explicitly in the report.
-    """
-
     schedule = getattr(model, "schedule_artifact", None)
     if not callable(schedule):
         return "legacy_injection", []
@@ -150,29 +135,10 @@ def _compile_artifact_schedule(
     fs = float(sampling_rate_hz)
     for stage_i, stage in enumerate(scenario.stages):
         stage_samples = _stage_sample_count(stage.duration_s, fs)
-        entries = [
-            (
-                _artifact_identity_payload(artifact),
-                artifact_i,
-                artifact,
-            )
-            for artifact_i, artifact in enumerate(stage.artifacts)
-        ]
-        # Event order in a manifest is presentation, not causal authority. The
-        # canonical sort gives implicit stochastic events stable identities even
-        # when the artifact tuple is rearranged.
-        entries.sort(
-            key=lambda item: (
-                "" if item[2].event_id is None else str(item[2].event_id),
-                item[0],
-                item[1],
-            )
-        )
+        entries = [(_artifact_identity_payload(artifact), artifact_i, artifact) for artifact_i, artifact in enumerate(stage.artifacts)]
+        entries.sort(key=lambda item: ("" if item[2].event_id is None else str(item[2].event_id), item[0], item[1]))
         duplicate_ordinals: dict[str, int] = {}
         for identity_payload, artifact_i, artifact in entries:
-            # First source sample at-or-after requested onset. If no source sample
-            # exists before stage end, reject rather than shift the event into the
-            # previous sample or silently assign it to the next stage.
             onset_sample = int(np.ceil(artifact.at_s * fs - 1e-12))
             if onset_sample >= stage_samples:
                 raise ValueError(
@@ -242,13 +208,11 @@ def run_scenario(
     evidence_card = evidence_card_for_model(model, model_profile.name)
     paradigm = scenario.metadata.get("paradigm", "ssvep")
     artifact_execution, compiled_artifacts = _compile_artifact_schedule(
-        model,
-        scenario,
-        participant,
-        device.sampling_rate_hz,
+        model, scenario, participant, device.sampling_rate_hz
     )
 
     fs = float(device.sampling_rate_hz)
+    participant_trace = compile_participant_state_trace(scenario, participant, fs)
     block_samples = WORLD_RENDER_CHUNK_SAMPLES
     data_blocks: list[np.ndarray] = []
     timestamp_blocks: list[np.ndarray] = []
@@ -290,8 +254,9 @@ def run_scenario(
         while produced < samples_total:
             count = min(block_samples, samples_total - produced)
             sample_offsets = produced + np.arange(count, dtype=np.int64)
+            global_indices = global_sample_start + sample_offsets
             local_times = sample_offsets.astype(float) / fs
-            global_times = (global_sample_start + sample_offsets).astype(float) / fs
+            global_times = global_indices.astype(float) / fs
             elapsed = produced / fs
             if artifact_execution == "legacy_injection":
                 for artifact_i, artifact in enumerate(stage.artifacts):
@@ -302,14 +267,14 @@ def run_scenario(
                             severity=artifact.severity * participant.artifact_gain,
                         )
                         artifact_cursor.add(artifact_i)
-            if stage.target_frequency_hz is None:
-                effective_gain = 0.0
-            else:
-                after_delay = max(0.0, elapsed - participant.response_delay_s)
-                switch_gain = 0.0 if elapsed < participant.response_delay_s else 1.0 - np.exp(-after_delay / participant.switch_time_constant_s)
-                global_elapsed_min = float(global_times[0]) / 60.0
-                attenuation = max(0.0, 1.0 - participant.response_attenuation_per_minute * global_elapsed_min)
-                effective_gain = stage.attention_gain * participant.gaze_duty_cycle * switch_gain * attenuation
+
+            attention_stream = participant_trace.attention_gain[global_indices]
+            requested_attention_stream = participant_trace.requested_attention_gain[global_indices]
+            target_switch_stream = participant_trace.target_switch[global_indices].astype(float)
+            # Legacy render(...) plugins retain the historical scalar surface. The
+            # first source sample is the least surprising summary because the old
+            # runner updated the value at block start.
+            effective_gain = float(attention_stream[0]) if attention_stream.size else 0.0
             emitted_drive = sample_stimulus(trace, local_times, display)
             target = dict(stage.target)
             if stage.target_frequency_hz is not None:
@@ -321,13 +286,18 @@ def run_scenario(
                 emitted_streams={"visual_luminance": emitted_drive},
                 target=target,
                 task_state=dict(stage.task_state),
-                participant_state={"attention_gain": float(effective_gain)},
+                participant_state={"attention_gain": effective_gain},
+                participant_streams={
+                    "attention_gain": attention_stream,
+                    "requested_attention_gain": requested_attention_stream,
+                    "target_switch": target_switch_stream,
+                },
             )
             emission = _render_world_model(
                 model,
                 input_block=input_block,
                 target_frequency_hz=stage.target_frequency_hz,
-                attention_gain=float(effective_gain),
+                attention_gain=effective_gain,
             )
             if emission.data_uv.shape != (len(model.channel_names), count):
                 raise ValueError(
@@ -395,6 +365,7 @@ def run_scenario(
             "transport": transport_metrics,
             "display": display_metrics,
             "stage_timing": stage_timing,
+            "participant_state": participant_trace.to_summary(),
             "world_model": {
                 "name": model_profile.name,
                 "display_coupled": bool(any(item.get("stimulus_coupling", 0.0) > 0 for item in latent_stage_end)),

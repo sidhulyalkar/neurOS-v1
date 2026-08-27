@@ -31,6 +31,11 @@ from .evaluation import ArenaDecision, evaluate_decisions
 from .evidence import WorldModelEvidenceCard, evidence_card_for_model
 from .leadfield import LeadFieldDrivenWorldModel, export_mne_forward_bundle, save_leadfield_bundle
 from .manifest import ArenaManifest, load_manifest, save_manifest
+from .participant import (
+    PARTICIPANT_RESPONSE_MODEL,
+    ParticipantStateTrace,
+    compile_participant_state_trace,
+)
 from .population import ParameterDistribution, PopulationRun, PopulationSpec, run_population
 from .presets import get_preset, list_presets
 from .reality import RealityAnchorResult, anchor_worlds_by_covariance, anchor_worlds_by_embeddings
@@ -84,8 +89,10 @@ __all__ = [
     "MetamorphicResult",
     "MetricRule",
     "NeuralWorldModel",
+    "PARTICIPANT_RESPONSE_MODEL",
     "ParameterDistribution",
     "ParticipantProfile",
+    "ParticipantStateTrace",
     "PopulationRun",
     "PopulationSpec",
     "RealityAnchorResult",
@@ -103,6 +110,7 @@ __all__ = [
     "check_fail_closed_degradation",
     "check_transport_drop_monotonicity",
     "compare_feature_signatures",
+    "compile_participant_state_trace",
     "evaluate_application_trace",
     "evaluate_decisions",
     "evidence_card_for_model",

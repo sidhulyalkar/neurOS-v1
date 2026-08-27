@@ -23,6 +23,7 @@ from neuros.drivers.synthetic_eeg import (
 )
 
 from .specs import ParticipantProfile
+from .world_input import WorldInputBlock
 
 SOURCE_CHANNELS = ("Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8")
 POSTERIOR_WEIGHTS = np.asarray([0.05, 0.05, 0.08, 0.05, 0.45, 0.85, 1.0, 0.85], dtype=float)
@@ -39,13 +40,7 @@ class WorldModelEmission:
 
 
 class NeuralWorldModel(Protocol):
-    """Minimal contract implemented by Arena-compatible neural generators.
-
-    `inject_artifact` remains the compatibility floor for external world-model
-    plugins. Built-in models additionally expose `schedule_artifact`; the Arena
-    runner detects that capability and uses sample-indexed compilation when it is
-    present rather than making it mandatory for older plugins.
-    """
+    """Minimal compatibility floor for Arena-compatible neural generators."""
 
     name: str
     channel_names: tuple[str, ...]
@@ -62,12 +57,7 @@ class NeuralWorldModel(Protocol):
 
 
 class LegacySyntheticWorldModel:
-    """Compatibility adapter around the original neurOS synthetic EEG driver.
-
-    This model responds to the nominal target frequency rather than the actual
-    frame-quantized luminance trace. It remains available for regression tests,
-    but the causally display-driven model is the Arena default.
-    """
+    """Compatibility adapter around the original neurOS synthetic EEG driver."""
 
     name = "legacy_synthetic"
     channel_names = SOURCE_CHANNELS
@@ -137,20 +127,13 @@ class LegacySyntheticWorldModel:
                 "attention_gain": float(attention_gain),
                 "entrainment": float(attention_gain if target_frequency_hz is not None else 0.0),
                 "stimulus_coupling": 0.0,
+                "participant_stream_coupling": 0.0,
             },
         )
 
 
 class _ArtifactEngine:
-    """Arena adapter over the canonical v3 sample-indexed artifact renderer.
-
-    Arena used to carry an independent mutable one-slot artifact engine. That
-    duplicated source-artifact semantics and reintroduced block-boundary dropout
-    leakage. This adapter deliberately delegates event timing/waveforms/seeding to
-    `SyntheticEEGGenerator` configured with zero background neural amplitudes.
-    Arena world models then overlay the returned additive signal and apply exact
-    dropout masks using the same event provenance.
-    """
+    """Arena adapter over the canonical v3 sample-indexed artifact renderer."""
 
     def __init__(self, sampling_rate_hz: float, seed: int) -> None:
         self.fs = float(sampling_rate_hz)
@@ -194,11 +177,7 @@ class _ArtifactEngine:
     ) -> tuple[np.ndarray, np.ndarray, tuple[DriverArtifactEvent, ...]]:
         samples = int(times_s.size)
         if samples == 0:
-            return (
-                np.empty((8, 0), dtype=float),
-                np.empty((8, 0), dtype=bool),
-                (),
-            )
+            return np.empty((8, 0), dtype=float), np.empty((8, 0), dtype=bool), ()
         block_start = self.generator.sample_index
         block = self.generator.render(samples)
         dropout_mask = np.zeros((8, samples), dtype=bool)
@@ -220,14 +199,9 @@ class _ArtifactEngine:
 class DrivenStateSpaceWorldModel:
     """Causal stochastic EEG state-space model driven by emitted luminance.
 
-    The model contains correlated background dynamics, an endogenous posterior
-    alpha oscillator, and a damped stimulus-entrainment state. The stimulus
-    state is driven by the *actual sample-and-held display waveform* supplied by
-    Arena, not by an ideal sine wave. This makes frame drops and timing jitter
-    causally visible in the generated EEG.
-
-    It is intentionally phenomenological rather than a biophysical neural-mass
-    model. More expensive MNE/TVB/learned models can implement the same contract.
+    The participant attention drive may be supplied per source sample through
+    `WorldInputBlock.participant_streams`. The older scalar `render(...)` path is
+    retained for compatibility and expands its scalar across the requested block.
     """
 
     name = "driven_state_space"
@@ -288,23 +262,29 @@ class DrivenStateSpaceWorldModel:
             seed=seed,
         )
 
-    def render(
+    def _render_with_attention_stream(
         self,
         sample_times_s: np.ndarray,
         emitted_stimulus: np.ndarray,
         target_frequency_hz: float | None,
-        attention_gain: float,
+        attention_gain: np.ndarray,
     ) -> WorldModelEmission:
         times = np.asarray(sample_times_s, dtype=float)
         drive = np.asarray(emitted_stimulus, dtype=float)
-        if times.ndim != 1 or drive.shape != times.shape:
-            raise ValueError("sample_times_s and emitted_stimulus must be matching 1-D arrays")
+        gain = np.asarray(attention_gain, dtype=float)
+        if times.ndim != 1 or drive.shape != times.shape or gain.shape != times.shape:
+            raise ValueError("time, emitted stimulus and attention gain must be matching 1-D arrays")
+        if not np.all(np.isfinite(gain)) or np.any(gain < 0):
+            raise ValueError("attention gain stream must be finite and non-negative")
         samples = times.size
         if samples == 0:
-            return WorldModelEmission(np.empty((8, 0), dtype=np.float32), {"entrainment": self._entrainment})
+            return WorldModelEmission(
+                np.empty((8, 0), dtype=np.float32),
+                {"entrainment": self._entrainment, "participant_stream_coupling": 1.0},
+            )
         dt = 1.0 / self.fs
         data = np.empty((8, samples), dtype=float)
-        target_gain = float(max(0.0, attention_gain)) if target_frequency_hz is not None else 0.0
+        target_gain = gain if target_frequency_hz is not None else np.zeros(samples, dtype=float)
         alpha_omega = 2.0 * np.pi * self.participant.alpha_frequency_hz
         target_omega = 0.0 if target_frequency_hz is None else 2.0 * np.pi * float(target_frequency_hz)
         innovation_scale = np.sqrt(max(1.0 - self.background_persistence**2, 1e-9))
@@ -313,7 +293,7 @@ class DrivenStateSpaceWorldModel:
                 self.background_persistence * self._background
                 + innovation_scale * self.rng.normal(size=8)
             )
-            self._entrainment += (target_gain - self._entrainment) * min(1.0, dt / self.entrainment_tau_s)
+            self._entrainment += (float(target_gain[i]) - self._entrainment) * min(1.0, dt / self.entrainment_tau_s)
             alpha = np.sin(alpha_omega * times[i] + self._alpha_phase + self._alpha_channel_phase)
             if target_frequency_hz is None:
                 self._resonator_x *= 0.98
@@ -341,10 +321,38 @@ class DrivenStateSpaceWorldModel:
         return WorldModelEmission(
             data_uv=data.astype(np.float32),
             latent={
-                "attention_gain": target_gain,
+                "attention_gain": float(target_gain[-1]) if target_gain.size else 0.0,
                 "entrainment": float(self._entrainment),
                 "resonator_x": float(self._resonator_x),
                 "resonator_v": float(self._resonator_v),
                 "stimulus_coupling": 1.0,
+                "participant_stream_coupling": 1.0,
             },
+        )
+
+    def render_world(self, block: WorldInputBlock) -> WorldModelEmission:
+        block.validate()
+        raw_frequency = block.target.get("frequency_hz")
+        target_frequency_hz = None if raw_frequency is None else float(raw_frequency)
+        return self._render_with_attention_stream(
+            block.sample_times_s,
+            block.visual_luminance,
+            target_frequency_hz,
+            block.attention_gain,
+        )
+
+    def render(
+        self,
+        sample_times_s: np.ndarray,
+        emitted_stimulus: np.ndarray,
+        target_frequency_hz: float | None,
+        attention_gain: float,
+    ) -> WorldModelEmission:
+        times = np.asarray(sample_times_s, dtype=float)
+        gain = np.full(times.size, max(0.0, float(attention_gain)), dtype=float)
+        return self._render_with_attention_stream(
+            times,
+            emitted_stimulus,
+            target_frequency_hz,
+            gain,
         )

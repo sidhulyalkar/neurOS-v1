@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from neuros.arena import (
     ArenaManifest,
@@ -10,6 +11,7 @@ from neuros.arena import (
     ParticipantProfile,
     StageSpec,
     TransportProfile,
+    WorldInputBlock,
     WorldModelEmission,
     WorldModelProfile,
     run_scenario,
@@ -29,12 +31,14 @@ class RichProbeWorldModel:
         return None
 
     def render_world(self, block):
+        block.validate()
         RichProbeWorldModel.seen.append({
             "paradigm": block.paradigm,
             "stage": block.stage_label,
             "target": dict(block.target),
             "task_state": dict(block.task_state),
             "attention_gain": block.participant_state.get("attention_gain"),
+            "attention_stream": block.attention_gain.copy(),
             "visual_shape": block.visual_luminance.shape,
         })
         amplitude = 2.0 if block.target.get("oddball") is True else 0.0
@@ -107,10 +111,61 @@ def test_runner_prefers_paradigm_neutral_render_world_contract():
     assert any(item["target"].get("oddball") is True for item in RichProbeWorldModel.seen)
     assert all(item["paradigm"] == "p300" for item in RichProbeWorldModel.seen)
     assert all(item["visual_shape"] for item in RichProbeWorldModel.seen)
+    # Arena's built-in participant_response.v1 is explicitly frequency-target
+    # scoped. A P300 plugin receives the rich transport surface but does not
+    # inherit made-up SSVEP attention dynamics.
+    assert all(np.all(item["attention_stream"] == 0.0) for item in RichProbeWorldModel.seen)
     assert float(np.max(run.device_output.data_uv)) > 1.5
 
 
-def test_manifest_v1_round_trip_preserves_rich_stage_metadata():
+def test_world_input_rejects_bad_participant_stream_geometry_and_nonfinite_values():
+    times = np.arange(5, dtype=float) / 250.0
+    base = dict(
+        sample_times_s=times,
+        paradigm="ssvep",
+        stage_label="target",
+        emitted_streams={"visual_luminance": np.zeros(5)},
+        target={"frequency_hz": 10.0},
+    )
+    with pytest.raises(ValueError, match="participant_streams.attention_gain"):
+        WorldInputBlock(
+            **base,
+            participant_streams={"attention_gain": np.zeros(4)},
+        ).validate()
+    bad = np.zeros(5)
+    bad[2] = np.nan
+    with pytest.raises(ValueError, match="participant_streams.attention_gain"):
+        WorldInputBlock(
+            **base,
+            participant_streams={"attention_gain": bad},
+        ).validate()
+
+
+def test_attention_gain_property_prefers_stream_and_falls_back_to_scalar():
+    times = np.arange(4, dtype=float) / 250.0
+    streamed = WorldInputBlock(
+        sample_times_s=times,
+        paradigm="ssvep",
+        stage_label="target",
+        emitted_streams={},
+        participant_state={"attention_gain": 0.2},
+        participant_streams={"attention_gain": np.asarray([0.0, 0.1, 0.3, 0.6])},
+    )
+    streamed.validate()
+    np.testing.assert_array_equal(streamed.attention_gain, [0.0, 0.1, 0.3, 0.6])
+
+    scalar = WorldInputBlock(
+        sample_times_s=times,
+        paradigm="ssvep",
+        stage_label="target",
+        emitted_streams={},
+        participant_state={"attention_gain": 0.25},
+    )
+    scalar.validate()
+    np.testing.assert_array_equal(scalar.attention_gain, np.full(4, 0.25))
+
+
+def test_manifest_v2_round_trip_preserves_rich_stage_metadata():
     manifest = ArenaManifest(
         ArenaScenario(
             "rich-manifest",

@@ -248,6 +248,28 @@ class StageSpec:
         _validate_scalar_mapping("stage.target", self.target)
         _validate_scalar_mapping("stage.task_state", self.task_state)
 
+        # `frequency_hz` inside generic target metadata is a reserved mirror of
+        # the typed frequency-target authority. Allowing it without the typed
+        # field would let rich world models see a target while participant state
+        # and Arena ground truth still describe rest.
+        if "frequency_hz" in self.target:
+            if self.target_frequency_hz is None:
+                raise ValueError(
+                    "stage.target.frequency_hz is reserved; set authoritative target_frequency_hz instead"
+                )
+            metadata_frequency = self.target["frequency_hz"]
+            if isinstance(metadata_frequency, bool) or not isinstance(metadata_frequency, (int, float, np.integer, np.floating)):
+                raise ValueError("stage.target.frequency_hz must be numeric when target_frequency_hz is set")
+            if not np.isfinite(float(metadata_frequency)) or not np.isclose(
+                float(metadata_frequency),
+                float(self.target_frequency_hz),
+                rtol=0.0,
+                atol=1e-12,
+            ):
+                raise ValueError(
+                    "stage.target.frequency_hz conflicts with authoritative target_frequency_hz"
+                )
+
 
 @dataclass(frozen=True)
 class ArenaScenario:

@@ -7,7 +7,6 @@ models continue to implement the original ``render`` method.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
@@ -19,10 +18,10 @@ _JSON_SCALAR = str | int | float | bool | None
 class WorldInputBlock:
     """One causal chunk presented to a paradigm-neutral neural world model.
 
-    ``emitted_streams`` contains physical/simulated sensory streams *after*
-    presentation effects. Examples include ``visual_luminance``, audio envelope,
-    haptic pulses, or future VR pose-dependent stimulus values. ``target`` and
-    ``task_state`` are declarative labels/metadata, not decoded neural truth.
+    ``emitted_streams`` contains physical/simulated sensory streams after
+    presentation effects. ``participant_streams`` contains resolved synthetic
+    participant state on the same sample clock. Scalar ``participant_state`` is
+    retained as a compatibility/summary surface for older plugins.
     """
 
     sample_times_s: np.ndarray
@@ -32,6 +31,7 @@ class WorldInputBlock:
     target: dict[str, _JSON_SCALAR] = field(default_factory=dict)
     task_state: dict[str, _JSON_SCALAR] = field(default_factory=dict)
     participant_state: dict[str, _JSON_SCALAR] = field(default_factory=dict)
+    participant_streams: dict[str, np.ndarray] = field(default_factory=dict)
 
     def validate(self) -> None:
         times = np.asarray(self.sample_times_s, dtype=float)
@@ -39,12 +39,18 @@ class WorldInputBlock:
             raise ValueError("sample_times_s must be a finite 1-D array")
         if not self.paradigm or not self.stage_label:
             raise ValueError("paradigm and stage_label are required")
-        for name, values in self.emitted_streams.items():
-            if not name:
-                raise ValueError("emitted stream names must be non-empty")
-            array = np.asarray(values, dtype=float)
-            if array.shape != times.shape or not np.all(np.isfinite(array)):
-                raise ValueError(f"emitted stream {name!r} must be finite and match sample_times_s")
+        for mapping_name, streams in (
+            ("emitted_streams", self.emitted_streams),
+            ("participant_streams", self.participant_streams),
+        ):
+            for name, values in streams.items():
+                if not name:
+                    raise ValueError(f"{mapping_name} names must be non-empty")
+                array = np.asarray(values, dtype=float)
+                if array.shape != times.shape or not np.all(np.isfinite(array)):
+                    raise ValueError(
+                        f"{mapping_name}.{name} must be finite and match sample_times_s"
+                    )
         for mapping_name, mapping in (
             ("target", self.target),
             ("task_state", self.task_state),
@@ -64,3 +70,11 @@ class WorldInputBlock:
         if values is None:
             return np.zeros(np.asarray(self.sample_times_s).size, dtype=float)
         return np.asarray(values, dtype=float)
+
+    @property
+    def attention_gain(self) -> np.ndarray:
+        values = self.participant_streams.get("attention_gain")
+        if values is not None:
+            return np.asarray(values, dtype=float)
+        scalar = float(self.participant_state.get("attention_gain", 0.0) or 0.0)
+        return np.full(np.asarray(self.sample_times_s).size, scalar, dtype=float)
