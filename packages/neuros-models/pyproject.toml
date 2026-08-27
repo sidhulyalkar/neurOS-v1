@@ -36,6 +36,10 @@ dependencies = [
 
 [project.optional-dependencies]
 pytorch = ["torch>=2.1.0"]
+artifact = [
+    "torch>=2.1.0",
+    "safetensors>=0.4.3",
+]
 braindecode = ["braindecode>=1.7,<1.8; python_version >= '3.11'"]
 mechint = [
     "torch>=2.1.0",
@@ -43,11 +47,13 @@ mechint = [
 ]
 dev = [
     "torch>=2.1.0",
+    "safetensors>=0.4.3",
     "pytest>=7.4",
     "pytest-cov>=4.1",
 ]
 all = [
     "torch>=2.1.0",
+    "safetensors>=0.4.3",
     "neuros-mechint>=1.0.0",
     "braindecode>=1.7,<1.8; python_version >= '3.11'",
 ]
