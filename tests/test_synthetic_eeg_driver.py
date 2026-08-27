@@ -4,9 +4,11 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from neuros.drivers.synthetic_eeg import SyntheticEEGConfig, SyntheticEEGGenerator
 from neuros.drivers.synthetic_eeg_driver import (
+    SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT,
     SYNTHETIC_EEG_GENERATOR_CONTRACT,
     SyntheticEEGDriver,
 )
@@ -48,6 +50,41 @@ def _expected_generator_config() -> dict[str, object]:
         "first_harmonic_ratio": 0.42,
         "seed": 41,
     }
+
+
+def _schedule_overlap_world(generator: SyntheticEEGGenerator, order: tuple[str, ...]) -> None:
+    specs = {
+        "blink": (
+            "blink",
+            {
+                "event_id": "blink-A",
+                "duration_seconds": 0.30,
+                "start_sample": 20,
+                "severity": 0.7,
+            },
+        ),
+        "controller": (
+            "controller",
+            {
+                "event_id": "controller-A",
+                "duration_seconds": 0.40,
+                "start_sample": 10,
+                "severity": 0.9,
+            },
+        ),
+        "dropout": (
+            "dropout",
+            {
+                "event_id": "dropout-A",
+                "duration_seconds": 0.10,
+                "start_sample": 40,
+                "channels": ("PO7", "Oz"),
+            },
+        ),
+    }
+    for name in order:
+        kind, kwargs = specs[name]
+        generator.schedule_artifact(kind, **kwargs)
 
 
 def test_ssvep_strength_is_controllable_and_posterior():
@@ -94,6 +131,125 @@ def test_seeded_controller_artifact_is_also_partition_invariant():
     actual = _render_partitioned(partitioned, (11, 26, 9, 54))
 
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-6)
+
+
+def test_overlapping_artifacts_are_insertion_order_and_partition_invariant():
+    cfg = SyntheticEEGConfig(seed=101)
+
+    forward = SyntheticEEGGenerator(cfg)
+    _schedule_overlap_world(forward, ("blink", "controller", "dropout"))
+    expected_block = forward.render(150)
+
+    reversed_world = SyntheticEEGGenerator(cfg)
+    _schedule_overlap_world(reversed_world, ("dropout", "controller", "blink"))
+    reversed_block = reversed_world.render(150)
+
+    partitioned = SyntheticEEGGenerator(cfg)
+    _schedule_overlap_world(partitioned, ("controller", "blink", "dropout"))
+    partitioned_data = _render_partitioned(partitioned, (13, 17, 29, 1, 40, 50))
+
+    np.testing.assert_allclose(reversed_block.data_uv, expected_block.data_uv, rtol=0.0, atol=1e-6)
+    np.testing.assert_allclose(partitioned_data, expected_block.data_uv, rtol=0.0, atol=1e-6)
+    assert expected_block.artifact == "multiple"
+    assert expected_block.artifact_ids == ("blink-A", "controller-A", "dropout-A")
+
+
+def test_scheduled_dropout_has_exact_sample_channel_support_and_provenance():
+    cfg = SyntheticEEGConfig(seed=103)
+    generator = SyntheticEEGGenerator(cfg)
+    event = generator.schedule_artifact(
+        "dropout",
+        event_id="posterior-contact-loss",
+        duration_seconds=10 / cfg.sampling_rate_hz,
+        start_sample=7,
+        channels=("PO7", "Oz"),
+    )
+    block = generator.render(30)
+
+    assert event.start_sample == 7
+    assert event.end_sample == 17
+    assert event.channel_indices == (5, 6)
+    assert event.evidence_class == "synthetic_assumption"
+    assert block.artifact_ids == ("posterior-contact-loss",)
+    assert np.allclose(block.data_uv[5:7, 7:17], 0.0)
+    assert not np.allclose(block.data_uv[5:7, :7], 0.0)
+    assert not np.allclose(block.data_uv[4, 7:17], 0.0)
+    assert generator.scheduled_artifacts == ()
+
+
+def test_future_stochastic_event_does_not_perturb_current_event():
+    cfg = SyntheticEEGConfig(seed=107)
+
+    current_only = SyntheticEEGGenerator(cfg)
+    current_only.schedule_artifact(
+        "controller",
+        event_id="controller-now",
+        start_sample=0,
+        duration_seconds=0.2,
+        seed=123,
+    )
+    expected = current_only.render(50).data_uv
+
+    with_future = SyntheticEEGGenerator(cfg)
+    with_future.schedule_artifact(
+        "controller",
+        event_id="controller-now",
+        start_sample=0,
+        duration_seconds=0.2,
+        seed=123,
+    )
+    with_future.schedule_artifact(
+        "controller",
+        event_id="controller-later",
+        start_sample=100,
+        duration_seconds=0.2,
+        seed=456,
+    )
+    actual = with_future.render(50).data_uv
+
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-6)
+    assert tuple(event.event_id for event in with_future.scheduled_artifacts) == (
+        "controller-later",
+    )
+
+
+def test_legacy_injection_preserves_single_slot_replacement_semantics():
+    generator = SyntheticEEGGenerator(SyntheticEEGConfig(seed=109))
+    generator.schedule_artifact(
+        "blink",
+        event_id="scheduled-blink",
+        start_sample=0,
+        duration_seconds=0.5,
+    )
+    generator.inject_artifact("controller", duration_seconds=0.2)
+
+    assert len(generator.scheduled_artifacts) == 1
+    assert generator.scheduled_artifacts[0].event_id.startswith("legacy-")
+    assert generator.scheduled_artifacts[0].kind == "controller"
+
+
+def test_scheduler_rejects_ambiguous_duplicate_and_past_events():
+    generator = SyntheticEEGGenerator(SyntheticEEGConfig(seed=113))
+    generator.schedule_artifact("blink", event_id="blink-A", duration_seconds=0.1)
+    with pytest.raises(ValueError, match="already scheduled"):
+        generator.schedule_artifact("motion", event_id="blink-A", duration_seconds=0.1)
+
+    generator.render(10)
+    with pytest.raises(ValueError, match="already-rendered past"):
+        generator.schedule_artifact(
+            "motion",
+            event_id="past-motion",
+            start_sample=0,
+            duration_seconds=0.1,
+        )
+    with pytest.raises(ValueError, match="either start_sample or delay_seconds"):
+        generator.schedule_artifact(
+            "motion",
+            event_id="ambiguous-motion",
+            start_sample=10,
+            delay_seconds=0.1,
+            duration_seconds=0.1,
+        )
 
 
 def test_dropout_duration_is_sample_exact_when_render_block_outlives_artifact():
@@ -143,7 +299,30 @@ def test_driver_exposes_versioned_replay_configuration():
     assert descriptor.channel_names == ("Fz", "C3", "Cz", "C4", "Pz", "PO7", "Oz", "PO8")
     assert descriptor.metadata["synthetic"] is True
     assert descriptor.metadata["generator"] == SYNTHETIC_EEG_GENERATOR_CONTRACT
+    assert descriptor.metadata["generator"] == "neuros.synthetic_eeg.v3"
+    assert descriptor.metadata["artifact_scheduler"] == SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT
+    assert descriptor.metadata["artifact_scheduler"] == "neuros.synthetic_eeg.artifact_schedule.v1"
+    assert descriptor.metadata["artifact_schedule_in_descriptor"] is False
     assert descriptor.metadata["generator_config"] == _expected_generator_config()
+
+
+def test_driver_exposes_composable_scheduler_without_bypassing_generator_contract():
+    driver = SyntheticEEGDriver(SyntheticEEGConfig(seed=127), realtime=False)
+    event = driver.schedule_artifact(
+        "controller",
+        event_id="driver-controller",
+        duration_seconds=0.2,
+        delay_seconds=0.1,
+        channels=("C3", "C4"),
+        seed=999,
+    )
+    assert event.start_sample == 25
+    assert event.end_sample == 75
+    assert event.channel_indices == (1, 3)
+    assert driver.scheduled_artifacts == (event,)
+    assert driver.cancel_artifact("driver-controller") is True
+    assert driver.scheduled_artifacts == ()
+    assert driver.cancel_artifact("driver-controller") is False
 
 
 def test_generator_contract_and_seed_survive_session_archive_serialization(tmp_path: Path):
@@ -154,4 +333,6 @@ def test_generator_contract_and_seed_survive_session_archive_serialization(tmp_p
     manifest = json.loads((tmp_path / "session" / "manifest.json").read_text(encoding="utf-8"))
     metadata = manifest["streams"]["phantom"]["descriptor"]["metadata"]
     assert metadata["generator"] == SYNTHETIC_EEG_GENERATOR_CONTRACT
+    assert metadata["artifact_scheduler"] == SYNTHETIC_EEG_ARTIFACT_SCHEDULER_CONTRACT
+    assert metadata["artifact_schedule_in_descriptor"] is False
     assert metadata["generator_config"] == _expected_generator_config()

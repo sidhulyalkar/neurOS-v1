@@ -8,7 +8,9 @@ on:
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
       - "tests/test_synthetic_eeg_driver.py"
+      - "tests/test_synthetic_eeg_control_contracts.py"
       - "tests/test_unicorn_*.py"
+      - "examples/mindforge_phantom_unicorn.py"
       - "examples/unicorn_*.py"
       - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
@@ -22,7 +24,9 @@ on:
       - "tests/test_brainflow_driver.py"
       - "tests/test_lsl_driver.py"
       - "tests/test_synthetic_eeg_driver.py"
+      - "tests/test_synthetic_eeg_control_contracts.py"
       - "tests/test_unicorn_*.py"
+      - "examples/mindforge_phantom_unicorn.py"
       - "examples/unicorn_*.py"
       - "examples/game_engines/csharp/**"
       - ".github/workflows/drivers-ci.yml"
@@ -86,6 +90,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_synthetic_eeg_driver.py \
+            tests/test_synthetic_eeg_control_contracts.py \
             tests/test_unicorn_hybrid_black_sim.py \
             tests/test_unicorn_api_sim.py \
             tests/test_unicorn_network_sim.py \
@@ -113,6 +118,7 @@ jobs:
       - name: Syntax-check real-time substitution and trace endpoints
         run: |
           python -m py_compile \
+            examples/mindforge_phantom_unicorn.py \
             examples/unicorn_hybrid_black_simulator.py \
             examples/unicorn_udp_simulator.py \
             examples/unicorn_raw_udp_trace_capture.py \
