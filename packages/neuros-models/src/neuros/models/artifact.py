@@ -1,22 +1,24 @@
-"""Public authority surface for the hardened Model Artifact v1 implementation.
+"""Public Model Artifact v1 authority facade.
 
-The implementation module owns canonical serialization. This facade keeps two
-separate authorities explicit:
-
-- envelope verification: bounded, strict content/integrity inspection without
-  constructing a model;
-- runtime authority: required reconstruction packages, honest output/backend
-  semantics, and bounded constructor resources before trusted factory code runs.
+Canonical serialization, runtime execution policy, and content-addressed storage
+are intentionally separate modules. This facade composes the first two without
+letting envelope verification silently become execution authorization.
 """
 
 from __future__ import annotations
 
 import shutil
 from functools import wraps
-from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Mapping
 
+from neuros.models.artifact_policy import (
+    preflight_bundle_size,
+    validate_backend_runtime,
+    validate_declared_environment,
+    validate_output_contract,
+    validate_runtime_authority,
+)
 from neuros.models.artifact_v1 import (
     ArtifactBackedDecoder,
     ModelArtifactManifest,
@@ -27,265 +29,37 @@ from neuros.models.artifact_v1 import (
     verify_model_artifact as _verify_model_artifact,
 )
 
-_REQUIRED_RUNTIME_PACKAGES = frozenset(
-    {"neuros-models", "neuros-core", "numpy", "torch", "safetensors"}
-)
-_MAX_MANIFEST_BYTES = 4 * 1024 * 1024
-_MAX_WEIGHTS_BYTES = 512 * 1024 * 1024
-_MAX_PARAMETER_BUDGET = 50_000_000
-
-
-def _positive_int(config: Mapping[str, Any], name: str, *, maximum: int) -> int:
-    value = config.get(name)
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"artifact model_config[{name!r}] must be a positive integer")
-    if value > maximum:
-        raise ValueError(
-            f"artifact model_config[{name!r}]={value} exceeds the built-in v1 resource budget "
-            f"of {maximum}"
-        )
-    return value
-
-
-def _bounded_product(name: str, *values: int, maximum: int = _MAX_PARAMETER_BUDGET) -> int:
-    result = 1
-    for value in values:
-        result *= value
-        if result > maximum:
-            raise ValueError(
-                f"artifact {name} requests approximately {result:,} scalar parameters/elements, "
-                f"exceeding the built-in v1 resource budget of {maximum:,}"
-            )
-    return result
-
-
-def _validate_factory_resource_budget(manifest: ModelArtifactManifest) -> None:
-    """Reject malicious/accidental constructor geometries before allocation."""
-
-    config = dict(manifest.model_config)
-    factory = manifest.factory_id
-    _positive_int(config, "n_classes", maximum=4096)
-
-    if factory == "neuros.eegnet.v1":
-        channels = _positive_int(config, "n_channels", maximum=8192)
-        temporal = _positive_int(config, "temporal_filters", maximum=2048)
-        depth = _positive_int(config, "depth_multiplier", maximum=128)
-        separable = _positive_int(config, "separable_filters", maximum=4096)
-        temporal_kernel = _positive_int(config, "temporal_kernel", maximum=65535)
-        separable_kernel = _positive_int(config, "separable_kernel", maximum=65535)
-        _bounded_product("EEGNet temporal convolution", temporal, temporal_kernel)
-        _bounded_product("EEGNet spatial projection", temporal, depth, channels)
-        _bounded_product("EEGNet separable projection", temporal, depth, separable_kernel)
-        _bounded_product("EEGNet feature mixing", temporal, depth, separable)
-        return
-
-    if factory == "neuros.cnn.v1":
-        channels = _positive_int(config, "n_channels", maximum=8192)
-        hidden = _positive_int(config, "hidden_channels", maximum=4096)
-        blocks = _positive_int(config, "n_blocks", maximum=128)
-        kernel = _positive_int(config, "kernel_size", maximum=65535)
-        _bounded_product("CNN input projection", channels, hidden, kernel)
-        _bounded_product("CNN residual stack", hidden, hidden, kernel, blocks, maximum=100_000_000)
-        return
-
-    if factory == "neuros.lstm.v1":
-        channels = _positive_int(config, "n_channels", maximum=8192)
-        units = _positive_int(config, "lstm_units", maximum=4096)
-        layers = _positive_int(config, "n_lstm_layers", maximum=64)
-        directions = 2 if config.get("bidirectional") is True else 1
-        _bounded_product(
-            "LSTM recurrent state",
-            4,
-            units,
-            units + channels,
-            layers,
-            directions,
-            maximum=100_000_000,
-        )
-        return
-
-    if factory == "neuros.transformer.v1":
-        channels = _positive_int(config, "n_channels", maximum=8192)
-        d_model = _positive_int(config, "d_model", maximum=2048)
-        heads = _positive_int(config, "n_heads", maximum=128)
-        layers = _positive_int(config, "n_layers", maximum=64)
-        feedforward = _positive_int(config, "dim_feedforward", maximum=16384)
-        max_timepoints = _positive_int(config, "max_timepoints", maximum=262144)
-        if d_model % heads:
-            raise ValueError("artifact Transformer d_model must remain divisible by n_heads")
-        _bounded_product("Transformer input projection", channels, d_model)
-        _bounded_product(
-            "Transformer positional buffer", max_timepoints + 1, d_model, maximum=25_000_000
-        )
-        _bounded_product(
-            "Transformer feed-forward stack",
-            layers,
-            d_model,
-            feedforward,
-            maximum=100_000_000,
-        )
-        return
-
-    if factory == "neuros.eeg_conformer.v1":
-        channels = _positive_int(config, "n_channels", maximum=8192)
-        embedding = _positive_int(config, "embedding_dim", maximum=2048)
-        heads = _positive_int(config, "n_heads", maximum=128)
-        layers = _positive_int(config, "n_layers", maximum=64)
-        multiplier = _positive_int(config, "feedforward_multiplier", maximum=64)
-        temporal_kernel = _positive_int(config, "temporal_kernel", maximum=65535)
-        if embedding % heads:
-            raise ValueError("artifact EEG-Conformer embedding_dim must remain divisible by n_heads")
-        _bounded_product("EEG-Conformer temporal stem", embedding, temporal_kernel)
-        _bounded_product("EEG-Conformer spatial stem", embedding, channels)
-        _bounded_product(
-            "EEG-Conformer transformer stack",
-            layers,
-            embedding,
-            embedding * multiplier,
-            maximum=100_000_000,
-        )
-        return
-
-    if factory == "neuros.attention_fusion.v1":
-        dims = config.get("modality_dims")
-        if not isinstance(dims, (list, tuple)) or not dims or len(dims) > 128:
-            raise ValueError("artifact modality_dims must contain between 1 and 128 dimensions")
-        normalized: list[int] = []
-        for index, value in enumerate(dims):
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > 65536:
-                raise ValueError(
-                    f"artifact modality_dims[{index}] must be an integer in [1, 65536]"
-                )
-            normalized.append(value)
-        fusion = _positive_int(config, "fusion_dim", maximum=4096)
-        total = sum(normalized)
-        if total > 262144:
-            raise ValueError("artifact modality_dims total exceeds built-in v1 resource budget")
-        _bounded_product("attention-fusion projections", total, fusion)
-        return
-
-    raise ValueError(f"artifact factory {factory!r} has no built-in v1 resource policy")
-
-
-def _validate_runtime_authority(manifest: ModelArtifactManifest) -> ModelArtifactManifest:
-    missing = _REQUIRED_RUNTIME_PACKAGES - set(manifest.package_versions)
-    if missing:
-        raise ValueError(
-            "Model Artifact v1 runtime authority is incomplete; missing exact package identities "
-            f"for {sorted(missing)}"
-        )
-    if manifest.backend != "pytorch":
-        raise ValueError("built-in Model Artifact v1 factories require backend='pytorch'")
-
-    output = manifest.output_contract
-    if output.task != "classification":
-        raise ValueError("built-in Model Artifact v1 factories support classification semantics only")
-    if output.score_semantics != "class_logits":
-        raise ValueError("built-in Model Artifact v1 factories emit class_logits")
-    if output.probability_semantics != "uncalibrated_softmax":
-        raise ValueError("built-in Model Artifact v1 factories emit uncalibrated_softmax only")
-    if output.uncertainty_semantics != "none":
-        raise ValueError(
-            "built-in Model Artifact v1 factories do not emit a qualified uncertainty estimate"
-        )
-
-    _validate_factory_resource_budget(manifest)
-    return manifest
-
-
-def _validate_declared_environment(package_versions: Mapping[str, str]) -> None:
-    """Ensure explicit promotion metadata describes the environment actually running."""
-
-    missing = _REQUIRED_RUNTIME_PACKAGES - set(package_versions)
-    if missing:
-        raise ValueError(
-            "custom package_versions cannot weaken Model Artifact v1 runtime authority; "
-            f"missing {sorted(missing)}"
-        )
-    for distribution, declared in package_versions.items():
-        if not isinstance(distribution, str) or not distribution.strip():
-            raise ValueError("package_versions keys must be non-empty distribution names")
-        if not isinstance(declared, str) or not declared.strip():
-            raise ValueError("package_versions values must be non-empty version strings")
-        try:
-            actual = importlib_metadata.version(distribution)
-        except importlib_metadata.PackageNotFoundError as exc:
-            raise ValueError(
-                f"cannot promote package identity {distribution!r}: distribution is not installed"
-            ) from exc
-        if actual != declared:
-            raise ValueError(
-                f"declared package identity {distribution}=={declared} does not match "
-                f"the promotion environment ({actual})"
-            )
-
-
-def _validate_backend_runtime(manifest: ModelArtifactManifest) -> None:
-    """Bind framework-reported backend identity separately from distribution metadata."""
-
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - package authority catches normal installs
-        raise RuntimeError("PyTorch is required to load built-in Model Artifact v1 decoders") from exc
-    actual = str(torch.__version__)
-    if manifest.backend_version != actual:
-        raise RuntimeError(
-            f"artifact backend_version={manifest.backend_version!r} does not match "
-            f"the active PyTorch runtime {actual!r}"
-        )
-
-
-def _preflight_bundle_size(path: str | Path) -> None:
-    root = Path(path)
-    if root.is_symlink():
-        raise ValueError("model artifact root cannot be a symbolic link")
-    manifest_path = root / "manifest.json"
-    weights_path = root / "weights.safetensors"
-    if manifest_path.exists() and not manifest_path.is_symlink():
-        if manifest_path.stat().st_size > _MAX_MANIFEST_BYTES:
-            raise ValueError(
-                f"model artifact manifest exceeds {_MAX_MANIFEST_BYTES} byte v1 safety limit"
-            )
-    if weights_path.exists() and not weights_path.is_symlink():
-        if weights_path.stat().st_size > _MAX_WEIGHTS_BYTES:
-            raise ValueError(
-                f"model artifact weights exceed {_MAX_WEIGHTS_BYTES} byte built-in v1 safety limit"
-            )
-
 
 @wraps(_verify_model_artifact)
 def verify_model_artifact(path: str | Path) -> ModelArtifactManifest:
     """Verify bounded envelope/content identity without approving execution."""
 
-    _preflight_bundle_size(path)
+    preflight_bundle_size(path)
     return _verify_model_artifact(path)
 
 
 @wraps(_export_model_artifact)
 def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
+    """Promote a trained built-in decoder under the strict v1 runtime policy."""
+
     package_versions = kwargs.get("package_versions")
     if package_versions is not None:
         if not isinstance(package_versions, Mapping):
             raise TypeError("package_versions must be a mapping")
-        _validate_declared_environment(package_versions)
+        validate_declared_environment(package_versions)
 
     output_contract = kwargs.get("output_contract")
     if output_contract is not None:
-        if not isinstance(output_contract, ModelOutputContract):
-            raise TypeError("output_contract must be a ModelOutputContract")
-        if output_contract.task != "classification":
-            raise ValueError("built-in Model Artifact v1 factories support classification only")
-        if output_contract.score_semantics != "class_logits":
-            raise ValueError("built-in Model Artifact v1 factories emit class_logits")
-        if output_contract.uncertainty_semantics != "none":
-            raise ValueError("built-in Model Artifact v1 factories do not emit qualified uncertainty")
+        validate_output_contract(output_contract)
 
     manifest = _export_model_artifact(*args, **kwargs)
     try:
-        _validate_runtime_authority(manifest)
-        _validate_backend_runtime(manifest)
+        validate_runtime_authority(manifest)
+        validate_backend_runtime(manifest)
         return manifest
     except Exception:
+        # A serializer-valid bundle that fails the public promotion policy must
+        # not remain at the requested destination looking promoted.
         output_dir = kwargs.get("output_dir")
         if output_dir is None and len(args) >= 2:
             output_dir = args[1]
@@ -298,11 +72,11 @@ def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
 
 @wraps(_load_model_artifact)
 def load_model_artifact(path: str | Path, *, device: str = "cpu") -> ArtifactBackedDecoder:
-    """Verify envelope then authorize runtime before any trusted allocation."""
+    """Verify envelope then authorize runtime before trusted model allocation."""
 
     manifest = verify_model_artifact(path)
-    _validate_runtime_authority(manifest)
-    _validate_backend_runtime(manifest)
+    validate_runtime_authority(manifest)
+    validate_backend_runtime(manifest)
     return _load_model_artifact(path, device=device)
 
 
