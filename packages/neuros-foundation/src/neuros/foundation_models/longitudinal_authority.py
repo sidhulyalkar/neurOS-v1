@@ -172,6 +172,18 @@ def _indices_tuple(name: str, values: Any) -> tuple[int, ...]:
     return result
 
 
+def _shape_tuple(name: str, values: Any) -> tuple[int, ...]:
+    """Validate tensor dimensions without applying sample-index uniqueness rules."""
+
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be an iterable of positive integer dimensions")
+    try:
+        raw = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be an iterable of positive integer dimensions") from exc
+    return tuple(_exact_int(name, value, minimum=1) for value in raw)
+
+
 def _string_tuple(name: str, values: Any, *, allow_empty: bool = True) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{name} must be a sequence of strings")
@@ -275,8 +287,8 @@ class LongitudinalCaseAuthority:
         if any(value >= n_samples for value in (*source_indices, *evaluation_indices, *calibration_flat)):
             raise ValueError("longitudinal authority contains out-of-range indices")
 
-        shape = _indices_tuple("input_shape", self.input_shape)
-        if not shape or shape[0] != n_samples or any(value < 1 for value in shape):
+        shape = _shape_tuple("input_shape", self.input_shape)
+        if not shape or shape[0] != n_samples:
             raise ValueError("input_shape must contain positive dimensions and begin with n_samples")
         partition = self.partition_fingerprint
         calibration_fp = self.calibration_split_fingerprint
@@ -431,7 +443,7 @@ class LongitudinalCaseAuthority:
             calibration_split_fingerprint=payload["calibration_split_fingerprint"],
             processed_data_sha256=payload["processed_data_sha256"],
             n_samples=_exact_int("n_samples", payload["n_samples"], minimum=1),
-            input_shape=_indices_tuple("input_shape", payload["input_shape"]),
+            input_shape=_shape_tuple("input_shape", payload["input_shape"]),
             case_metadata=metadata,
             schema_version=_exact_int("schema_version", payload.get("schema_version", 1), minimum=1),
         )
