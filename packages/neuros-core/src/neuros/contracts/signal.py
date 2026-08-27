@@ -47,6 +47,11 @@ class QualityFlag(IntFlag):
     ARTIFACT_SUSPECTED = auto()
 
 
+_KNOWN_QUALITY_MASK = 0
+for _quality_flag in QualityFlag:
+    _KNOWN_QUALITY_MASK |= int(_quality_flag)
+
+
 def _nonempty_string(value: Any, *, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} must be a non-empty string")
@@ -124,6 +129,14 @@ def _freeze_metadata(value: Any, *, path: str = "metadata") -> Any:
         f"{path} contains unsupported value type {type(value).__module__}."
         f"{type(value).__qualname__}; use deterministic provenance primitives"
     )
+
+
+def _freeze_metadata_mapping(value: Any) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError("metadata must be a mapping")
+    frozen = _freeze_metadata(value)
+    assert isinstance(frozen, Mapping)
+    return frozen
 
 
 def _canonical_value(value: Any) -> Any:
@@ -212,7 +225,7 @@ class StreamDescriptor:
         if self.manufacturer is not None:
             _nonempty_string(self.manufacturer, field_name="manufacturer")
         object.__setattr__(self, "clock_domain", ClockDomain(self.clock_domain))
-        object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
+        object.__setattr__(self, "metadata", _freeze_metadata_mapping(self.metadata))
 
     @property
     def nominal_sample_rate_hz(self) -> float:
@@ -301,6 +314,8 @@ class SignalFrame:
         object.__setattr__(self, "clock_domain", domain)
 
         quality_value = _nonnegative_integer(self.quality, field_name="quality")
+        if quality_value & ~_KNOWN_QUALITY_MASK:
+            raise ValueError("quality contains undefined QualityFlag bits")
         object.__setattr__(self, "quality", QualityFlag(quality_value))
 
         arr = np.array(self.data, copy=True, subok=False)
@@ -320,7 +335,7 @@ class SignalFrame:
             )
         arr.setflags(write=False)
         object.__setattr__(self, "data", arr)
-        object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
+        object.__setattr__(self, "metadata", _freeze_metadata_mapping(self.metadata))
 
     @property
     def timestamp_ns(self) -> int:
