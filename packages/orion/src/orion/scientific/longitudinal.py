@@ -29,6 +29,12 @@ def _strict_indices(name: str, values: Any) -> tuple[int, ...]:
     return tuple(result)
 
 
+def _strict_nonempty_string(name: str, value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string without coercion")
+    return value.strip()
+
+
 def _source_case_sha256(case_payload: Mapping[str, Any]) -> tuple[str, str | None]:
     source = dict(case_payload)
     legacy_display = source.pop("authority_fingerprint", None)
@@ -37,9 +43,9 @@ def _source_case_sha256(case_payload: Mapping[str, Any]) -> tuple[str, str | Non
     if supplied_full is not None and require_sha256("authority_sha256", supplied_full) != full:
         raise ValueError("serialized longitudinal authority_sha256 does not match its content")
     if legacy_display is not None:
-        legacy_display = str(legacy_display).strip()
-        if not legacy_display:
-            raise ValueError("legacy authority_fingerprint cannot be empty")
+        legacy_display = _strict_nonempty_string(
+            "legacy authority_fingerprint", legacy_display
+        )
     return full, legacy_display
 
 
@@ -60,7 +66,10 @@ def bind_longitudinal_case_authority(
 
     if not isinstance(case_payload, Mapping):
         raise TypeError("case_payload must be a mapping")
-    if str(case_payload.get("dataset_id")) != dataset_lineage.dataset_id:
+    if not isinstance(dataset_lineage, DatasetLineage):
+        raise TypeError("dataset_lineage must be DatasetLineage")
+    dataset_id = _strict_nonempty_string("dataset_id", case_payload.get("dataset_id"))
+    if dataset_id != dataset_lineage.dataset_id:
         raise ValueError("longitudinal case dataset_id does not match dataset lineage")
     if (
         isinstance(calibration_per_class, bool)
@@ -69,9 +78,7 @@ def bind_longitudinal_case_authority(
     ):
         raise ValueError("calibration_per_class must be a non-negative integer")
 
-    case_id = str(case_payload.get("case_id", "")).strip()
-    if not case_id:
-        raise ValueError("case_id must be non-empty")
+    case_id = _strict_nonempty_string("case_id", case_payload.get("case_id"))
 
     source_authority_sha256, legacy_display = _source_case_sha256(case_payload)
     source_indices = _strict_indices("source_train_indices", case_payload["source_train_indices"])
@@ -81,10 +88,12 @@ def bind_longitudinal_case_authority(
     if not isinstance(raw_calibration, Mapping) or not raw_calibration:
         raise ValueError("calibration_order_by_class must be a non-empty mapping")
     calibration_indices: list[int] = []
-    for raw_label in sorted(raw_calibration, key=str):
-        label = str(raw_label).strip()
-        if not label:
-            raise ValueError("calibration class labels must be non-empty")
+    seen_labels: set[str] = set()
+    for raw_label in sorted(raw_calibration, key=lambda value: str(value)):
+        label = _strict_nonempty_string("calibration class label", raw_label)
+        if label in seen_labels:
+            raise ValueError("calibration class labels cannot collide after normalization")
+        seen_labels.add(label)
         ordered = _strict_indices(
             f"calibration_order_by_class[{label!r}]", raw_calibration[raw_label]
         )
@@ -132,6 +141,13 @@ def bind_longitudinal_case_authority(
     if unlabeled_set & source_set:
         raise ValueError("unlabeled target observations cannot borrow source-history rows")
 
+    budget = TargetObservationBudget(
+        labeled_examples=len(calibration),
+        labeled_examples_per_class=calibration_per_class,
+        unlabeled_examples=len(unlabeled),
+        unlabeled_seconds=unlabeled_target_seconds,
+    )
+
     processed_sha = case_payload.get("processed_data_sha256")
     if processed_sha is not None:
         processed_sha = require_sha256("processed_data_sha256", processed_sha)
@@ -175,7 +191,7 @@ def bind_longitudinal_case_authority(
             metadata=common_metadata,
         ),
     ]
-    if unlabeled:
+    if unlabeled or (budget.unlabeled_seconds or 0.0) > 0.0:
         observations.append(
             ObservationSetAuthority(
                 authority_id=f"{case_id}:unlabeled-target",
@@ -183,16 +199,11 @@ def bind_longitudinal_case_authority(
                 role=ObservationRole.UNLABELED_TARGET_OBSERVATION,
                 observation_ids=tuple(str(value) for value in unlabeled),
                 domain_id=domain,
-                metadata=common_metadata,
+                metadata={
+                    **common_metadata,
+                    "unlabeled_seconds": budget.unlabeled_seconds,
+                },
             )
         )
 
-    return (
-        tuple(observations),
-        TargetObservationBudget(
-            labeled_examples=len(calibration),
-            labeled_examples_per_class=calibration_per_class,
-            unlabeled_examples=len(unlabeled),
-            unlabeled_seconds=unlabeled_target_seconds,
-        ),
-    )
+    return tuple(observations), budget
