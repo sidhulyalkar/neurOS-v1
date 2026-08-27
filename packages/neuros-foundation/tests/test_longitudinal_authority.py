@@ -105,6 +105,24 @@ def test_authority_roundtrip_restores_exact_split():
     assert restored_authority.case_metadata["original_protocol"] == "GR"
 
 
+def test_authority_accepts_repeated_tensor_dimensions_as_shape_not_indices():
+    data = _fixture()
+    square = GroupedEvaluationData(
+        dataset_id=data.dataset_id,
+        X=np.zeros((len(data.X), 4, 4), dtype=np.float32),
+        y=data.y,
+        groups=data.groups,
+        metadata=data.metadata,
+    )
+    authority = _authority(square)
+    assert authority.input_shape == (len(square.X), 4, 4)
+
+    restored = LongitudinalCaseAuthority.from_dict(authority.to_dict())
+    split = restored.restore(square)
+    assert restored.input_shape == (len(square.X), 4, 4)
+    assert tuple(split.evaluation_indices) == authority.evaluation_indices
+
+
 def test_authority_rejects_changed_processed_neural_values():
     data = _fixture()
     authority = _authority(data)
