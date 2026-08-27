@@ -15,6 +15,7 @@ from neuros.models.artifact import (
     load_model_artifact,
     verify_model_artifact,
 )
+from neuros.models.artifact_store import ModelArtifactStore
 from neuros.models.attention_fusion_model import AttentionFusionModel
 from neuros.models.base_model import BaseModel
 from neuros.models.braindecode_adapter import BraindecodeDecoder
@@ -52,6 +53,7 @@ __all__ = [
     "LSTMModel",
     "MechanisticallyInspectable",
     "ModelArtifactManifest",
+    "ModelArtifactStore",
     "ModelInputContract",
     "ModelMetadata",
     "ModelRegistry",
