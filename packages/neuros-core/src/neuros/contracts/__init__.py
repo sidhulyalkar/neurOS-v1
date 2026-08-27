@@ -3,7 +3,14 @@
 from .artifacts import ModelArtifactManifest
 from .models import Decoder, DecoderCapabilities, DecoderOutput, TrainableDecoder
 from .operators import Monitor, OutputSubscriber, Sink, Source, Transform, TransformEmission
-from .signal import ClockDomain, QualityFlag, SignalFrame, StreamDescriptor
+from .signal import (
+    ClockDomain,
+    QualityFlag,
+    SignalFrame,
+    StreamDescriptor,
+    frame_channel_count,
+    validate_frame_against_descriptor,
+)
 from .window import NeuralWindow, WindowSpec
 
 __all__ = [
@@ -24,4 +31,6 @@ __all__ = [
     "Transform",
     "TransformEmission",
     "WindowSpec",
+    "frame_channel_count",
+    "validate_frame_against_descriptor",
 ]
