@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
@@ -22,6 +24,96 @@ from .longitudinal import NestedCalibrationSplit, ordered_group_values
 from .real_world import EvaluationPartition, GroupedEvaluationData
 
 HistoryPolicy = Literal["prior", "all-other", "custom"]
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _canonical_json(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("longitudinal authority cannot contain NaN or infinity")
+        return value
+    if isinstance(value, np.generic):
+        return _canonical_json(value.item())
+    if isinstance(value, np.ndarray):
+        if value.dtype.hasobject:
+            raise TypeError("longitudinal authority cannot contain object arrays")
+        return _canonical_json(value.tolist())
+    if isinstance(value, Mapping):
+        normalized: dict[str, Any] = {}
+        for key, item in sorted(value.items(), key=lambda pair: str(pair[0])):
+            normalized_key = str(key)
+            if not normalized_key.strip():
+                raise ValueError("longitudinal authority mapping keys must be non-empty")
+            if normalized_key in normalized:
+                raise ValueError(
+                    "longitudinal authority mapping keys collide after string normalization"
+                )
+            normalized[normalized_key] = _canonical_json(item)
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [_canonical_json(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        raise TypeError("unordered sets are not valid longitudinal authority values")
+    raise TypeError(
+        "longitudinal authority values must be deterministic JSON-compatible values; "
+        f"got {type(value).__name__}"
+    )
+
+
+def _freeze_json(value: Any) -> Any:
+    normalized = _canonical_json(value)
+    if isinstance(normalized, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in normalized.items()})
+    if isinstance(normalized, list):
+        return tuple(_freeze_json(item) for item in normalized)
+    return normalized
+
+
+def _thaw_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
+def _canonical_sha256(payload: Mapping[str, Any]) -> str:
+    raw = json.dumps(
+        _canonical_json(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _require_sha256(name: str, value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a lowercase SHA-256 string")
+    normalized = value.strip().lower()
+    if not _SHA256_RE.fullmatch(normalized):
+        raise ValueError(f"{name} must be a 64-character lowercase SHA-256 hex digest")
+    return normalized
+
+
+def _exact_int(name: str, value: Any, *, minimum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise ValueError(f"{name} must be an integer without coercion")
+    number = int(value)
+    if minimum is not None and number < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return number
+
+
+def _finite_float(name: str, value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+        raise ValueError(f"{name} must be numeric without string coercion")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{name} must be finite")
+    return number
 
 
 def processed_data_sha256(data: GroupedEvaluationData) -> str:
@@ -46,7 +138,6 @@ def processed_data_sha256(data: GroupedEvaluationData) -> str:
     digest.update(json.dumps(list(x.shape), separators=(",", ":")).encode("ascii"))
     digest.update(b"\0")
 
-    # Stream sample-by-sample to avoid materializing a second full dataset copy.
     for sample in x:
         contiguous = np.ascontiguousarray(sample)
         digest.update(memoryview(contiguous).cast("B"))
@@ -68,9 +159,46 @@ def _ordered_values(values: np.ndarray) -> tuple[str, ...]:
     return tuple(dict.fromkeys(np.asarray(values).astype(str).tolist()))
 
 
-def _indices_tuple(values: Any) -> tuple[int, ...]:
-    array = np.asarray(values, dtype=np.int64).reshape(-1)
-    return tuple(int(value) for value in array.tolist())
+def _indices_tuple(name: str, values: Any) -> tuple[int, ...]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be an iterable of integer indices")
+    try:
+        raw = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be an iterable of integer indices") from exc
+    result = tuple(_exact_int(name, value, minimum=0) for value in raw)
+    if len(set(result)) != len(result):
+        raise ValueError(f"{name} cannot contain duplicate indices")
+    return result
+
+
+def _shape_tuple(name: str, values: Any) -> tuple[int, ...]:
+    """Validate tensor dimensions without applying sample-index uniqueness rules."""
+
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be an iterable of positive integer dimensions")
+    try:
+        raw = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be an iterable of positive integer dimensions") from exc
+    return tuple(_exact_int(name, value, minimum=1) for value in raw)
+
+
+def _string_tuple(name: str, values: Any, *, allow_empty: bool = True) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} must be a sequence of strings")
+    try:
+        raw = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a sequence of strings") from exc
+    if any(not isinstance(value, str) or not value.strip() for value in raw):
+        raise ValueError(f"{name} must contain non-empty strings")
+    result = tuple(value.strip() for value in raw)
+    if not allow_empty and not result:
+        raise ValueError(f"{name} must be non-empty")
+    if len(set(result)) != len(result):
+        raise ValueError(f"{name} cannot contain duplicates")
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,31 +232,91 @@ class LongitudinalCaseAuthority:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
-        if not self.dataset_id or not self.case_id:
-            raise ValueError("dataset_id and case_id must be non-empty")
+        if isinstance(self.schema_version, bool) or self.schema_version != 1:
+            raise ValueError("LongitudinalCaseAuthority schema_version must be 1")
+        if not isinstance(self.dataset_id, str) or not self.dataset_id.strip():
+            raise ValueError("dataset_id must be a non-empty string")
+        if not isinstance(self.case_id, str) or not self.case_id.strip():
+            raise ValueError("case_id must be a non-empty string")
+        if not isinstance(self.split_unit, str) or not self.split_unit.strip():
+            raise ValueError("split_unit must be a non-empty string")
         if self.split_unit == "sample":
             raise ValueError("longitudinal authority requires a deployment-unit split")
-        if not self.held_out_values:
-            raise ValueError("held_out_values must be non-empty")
+        held_out = _string_tuple("held_out_values", self.held_out_values, allow_empty=False)
+        observed = _string_tuple("observed_group_order", self.observed_group_order, allow_empty=False)
+        sources = _string_tuple("source_group_values", self.source_group_values)
         if self.history_policy not in {"prior", "all-other", "custom"}:
             raise ValueError(f"unsupported history_policy={self.history_policy!r}")
-        if self.n_samples <= 0:
-            raise ValueError("n_samples must be positive")
-        if not self.input_shape or self.input_shape[0] != self.n_samples:
-            raise ValueError("input_shape must begin with n_samples")
-        if len(self.processed_data_sha256) != 64:
-            raise ValueError("processed_data_sha256 must be a SHA-256 hex digest")
-        if not 0.0 < float(self.evaluation_fraction) < 1.0:
+        n_samples = _exact_int("n_samples", self.n_samples, minimum=1)
+        seed = _exact_int("seed", self.seed, minimum=0)
+        fraction = _finite_float("evaluation_fraction", self.evaluation_fraction)
+        if not 0.0 < fraction < 1.0:
             raise ValueError("evaluation_fraction must lie strictly between 0 and 1")
+        source_indices = _indices_tuple("source_train_indices", self.source_train_indices)
+        evaluation_indices = _indices_tuple("evaluation_indices", self.evaluation_indices)
+        if not evaluation_indices:
+            raise ValueError("evaluation_indices must be non-empty")
 
-        calibration = {
-            str(label): _indices_tuple(values)
-            for label, values in self.calibration_order_by_class.items()
-        }
+        if not isinstance(self.calibration_order_by_class, Mapping):
+            raise ValueError("calibration_order_by_class must be a mapping")
+        calibration: dict[str, tuple[int, ...]] = {}
+        for raw_label, values in self.calibration_order_by_class.items():
+            if not isinstance(raw_label, str) or not raw_label.strip():
+                raise ValueError("calibration class labels must be non-empty strings")
+            label = raw_label.strip()
+            if label in calibration:
+                raise ValueError("calibration class labels cannot duplicate after normalization")
+            calibration[label] = _indices_tuple(
+                f"calibration_order_by_class[{label!r}]", values
+            )
         if not calibration:
             raise ValueError("calibration_order_by_class must be non-empty")
+
+        calibration_flat = [value for values in calibration.values() for value in values]
+        if len(set(calibration_flat)) != len(calibration_flat):
+            raise ValueError("calibration indices cannot be shared between classes")
+        source_set = set(source_indices)
+        evaluation_set = set(evaluation_indices)
+        calibration_set = set(calibration_flat)
+        if source_set & evaluation_set:
+            raise ValueError("source and evaluation indices must be disjoint")
+        if source_set & calibration_set:
+            raise ValueError("source and calibration indices must be disjoint")
+        if evaluation_set & calibration_set:
+            raise ValueError("evaluation and calibration indices must be disjoint")
+        if any(value >= n_samples for value in (*source_indices, *evaluation_indices, *calibration_flat)):
+            raise ValueError("longitudinal authority contains out-of-range indices")
+
+        shape = _shape_tuple("input_shape", self.input_shape)
+        if not shape or shape[0] != n_samples:
+            raise ValueError("input_shape must contain positive dimensions and begin with n_samples")
+        partition = self.partition_fingerprint
+        calibration_fp = self.calibration_split_fingerprint
+        if not isinstance(partition, str) or not partition.strip():
+            raise ValueError("partition_fingerprint must be non-empty")
+        if not isinstance(calibration_fp, str) or not calibration_fp.strip():
+            raise ValueError("calibration_split_fingerprint must be non-empty")
+        processed = _require_sha256("processed_data_sha256", self.processed_data_sha256)
+        metadata = _freeze_json(self.case_metadata)
+        if not isinstance(metadata, Mapping):
+            raise TypeError("case_metadata must be a mapping")
+
+        object.__setattr__(self, "dataset_id", self.dataset_id.strip())
+        object.__setattr__(self, "case_id", self.case_id.strip())
+        object.__setattr__(self, "held_out_values", held_out)
+        object.__setattr__(self, "observed_group_order", observed)
+        object.__setattr__(self, "source_group_values", sources)
+        object.__setattr__(self, "source_train_indices", source_indices)
+        object.__setattr__(self, "evaluation_indices", evaluation_indices)
         object.__setattr__(self, "calibration_order_by_class", MappingProxyType(calibration))
-        object.__setattr__(self, "case_metadata", MappingProxyType(dict(self.case_metadata)))
+        object.__setattr__(self, "evaluation_fraction", fraction)
+        object.__setattr__(self, "seed", seed)
+        object.__setattr__(self, "partition_fingerprint", partition.strip())
+        object.__setattr__(self, "calibration_split_fingerprint", calibration_fp.strip())
+        object.__setattr__(self, "processed_data_sha256", processed)
+        object.__setattr__(self, "n_samples", n_samples)
+        object.__setattr__(self, "input_shape", shape)
+        object.__setattr__(self, "case_metadata", metadata)
 
     @classmethod
     def from_split(
@@ -155,10 +343,10 @@ class LongitudinalCaseAuthority:
             history_policy=history_policy,
             observed_group_order=tuple(str(v) for v in observed),
             source_group_values=source_values,
-            source_train_indices=_indices_tuple(split.source_train_indices),
-            evaluation_indices=_indices_tuple(split.evaluation_indices),
+            source_train_indices=_indices_tuple("source_train_indices", split.source_train_indices),
+            evaluation_indices=_indices_tuple("evaluation_indices", split.evaluation_indices),
             calibration_order_by_class={
-                label: _indices_tuple(values)
+                label: _indices_tuple(f"calibration_order_by_class[{label!r}]", values)
                 for label, values in split.calibration_order_by_class.items()
             },
             evaluation_fraction=float(split.evaluation_fraction),
@@ -172,10 +360,13 @@ class LongitudinalCaseAuthority:
         )
 
     @property
+    def authority_sha256(self) -> str:
+        return _canonical_sha256(self.to_dict(include_fingerprint=False))
+
+    @property
     def authority_fingerprint(self) -> str:
-        payload = self.to_dict(include_fingerprint=False)
-        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+        """Display-only prefix retained for backward compatibility."""
+        return self.authority_sha256[:16]
 
     def to_dict(self, *, include_fingerprint: bool = True) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -193,48 +384,77 @@ class LongitudinalCaseAuthority:
                 key: list(values)
                 for key, values in sorted(self.calibration_order_by_class.items())
             },
-            "evaluation_fraction": float(self.evaluation_fraction),
-            "seed": int(self.seed),
+            "evaluation_fraction": self.evaluation_fraction,
+            "seed": self.seed,
             "partition_fingerprint": self.partition_fingerprint,
             "calibration_split_fingerprint": self.calibration_split_fingerprint,
             "processed_data_sha256": self.processed_data_sha256,
-            "n_samples": int(self.n_samples),
+            "n_samples": self.n_samples,
             "input_shape": list(self.input_shape),
-            "case_metadata": dict(self.case_metadata),
+            "case_metadata": _thaw_json(self.case_metadata),
         }
         if include_fingerprint:
+            payload["authority_sha256"] = self.authority_sha256
             payload["authority_fingerprint"] = self.authority_fingerprint
         return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "LongitudinalCaseAuthority":
-        value = cls(
-            dataset_id=str(payload["dataset_id"]),
-            case_id=str(payload["case_id"]),
-            split_unit=str(payload["split_unit"]),  # type: ignore[arg-type]
-            held_out_values=tuple(str(v) for v in payload["held_out_values"]),
-            history_policy=str(payload["history_policy"]),  # type: ignore[arg-type]
-            observed_group_order=tuple(str(v) for v in payload["observed_group_order"]),
-            source_group_values=tuple(str(v) for v in payload["source_group_values"]),
-            source_train_indices=tuple(int(v) for v in payload["source_train_indices"]),
-            evaluation_indices=tuple(int(v) for v in payload["evaluation_indices"]),
-            calibration_order_by_class={
-                str(key): tuple(int(v) for v in values)
-                for key, values in dict(payload["calibration_order_by_class"]).items()
-            },
-            evaluation_fraction=float(payload["evaluation_fraction"]),
-            seed=int(payload["seed"]),
-            partition_fingerprint=str(payload["partition_fingerprint"]),
-            calibration_split_fingerprint=str(payload["calibration_split_fingerprint"]),
-            processed_data_sha256=str(payload["processed_data_sha256"]),
-            n_samples=int(payload["n_samples"]),
-            input_shape=tuple(int(v) for v in payload["input_shape"]),
-            case_metadata=dict(payload.get("case_metadata", {})),
-            schema_version=int(payload.get("schema_version", 1)),
+        if not isinstance(payload, Mapping):
+            raise TypeError("serialized longitudinal authority must be a mapping")
+        required_strings = (
+            "dataset_id",
+            "case_id",
+            "split_unit",
+            "history_policy",
+            "partition_fingerprint",
+            "calibration_split_fingerprint",
+            "processed_data_sha256",
         )
-        expected = payload.get("authority_fingerprint")
-        if expected is not None and str(expected) != value.authority_fingerprint:
-            raise ValueError("authority_fingerprint does not match serialized content")
+        for name in required_strings:
+            if not isinstance(payload.get(name), str):
+                raise ValueError(f"serialized {name} must be a string without coercion")
+        calibration_payload = payload.get("calibration_order_by_class")
+        if not isinstance(calibration_payload, Mapping):
+            raise ValueError("serialized calibration_order_by_class must be a mapping")
+        metadata = payload.get("case_metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise ValueError("serialized case_metadata must be a mapping")
+
+        value = cls(
+            dataset_id=payload["dataset_id"],
+            case_id=payload["case_id"],
+            split_unit=payload["split_unit"],  # type: ignore[arg-type]
+            held_out_values=_string_tuple("held_out_values", payload["held_out_values"], allow_empty=False),
+            history_policy=payload["history_policy"],  # type: ignore[arg-type]
+            observed_group_order=_string_tuple(
+                "observed_group_order", payload["observed_group_order"], allow_empty=False
+            ),
+            source_group_values=_string_tuple("source_group_values", payload["source_group_values"]),
+            source_train_indices=_indices_tuple("source_train_indices", payload["source_train_indices"]),
+            evaluation_indices=_indices_tuple("evaluation_indices", payload["evaluation_indices"]),
+            calibration_order_by_class={
+                key: _indices_tuple(f"calibration_order_by_class[{key!r}]", values)
+                for key, values in calibration_payload.items()
+            },
+            evaluation_fraction=_finite_float("evaluation_fraction", payload["evaluation_fraction"]),
+            seed=_exact_int("seed", payload["seed"], minimum=0),
+            partition_fingerprint=payload["partition_fingerprint"],
+            calibration_split_fingerprint=payload["calibration_split_fingerprint"],
+            processed_data_sha256=payload["processed_data_sha256"],
+            n_samples=_exact_int("n_samples", payload["n_samples"], minimum=1),
+            input_shape=_shape_tuple("input_shape", payload["input_shape"]),
+            case_metadata=metadata,
+            schema_version=_exact_int("schema_version", payload.get("schema_version", 1), minimum=1),
+        )
+        expected_full = payload.get("authority_sha256")
+        if expected_full is not None:
+            if _require_sha256("authority_sha256", expected_full) != value.authority_sha256:
+                raise ValueError("authority_sha256 does not match serialized content")
+        expected_display = payload.get("authority_fingerprint")
+        if expected_display is not None:
+            if not isinstance(expected_display, str) or expected_display != value.authority_fingerprint:
+                raise ValueError("authority_fingerprint does not match serialized content")
         return value
 
     def restore(self, data: GroupedEvaluationData) -> NestedCalibrationSplit:
