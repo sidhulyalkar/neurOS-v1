@@ -87,6 +87,49 @@ def _schedule_overlap_world(generator: SyntheticEEGGenerator, order: tuple[str, 
         generator.schedule_artifact(kind, **kwargs)
 
 
+def test_config_rejects_alpha_at_or_above_nyquist():
+    with pytest.raises(ValueError, match="alpha_frequency_hz.*Nyquist"):
+        SyntheticEEGGenerator(
+            SyntheticEEGConfig(
+                sampling_rate_hz=20.0,
+                alpha_frequency_hz=10.0,
+                first_harmonic_ratio=0.0,
+            )
+        )
+
+
+def test_attention_rejects_unrepresentable_fundamental_and_enabled_harmonic():
+    no_harmonic = SyntheticEEGGenerator(
+        SyntheticEEGConfig(sampling_rate_hz=100.0, first_harmonic_ratio=0.0)
+    )
+    no_harmonic.set_attention(49.0)
+    with pytest.raises(ValueError, match="SSVEP fundamental.*Nyquist"):
+        no_harmonic.set_attention(50.0)
+
+    with_harmonic = SyntheticEEGGenerator(
+        SyntheticEEGConfig(sampling_rate_hz=100.0, first_harmonic_ratio=0.34)
+    )
+    with_harmonic.set_attention(24.0)
+    with pytest.raises(ValueError, match="SSVEP first harmonic.*Nyquist"):
+        with_harmonic.set_attention(25.0)
+
+
+def test_artifact_scheduler_refuses_fixed_carriers_that_would_alias():
+    jaw_world = SyntheticEEGGenerator(
+        SyntheticEEGConfig(sampling_rate_hz=100.0, first_harmonic_ratio=0.0)
+    )
+    with pytest.raises(ValueError, match="jaw artifact carrier.*Nyquist"):
+        jaw_world.schedule_artifact("jaw", event_id="aliased-jaw")
+    # 46 Hz remains representable at a 100 Hz sample rate.
+    jaw_world.schedule_artifact("controller", event_id="controller-ok")
+
+    controller_world = SyntheticEEGGenerator(
+        SyntheticEEGConfig(sampling_rate_hz=80.0, first_harmonic_ratio=0.0)
+    )
+    with pytest.raises(ValueError, match="controller artifact carrier.*Nyquist"):
+        controller_world.schedule_artifact("controller", event_id="aliased-controller")
+
+
 def test_ssvep_strength_is_controllable_and_posterior():
     cfg = SyntheticEEGConfig(seed=11, ssvep_amplitude_uv=8.0)
     strong = SyntheticEEGGenerator(cfg)
