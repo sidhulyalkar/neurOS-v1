@@ -40,7 +40,10 @@ jobs:
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/neuros-models[artifact]" pytest
       - name: Exercise Model Artifact v1 adversarial contracts
-        run: pytest -q packages/neuros-models/tests/test_model_artifact_v1.py
+        run: |
+          pytest -q \
+            packages/neuros-models/tests/test_model_artifact_v1.py \
+            packages/neuros-models/tests/test_model_artifact_store.py
       - name: Prove promoted loader has no pickle execution path
         run: |
           python - <<'PY'
@@ -55,6 +58,7 @@ jobs:
         run: |
           python -m compileall -q \
             packages/neuros-models/src/neuros/models/artifact.py \
+            packages/neuros-models/src/neuros/models/artifact_store.py \
             packages/neuros-models/src/neuros/models/analysis.py
 
   installed-wheel-artifact:
@@ -85,4 +89,6 @@ jobs:
           test -n "${MODELS_WHEEL}"
           "${PY}" -m pip install "${CORE_WHEEL}" "${MODELS_WHEEL}" torch safetensors pytest
           "${PY}" -m pip check
-          "${PY}" -m pytest -q packages/neuros-models/tests/test_model_artifact_v1.py
+          "${PY}" -m pytest -q \
+            packages/neuros-models/tests/test_model_artifact_v1.py \
+            packages/neuros-models/tests/test_model_artifact_store.py
