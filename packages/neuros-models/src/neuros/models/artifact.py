@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 from functools import wraps
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -59,12 +60,7 @@ def _bounded_product(name: str, *values: int, maximum: int = _MAX_PARAMETER_BUDG
 
 
 def _validate_factory_resource_budget(manifest: ModelArtifactManifest) -> None:
-    """Reject malicious/accidental constructor geometries before allocation.
-
-    These are software resource-safety limits for compact built-in v1 factories,
-    not scientific limits on future neurOS model families. Larger
-    foundation/compiled models need their own qualified artifact profile.
-    """
+    """Reject malicious/accidental constructor geometries before allocation."""
 
     config = dict(manifest.model_config)
     factory = manifest.factory_id
@@ -180,8 +176,6 @@ def _validate_runtime_authority(manifest: ModelArtifactManifest) -> ModelArtifac
         )
     if manifest.backend != "pytorch":
         raise ValueError("built-in Model Artifact v1 factories require backend='pytorch'")
-    if manifest.backend_version != manifest.package_versions["torch"]:
-        raise ValueError("artifact backend_version must exactly match package_versions['torch']")
 
     output = manifest.output_contract
     if output.task != "classification":
@@ -197,6 +191,48 @@ def _validate_runtime_authority(manifest: ModelArtifactManifest) -> ModelArtifac
 
     _validate_factory_resource_budget(manifest)
     return manifest
+
+
+def _validate_declared_environment(package_versions: Mapping[str, str]) -> None:
+    """Ensure explicit promotion metadata describes the environment actually running."""
+
+    missing = _REQUIRED_RUNTIME_PACKAGES - set(package_versions)
+    if missing:
+        raise ValueError(
+            "custom package_versions cannot weaken Model Artifact v1 runtime authority; "
+            f"missing {sorted(missing)}"
+        )
+    for distribution, declared in package_versions.items():
+        if not isinstance(distribution, str) or not distribution.strip():
+            raise ValueError("package_versions keys must be non-empty distribution names")
+        if not isinstance(declared, str) or not declared.strip():
+            raise ValueError("package_versions values must be non-empty version strings")
+        try:
+            actual = importlib_metadata.version(distribution)
+        except importlib_metadata.PackageNotFoundError as exc:
+            raise ValueError(
+                f"cannot promote package identity {distribution!r}: distribution is not installed"
+            ) from exc
+        if actual != declared:
+            raise ValueError(
+                f"declared package identity {distribution}=={declared} does not match "
+                f"the promotion environment ({actual})"
+            )
+
+
+def _validate_backend_runtime(manifest: ModelArtifactManifest) -> None:
+    """Bind framework-reported backend identity separately from distribution metadata."""
+
+    try:
+        import torch
+    except ImportError as exc:  # pragma: no cover - package authority catches normal installs
+        raise RuntimeError("PyTorch is required to load built-in Model Artifact v1 decoders") from exc
+    actual = str(torch.__version__)
+    if manifest.backend_version != actual:
+        raise RuntimeError(
+            f"artifact backend_version={manifest.backend_version!r} does not match "
+            f"the active PyTorch runtime {actual!r}"
+        )
 
 
 def _preflight_bundle_size(path: str | Path) -> None:
@@ -231,12 +267,8 @@ def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
     if package_versions is not None:
         if not isinstance(package_versions, Mapping):
             raise TypeError("package_versions must be a mapping")
-        missing = _REQUIRED_RUNTIME_PACKAGES - set(package_versions)
-        if missing:
-            raise ValueError(
-                "custom package_versions cannot weaken Model Artifact v1 runtime authority; "
-                f"missing {sorted(missing)}"
-            )
+        _validate_declared_environment(package_versions)
+
     output_contract = kwargs.get("output_contract")
     if output_contract is not None:
         if not isinstance(output_contract, ModelOutputContract):
@@ -247,9 +279,12 @@ def export_model_artifact(*args: Any, **kwargs: Any) -> ModelArtifactManifest:
             raise ValueError("built-in Model Artifact v1 factories emit class_logits")
         if output_contract.uncertainty_semantics != "none":
             raise ValueError("built-in Model Artifact v1 factories do not emit qualified uncertainty")
+
     manifest = _export_model_artifact(*args, **kwargs)
     try:
-        return _validate_runtime_authority(manifest)
+        _validate_runtime_authority(manifest)
+        _validate_backend_runtime(manifest)
+        return manifest
     except Exception:
         output_dir = kwargs.get("output_dir")
         if output_dir is None and len(args) >= 2:
@@ -267,6 +302,7 @@ def load_model_artifact(path: str | Path, *, device: str = "cpu") -> ArtifactBac
 
     manifest = verify_model_artifact(path)
     _validate_runtime_authority(manifest)
+    _validate_backend_runtime(manifest)
     return _load_model_artifact(path, device=device)
 
 
