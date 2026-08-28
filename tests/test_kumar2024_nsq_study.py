@@ -205,7 +205,6 @@ def _analysis_rows():
 def test_analysis_uses_participant_as_inferential_unit_and_preserves_failure_counts():
     config = Kumar2024StudyConfig(
         methods=("mne-csp-lda", "braindecode-eegnet"),
-        target_sessions=("1", "2"),
         budgets_per_class=(0, 1),
         analysis_bootstrap_replicates=50,
     )
@@ -232,7 +231,11 @@ def test_analysis_uses_participant_as_inferential_unit_and_preserves_failure_cou
 
 
 def test_frontier_auc_requires_same_cases_at_every_budget():
-    rows = _analysis_rows()
+    rows = [
+        row
+        for row in _analysis_rows()
+        if row["held_out_session"] in {"1", "2"}
+    ]
     rows = [
         row
         for row in rows
@@ -259,7 +262,6 @@ def test_frontier_auc_requires_same_cases_at_every_budget():
     assert [1, "2"] not in eegnet["complete_frontier_subject_session_cases"]
     paired_auc = analysis["paired_calibration_efficiency"][0]
     assert paired_auc["matched_complete_frontier_participants"] == [10]
-
 
 
 def _sha(path: Path) -> str:
