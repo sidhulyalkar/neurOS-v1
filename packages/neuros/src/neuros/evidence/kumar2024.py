@@ -301,11 +301,12 @@ def pilot_config() -> Kumar2024StudyConfig:
 
 
 def full_config() -> Kumar2024StudyConfig:
-    """Predeclared full-study execution profile.
+    """Unpromoted all-subject reference configuration.
 
-    Twenty epochs is a fixed reference training budget, not an assertion that it
-    is optimal. Changing it after observing final results creates a new study
-    identity and must not rewrite the v1 result.
+    This helper exists for feasibility work only. It is intentionally not exposed
+    by the CLI because the promoted comparison in issue #27 still requires the
+    shared split-seed ensemble, paired frontier-AUC endpoint, and predeclared
+    neural-model seed authority. Twenty epochs is only a reference compute budget.
     """
 
     return Kumar2024StudyConfig(
@@ -327,6 +328,11 @@ def _preprocessing_authority(
         "processed_signal_contract_sha256": epoch_descriptor.signal_contract_sha256,
         "moabb_version": versions.get("moabb"),
         "mne_version": versions.get("mne"),
+        "processed_value_units": {
+            "get_data_units_argument": None,
+            "unit_system": "MNE channel-type-specific default SI units",
+            "eeg": "V",
+        },
         "fit_kind": "fixed_upstream_transform_no_neuros_fit",
         "content_claim": (
             "identity covers the declared MOABB/MNE processing configuration and observed "
@@ -398,6 +404,7 @@ def build_dataset_lineage(
             "processed_epoch_start_s": contract["epoch_start_s"],
             "processed_epoch_end_s": contract["epoch_end_s"],
             "processed_event_id": contract["event_id"],
+            "processed_value_units": preprocessing_authority["processed_value_units"],
         },
         license="CC BY 4.0",
         citation=(
@@ -451,9 +458,6 @@ def build_protocol(
         robustness_axes=(
             "session",
             "subject",
-            "channel_drop",
-            "artifact_sensitivity",
-            "montage",
         ),
         final_assessment_role="untouched_final_assessment",
         protocol_status="frozen",
@@ -464,6 +468,15 @@ def build_protocol(
             "unlabeled_target_adaptation": False,
             "cohort_labels_are_contextual_metadata": True,
             "analysis_independent_unit": "participant",
+            "planned_not_executed_robustness_axes": [
+                "channel_drop",
+                "artifact_sensitivity",
+                "montage",
+            ],
+            "event_semantics": (
+                "processed MNE event_id is retained verbatim; task labels are separately "
+                "bound in GroupedEvaluationData targets and processed-data identity"
+            ),
             "study_scope": (
                 "neurOS re-evaluation of the MOABB bar-feedback subset; not a reproduction "
                 "of the original online GR/PAR intervention"
@@ -719,8 +732,10 @@ def summarize_rows(
             )
 
     frontier_auc: list[dict[str, Any]] = []
+    frontier_participant_values: dict[str, dict[int, float]] = {}
+    expected_sessions = set(config.target_sessions)
     for method_index, method in enumerate(methods):
-        by_participant_budget: dict[int, dict[int, list[float]]] = defaultdict(
+        by_case_budget: dict[tuple[int, str], dict[int, list[float]]] = defaultdict(
             lambda: defaultdict(list)
         )
         for row in rows:
@@ -729,15 +744,28 @@ def summarize_rows(
             value = row.get("balanced_accuracy")
             if value is None:
                 continue
-            by_participant_budget[int(row["subject"])][
-                int(row["calibration_per_class"])
-            ].append(float(value))
-        auc_values: dict[int, float] = {}
-        for participant, budget_values in by_participant_budget.items():
+            key = (int(row["subject"]), str(row["held_out_session"]))
+            by_case_budget[key][int(row["calibration_per_class"])].append(float(value))
+
+        complete_case_auc: dict[tuple[int, str], float] = {}
+        for key, budget_values in by_case_budget.items():
             if any(budget not in budget_values for budget in budgets):
                 continue
             ys = [float(np.mean(budget_values[budget])) for budget in budgets]
-            auc_values[participant] = _normalized_trapezoid(budgets, ys)
+            complete_case_auc[key] = _normalized_trapezoid(budgets, ys)
+
+        by_participant: dict[int, list[float]] = defaultdict(list)
+        complete_sessions: dict[int, set[str]] = defaultdict(set)
+        for (participant, session), value in complete_case_auc.items():
+            by_participant[participant].append(value)
+            complete_sessions[participant].add(session)
+
+        auc_values = {
+            participant: float(np.mean(values))
+            for participant, values in by_participant.items()
+            if complete_sessions[participant] == expected_sessions
+        }
+        frontier_participant_values[method] = auc_values
         frontier_auc.append(
             {
                 "method_id": method,
@@ -747,6 +775,15 @@ def summarize_rows(
                     replicates=config.analysis_bootstrap_replicates,
                 ),
                 "complete_frontier_participants": sorted(auc_values),
+                "complete_frontier_subject_session_cases": [
+                    [participant, session]
+                    for participant, session in sorted(complete_case_auc)
+                ],
+                "pairing_rule": (
+                    "a subject-session contributes only if every declared calibration budget "
+                    "succeeds; a participant contributes only if every declared target session "
+                    "has a complete subject-session frontier"
+                ),
             }
         )
 
@@ -803,6 +840,37 @@ def summarize_rows(
                     }
                 )
 
+    paired_frontier_auc: list[dict[str, Any]] = []
+    for left_index, left in enumerate(methods):
+        for right_index in range(left_index + 1, len(methods)):
+            right = methods[right_index]
+            left_values = frontier_participant_values.get(left, {})
+            right_values = frontier_participant_values.get(right, {})
+            matched_participants = sorted(set(left_values) & set(right_values))
+            differences = {
+                participant: left_values[participant] - right_values[participant]
+                for participant in matched_participants
+            }
+            paired_frontier_auc.append(
+                {
+                    "left_method": left,
+                    "right_method": right,
+                    "matched_complete_frontier_participants": matched_participants,
+                    "left_minus_right_normalized_balanced_accuracy_frontier_auc": (
+                        _bootstrap_mean_ci(
+                            differences,
+                            seed=_stable_seed(
+                                config.analysis_seed,
+                                "paired-frontier-auc",
+                                left_index,
+                                right_index,
+                            ),
+                            replicates=config.analysis_bootstrap_replicates,
+                        )
+                    ),
+                }
+            )
+
     return {
         "schema_version": 1,
         "independent_inferential_unit": "participant",
@@ -813,9 +881,11 @@ def summarize_rows(
             "seed": config.analysis_seed,
         },
         "primary_metric": "balanced_accuracy",
+        "primary_study_endpoint": "paired_normalized_balanced_accuracy_frontier_auc",
         "performance": performance,
         "calibration_efficiency": frontier_auc,
         "paired_method_differences": paired,
+        "paired_calibration_efficiency": paired_frontier_auc,
         "cohort_policy": (
             "GR/PAR summaries are descriptive context only; no causal treatment comparison is claimed"
         ),
@@ -1195,7 +1265,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--profile", choices=("pilot", "full"), default="pilot")
+    parser.add_argument("--profile", choices=("pilot",), default="pilot")
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--subjects", type=_parse_ints, default=None)
@@ -1214,7 +1284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.verify_only:
         print(json.dumps(verify_bundle(args.output), indent=2, sort_keys=True))
         return 0
-    base = full_config() if args.profile == "full" else pilot_config()
+    base = pilot_config()
     config = Kumar2024StudyConfig(
         subjects=base.subjects if args.subjects is None else args.subjects,
         target_sessions=base.target_sessions if args.sessions is None else args.sessions,

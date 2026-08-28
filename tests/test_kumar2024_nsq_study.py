@@ -205,6 +205,7 @@ def _analysis_rows():
 def test_analysis_uses_participant_as_inferential_unit_and_preserves_failure_counts():
     config = Kumar2024StudyConfig(
         methods=("mne-csp-lda", "braindecode-eegnet"),
+        target_sessions=("1", "2"),
         budgets_per_class=(0, 1),
         analysis_bootstrap_replicates=50,
     )
@@ -228,6 +229,37 @@ def test_analysis_uses_participant_as_inferential_unit_and_preserves_failure_cou
     assert paired["matched_subject_session_cases"] == 4
     assert paired["left_minus_right_balanced_accuracy"]["n_participants"] == 2
     assert len(analysis["calibration_efficiency"]) == 2
+
+
+def test_frontier_auc_requires_same_cases_at_every_budget():
+    rows = _analysis_rows()
+    rows = [
+        row
+        for row in rows
+        if not (
+            row["method_id"] == "braindecode-eegnet"
+            and row["subject"] == 1
+            and row["held_out_session"] == "2"
+            and row["calibration_per_class"] == 1
+        )
+    ]
+    config = Kumar2024StudyConfig(
+        methods=("mne-csp-lda", "braindecode-eegnet"),
+        target_sessions=("1", "2"),
+        budgets_per_class=(0, 1),
+        analysis_bootstrap_replicates=25,
+    )
+    analysis = summarize_rows(rows, config=config)
+    eegnet = next(
+        item
+        for item in analysis["calibration_efficiency"]
+        if item["method_id"] == "braindecode-eegnet"
+    )
+    assert eegnet["complete_frontier_participants"] == [10]
+    assert [1, "2"] not in eegnet["complete_frontier_subject_session_cases"]
+    paired_auc = analysis["paired_calibration_efficiency"][0]
+    assert paired_auc["matched_complete_frontier_participants"] == [10]
+
 
 
 def _sha(path: Path) -> str:

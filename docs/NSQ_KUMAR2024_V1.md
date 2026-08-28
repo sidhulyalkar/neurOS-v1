@@ -108,7 +108,9 @@ The last point is important. The study retains the actual processed MNE `Epochs`
 - epoch start/end times;
 - event-ID mapping.
 
-Only then are the values converted into the shared `GroupedEvaluationData` array contract.
+Only then are the values converted into the shared `GroupedEvaluationData` array contract. MNE `Epochs.get_data(units=None)` returns channel-type-specific default SI units; for EEG this study therefore binds the processed values as volts. Any later microvolt conversion or standardization used by a deep baseline must be declared as a separate fixed or fitted preprocessing authority.
+
+The MNE `event_id` mapping is retained verbatim. Task labels (`left_hand` / `right_hand`) are separately bound to the processed row order by `GroupedEvaluationData` and its processed-data SHA rather than being guessed from event-ID display names.
 
 This fixes a provenance weakness in the older array-only MOABB runners, which could identify array geometry but could not prove the processed channel order supplied to a decoder.
 
@@ -191,18 +193,19 @@ Braindecode epochs = 1
 
 One participant comes from each original GR/PAR cohort. This pilot exists to validate data identity, runtime behavior, artifact semantics, and dependency feasibility. It is **not** the headline model-comparison claim.
 
-### Full
+### Promoted all-subject comparison: intentionally blocked
 
-The predeclared full profile uses:
+The code contains an internal all-18-subject reference configuration for feasibility work, but it is **not** exposed as a CLI profile and is **not** the promoted preregistration.
+
+Before any headline all-subject comparison, issue #27 must be encoded explicitly:
 
 ```text
-subjects = 1..18
-sessions = 1..5
-budgets = 0,1,2,5,10 / class
-Braindecode epochs = 20
+shared split seeds = 2026, 3407, 9109
+primary study endpoint = paired normalized balanced-accuracy calibration-frontier AUC
+neural model seeds = predeclared and reported separately from split variation
 ```
 
-The training budget is a fixed reference protocol, not an assertion that 20 epochs is optimal. Changing it after viewing final results produces a new study identity rather than rewriting v1.
+The training budget must also be frozen before final-assessment results are inspected. A convenient all-subject run must never masquerade as the promoted study.
 
 ## Installation
 
@@ -228,14 +231,6 @@ Pilot:
 neuros-nsq-kumar2024 \
   --profile pilot \
   --output /tmp/nsq-kumar2024-pilot
-```
-
-Full predeclared profile:
-
-```bash
-neuros-nsq-kumar2024 \
-  --profile full \
-  --output /tmp/nsq-kumar2024-v1
 ```
 
 A method-restricted plumbing run is allowed, but its distinct configuration SHA prevents it from masquerading as the full study:
@@ -275,6 +270,10 @@ The bundle binds:
 - all result and failure rows;
 - participant/session/cohort metadata;
 - participant-level analysis generated from those rows.
+
+## Canonical real-data execution
+
+The pull-request data job is a pre-merge feasibility check because GitHub checks out a synthetic PR merge ref. The archival CSP pilot is produced by `.github/workflows/nsq-kumar2024-study.yml` from an exact durable `main` commit. The workflow runs once when first added to `main` and remains manually dispatchable afterward. It asserts that the bundle records the exact workflow SHA, all ten case authorities use literal split seed `2026`, all five budgets are present, and the expected 50 CSP result rows are preserved before uploading the artifact.
 
 ## Verify without retraining
 
