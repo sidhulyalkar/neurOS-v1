@@ -1,12 +1,15 @@
 """Executable referee for Neural System Qualification (NSQ) v1.
 
-The runner owns evidence authority, not external model training. It restores an
+The runner owns evidence authority, not external model training. It composes the
 existing :class:`LongitudinalCaseAuthority`, exposes only authorized observations
 to a fresh external decoder at each calibration budget, validates output
-semantics, and preserves every attempted run including failures.
+semantics, and preserves every attempted external run including failures.
 
-Upstream dataset lineage and downstream processed-array identity are deliberately
-separate authorities: both must match before fitting begins.
+The v1 longitudinal executor is intentionally *labeled-target only*. The generic
+NSQ participation schema can describe unlabeled target adaptation, but this
+executor refuses to manufacture an unlabeled pool from leftover calibration
+rows. A future executor must receive a separately frozen unlabeled-target
+observation authority before ``adapt_unlabeled(X)`` may be called.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ from .qualification import (
     ExternalProbabilityDecoder,
     ExternalQualificationDecoder,
     ExternalQualificationFactory,
-    ExternalUnlabeledTargetAdapter,
     QualificationModelState,
     QualificationProtocolSpec,
     QualificationRunContract,
@@ -74,7 +76,7 @@ def _sha_tuple(name: str, values: Sequence[str]) -> tuple[str, ...]:
     return result
 
 
-def _exact_nonnegative_int(name: str, value: Any) -> int:
+def _strict_nonnegative_int(name: str, value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise ValueError(f"{name} must be an integer without coercion")
     result = int(value)
@@ -83,12 +85,12 @@ def _exact_nonnegative_int(name: str, value: Any) -> int:
     return result
 
 
-def _finite_nonnegative(name: str, value: Any) -> float:
+def _strict_positive_float(name: str, value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
         raise ValueError(f"{name} must be numeric without coercion")
     result = float(value)
-    if not math.isfinite(result) or result < 0:
-        raise ValueError(f"{name} must be finite and non-negative")
+    if not math.isfinite(result) or result <= 0:
+        raise ValueError(f"{name} must be finite and positive")
     return result
 
 
@@ -97,7 +99,7 @@ def _canonical(value: Any) -> Any:
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise ValueError("qualification result cannot contain NaN or infinity")
+            raise ValueError("qualification identity cannot contain NaN or infinity")
         return value
     if isinstance(value, np.generic):
         return _canonical(value.item())
@@ -152,6 +154,31 @@ def _identity_sha256(schema: str, payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _index_set_sha256(
+    role: str,
+    processed_data_sha256: str,
+    indices: Sequence[int] | np.ndarray,
+) -> str:
+    values = np.asarray(indices)
+    if values.ndim != 1:
+        raise ValueError(f"{role} indices must be one-dimensional")
+    if values.dtype == np.bool_:
+        raise ValueError(f"{role} indices cannot be booleans")
+    integer = values.astype(np.int64)
+    if not np.array_equal(values, integer):
+        raise ValueError(f"{role} indices must be integers without coercion")
+    return _identity_sha256(
+        "neuros.qualification_observation_set.v1",
+        {
+            "role": role,
+            "processed_data_sha256": _sha256(
+                "processed_data_sha256", processed_data_sha256
+            ),
+            "indices": [int(value) for value in integer.tolist()],
+        },
+    )
+
+
 class QualificationUnavailableError(RuntimeError):
     """External method/runtime is unavailable for the attempted case."""
 
@@ -166,7 +193,7 @@ class QualificationNonConvergenceError(RuntimeError):
 
 @runtime_checkable
 class ExternalProbabilityClassOrderProvider(Protocol):
-    """Required fitted-class order for probability-capable external methods."""
+    """Fitted class-column order required for probability-capable methods."""
 
     def probability_class_labels(self) -> Sequence[Any]:
         ...
@@ -174,12 +201,16 @@ class ExternalProbabilityClassOrderProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class QualificationExecutionContext:
-    """Observed provenance and target-observation plan for one execution.
+    """Observed upstream provenance for one qualification execution.
 
-    ``observed_dataset_lineage_sha256`` is the lineage of the upstream dataset
-    actually loaded for this run. It is distinct from
-    ``LongitudinalCaseAuthority.processed_data_sha256``, which binds the exact
-    downstream processed array.
+    ``observed_dataset_lineage_sha256`` identifies the upstream dataset/revision
+    actually loaded. It is intentionally distinct from the case authority's
+    processed-array SHA-256.
+
+    ``unlabeled_target_examples`` is retained in the context schema so callers
+    cannot accidentally erase that intent. The v1 ``LongitudinalCaseAuthority``
+    executor refuses any nonzero value because that authority does not freeze a
+    scientifically distinct unlabeled-adaptation pool.
     """
 
     observed_dataset_lineage_sha256: str
@@ -217,19 +248,18 @@ class QualificationExecutionContext:
                 self.calibration_authority_sha256s,
             ),
         )
-        object.__setattr__(
-            self,
-            "unlabeled_target_examples",
-            _exact_nonnegative_int(
-                "unlabeled_target_examples", self.unlabeled_target_examples
-            ),
+        count = _strict_nonnegative_int(
+            "unlabeled_target_examples", self.unlabeled_target_examples
         )
+        object.__setattr__(self, "unlabeled_target_examples", count)
         if self.target_example_duration_s is not None:
-            duration = _finite_nonnegative(
+            duration = _strict_positive_float(
                 "target_example_duration_s", self.target_example_duration_s
             )
-            if duration <= 0:
-                raise ValueError("target_example_duration_s must be positive when provided")
+            if count == 0:
+                raise ValueError(
+                    "target_example_duration_s requires unlabeled_target_examples > 0"
+                )
             object.__setattr__(self, "target_example_duration_s", duration)
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
@@ -259,7 +289,9 @@ class QualificationExecutionContext:
 
     @property
     def sha256(self) -> str:
-        return _identity_sha256("neuros.qualification_execution_context.v1", self.to_dict())
+        return _identity_sha256(
+            "neuros.qualification_execution_context.v1", self.to_dict()
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,13 +310,6 @@ class QualificationScore:
         for name, value in metrics.items():
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("metric names must be non-empty strings")
-            if value is None:
-                normalized[name] = None
-            else:
-                number = float(value)
-                if not math.isfinite(number):
-                    raise ValueError(f"metric {name!r} must be finite when available")
-                normalized[name] = number
             state = availability[name]
             if state not in {
                 "available",
@@ -292,10 +317,21 @@ class QualificationScore:
                 "unavailable_class_support",
             }:
                 raise ValueError(f"unsupported availability state {state!r}")
-            if (value is None) == (state == "available"):
-                raise ValueError(
-                    f"metric {name!r} value/availability are semantically inconsistent"
-                )
+            if value is None:
+                if state == "available":
+                    raise ValueError(
+                        f"metric {name!r} cannot be available with a null value"
+                    )
+                normalized[name] = None
+            else:
+                if state != "available":
+                    raise ValueError(
+                        f"metric {name!r} has a value but is marked unavailable"
+                    )
+                number = float(value)
+                if not math.isfinite(number):
+                    raise ValueError(f"metric {name!r} must be finite")
+                normalized[name] = number
         object.__setattr__(self, "metrics", MappingProxyType(normalized))
         object.__setattr__(self, "availability", MappingProxyType(availability))
 
@@ -330,8 +366,6 @@ class QualificationScorecard(Protocol):
 
 
 def _average_ranks(values: np.ndarray) -> np.ndarray:
-    """One-based average ranks with deterministic tie handling."""
-
     order = np.argsort(values, kind="mergesort")
     sorted_values = values[order]
     ranks = np.empty(len(values), dtype=np.float64)
@@ -340,8 +374,7 @@ def _average_ranks(values: np.ndarray) -> np.ndarray:
         stop = start + 1
         while stop < len(values) and sorted_values[stop] == sorted_values[start]:
             stop += 1
-        average = 0.5 * ((start + 1) + stop)
-        ranks[order[start:stop]] = average
+        ranks[order[start:stop]] = 0.5 * ((start + 1) + stop)
         start = stop
     return ranks
 
@@ -355,23 +388,21 @@ def _binary_auc(y_true: np.ndarray, positive_score: np.ndarray) -> float | None:
         return None
     ranks = _average_ranks(scores)
     rank_sum_positive = float(np.sum(ranks[y]))
-    auc = (
-        rank_sum_positive - n_positive * (n_positive + 1) / 2.0
-    ) / (n_positive * n_negative)
-    return float(auc)
+    return float(
+        (rank_sum_positive - n_positive * (n_positive + 1) / 2.0)
+        / (n_positive * n_negative)
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class ClassificationScorecardV1:
-    """Dependency-light classification scorecard for the first NSQ benchmark.
+    """Dependency-light classification scorecard for NSQ v1.
 
-    Semantics are deliberately explicit:
-
-    - balanced accuracy = macro mean recall over the source-derived class set;
-    - ROC AUC is binary only in v1 and uses the second canonical class as the
-      positive class;
-    - Brier score is mean per-sample sum of squared multiclass probability error;
-    - ECE uses 10 equal-width top-label confidence bins over [0, 1].
+    Semantics:
+    - balanced accuracy: macro mean recall over the source-derived vocabulary;
+    - ROC AUC: binary rank AUC, positive class = second canonical source label;
+    - Brier: mean per-sample multiclass sum-squared probability error;
+    - ECE: 10 equal-width top-label confidence bins by default.
     """
 
     ece_bins: int = 10
@@ -448,12 +479,11 @@ class ClassificationScorecardV1:
         if not class_labels:
             raise ValueError("class_labels must be non-empty")
 
-        recalls: list[float] = []
-        for label in class_labels:
-            mask = truth == label
-            if not np.any(mask):
-                continue
-            recalls.append(float(np.mean(prediction[mask] == label)))
+        recalls = [
+            float(np.mean(prediction[truth == label] == label))
+            for label in class_labels
+            if np.any(truth == label)
+        ]
         if not recalls:
             raise ValueError("evaluation set contains no declared task classes")
 
@@ -471,16 +501,19 @@ class ClassificationScorecardV1:
             "brier_score": "unavailable_probability_output",
             "expected_calibration_error": "unavailable_probability_output",
         }
-
         if probability is None:
             return QualificationScore(metrics=metrics, availability=availability)
 
         probs = np.asarray(probability, dtype=np.float64)
         n_classes = len(class_labels)
         label_to_index = {label: index for index, label in enumerate(class_labels)}
-        encoded = np.asarray([label_to_index[label] for label in truth], dtype=np.int64)
+        encoded = np.asarray(
+            [label_to_index[label] for label in truth], dtype=np.int64
+        )
         one_hot = np.eye(n_classes, dtype=np.float64)[encoded]
-        metrics["brier_score"] = float(np.mean(np.sum((probs - one_hot) ** 2, axis=1)))
+        metrics["brier_score"] = float(
+            np.mean(np.sum((probs - one_hot) ** 2, axis=1))
+        )
         availability["brier_score"] = "available"
 
         predicted_index = probs.argmax(axis=1)
@@ -490,20 +523,25 @@ class ClassificationScorecardV1:
         ece = 0.0
         for index in range(self.ece_bins):
             if index == self.ece_bins - 1:
-                mask = (confidence >= edges[index]) & (confidence <= edges[index + 1])
+                mask = (
+                    (confidence >= edges[index])
+                    & (confidence <= edges[index + 1])
+                )
             else:
-                mask = (confidence >= edges[index]) & (confidence < edges[index + 1])
-            if not np.any(mask):
-                continue
-            ece += float(np.mean(mask)) * abs(
-                float(np.mean(correct[mask])) - float(np.mean(confidence[mask]))
-            )
+                mask = (
+                    (confidence >= edges[index])
+                    & (confidence < edges[index + 1])
+                )
+            if np.any(mask):
+                ece += float(np.mean(mask)) * abs(
+                    float(np.mean(correct[mask]))
+                    - float(np.mean(confidence[mask]))
+                )
         metrics["expected_calibration_error"] = float(ece)
         availability["expected_calibration_error"] = "available"
 
         if n_classes == 2:
-            binary_truth = truth == class_labels[1]
-            auc = _binary_auc(binary_truth, probs[:, 1])
+            auc = _binary_auc(truth == class_labels[1], probs[:, 1])
             if auc is None:
                 availability["roc_auc"] = "unavailable_class_support"
             else:
@@ -534,22 +572,25 @@ class QualificationBudgetResult:
     metric_scorecard_sha256: str
     processed_data_sha256: str
     observed_dataset_lineage_sha256: str
-    model_state_sha256: str | None
+    source_train_indices_sha256: str
+    labeled_target_indices_sha256: str
+    fit_indices_sha256: str
+    evaluation_indices_sha256: str
+    qualification_model_state_sha256: str | None
+    external_learned_state_sha256: str | None
+    external_state_identity_kind: str | None
     learned_state_addressable: bool
     source_train_samples: int
     labeled_target_examples: int
-    unlabeled_target_examples: int
-    unlabeled_target_seconds: float
     evaluation_samples: int
     class_labels: tuple[str, ...]
     score: QualificationScore | None = None
     probability_available: bool = False
     fit_s: float | None = None
-    adaptation_s: float | None = None
     inference_s: float | None = None
     failure_type: str | None = None
     failure_reason: str | None = None
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -561,8 +602,8 @@ class QualificationBudgetResult:
             "oom",
         }:
             raise ValueError(f"unsupported qualification status {self.status!r}")
-        if isinstance(self.schema_version, bool) or self.schema_version != 1:
-            raise ValueError("QualificationBudgetResult schema_version must be 1")
+        if isinstance(self.schema_version, bool) or self.schema_version != 2:
+            raise ValueError("QualificationBudgetResult schema_version must be 2")
         for name in (
             "protocol_sha256",
             "case_authority_sha256",
@@ -572,24 +613,48 @@ class QualificationBudgetResult:
             "metric_scorecard_sha256",
             "processed_data_sha256",
             "observed_dataset_lineage_sha256",
+            "source_train_indices_sha256",
+            "labeled_target_indices_sha256",
+            "fit_indices_sha256",
+            "evaluation_indices_sha256",
         ):
             object.__setattr__(self, name, _sha256(name, getattr(self, name)))
-        if self.model_state_sha256 is not None:
-            object.__setattr__(
-                self,
-                "model_state_sha256",
-                _sha256("model_state_sha256", self.model_state_sha256),
+        for name in (
+            "qualification_model_state_sha256",
+            "external_learned_state_sha256",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, _sha256(name, value))
+
+        if self.learned_state_addressable:
+            if self.external_learned_state_sha256 is None:
+                raise ValueError(
+                    "addressable learned state requires external_learned_state_sha256"
+                )
+        elif self.external_learned_state_sha256 is not None:
+            raise ValueError(
+                "opaque learned state cannot expose external_learned_state_sha256"
             )
+
         if self.status == "success":
-            if self.score is None or self.model_state_sha256 is None:
-                raise ValueError("successful result requires score and bound model state")
+            if self.score is None or self.qualification_model_state_sha256 is None:
+                raise ValueError(
+                    "successful result requires score and qualification model-state binding"
+                )
+            if self.external_state_identity_kind is None:
+                raise ValueError(
+                    "successful result requires external_state_identity_kind"
+                )
             if self.failure_type is not None or self.failure_reason is not None:
                 raise ValueError("successful result cannot contain failure metadata")
         else:
-            if self.score is not None or self.model_state_sha256 is not None:
-                raise ValueError("failed/unavailable result cannot contain success evidence")
+            if self.score is not None:
+                raise ValueError("non-success result cannot contain a score")
             if not self.failure_type or not self.failure_reason:
-                raise ValueError("non-success result requires failure_type and failure_reason")
+                raise ValueError(
+                    "non-success result requires failure_type and failure_reason"
+                )
 
     def to_dict(self, *, include_sha256: bool = True) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -606,18 +671,23 @@ class QualificationBudgetResult:
             "metric_scorecard_sha256": self.metric_scorecard_sha256,
             "processed_data_sha256": self.processed_data_sha256,
             "observed_dataset_lineage_sha256": self.observed_dataset_lineage_sha256,
-            "model_state_sha256": self.model_state_sha256,
+            "source_train_indices_sha256": self.source_train_indices_sha256,
+            "labeled_target_indices_sha256": self.labeled_target_indices_sha256,
+            "fit_indices_sha256": self.fit_indices_sha256,
+            "evaluation_indices_sha256": self.evaluation_indices_sha256,
+            "qualification_model_state_sha256": self.qualification_model_state_sha256,
+            "external_learned_state_sha256": self.external_learned_state_sha256,
+            "external_state_identity_kind": self.external_state_identity_kind,
             "learned_state_addressable": self.learned_state_addressable,
             "source_train_samples": self.source_train_samples,
             "labeled_target_examples": self.labeled_target_examples,
-            "unlabeled_target_examples": self.unlabeled_target_examples,
-            "unlabeled_target_seconds": self.unlabeled_target_seconds,
+            "unlabeled_target_examples": 0,
+            "unlabeled_target_seconds": 0.0,
             "evaluation_samples": self.evaluation_samples,
             "class_labels": list(self.class_labels),
             "score": None if self.score is None else self.score.to_dict(),
             "probability_available": self.probability_available,
             "fit_s": self.fit_s,
-            "adaptation_s": self.adaptation_s,
             "inference_s": self.inference_s,
             "failure_type": self.failure_type,
             "failure_reason": self.failure_reason,
@@ -629,7 +699,7 @@ class QualificationBudgetResult:
     @property
     def sha256(self) -> str:
         return _identity_sha256(
-            "neuros.qualification_budget_result.v1",
+            "neuros.qualification_budget_result.v2",
             self.to_dict(include_sha256=False),
         )
 
@@ -644,11 +714,11 @@ class QualificationCaseResult:
     execution_context_sha256: str
     metric_scorecard_sha256: str
     rows: tuple[QualificationBudgetResult, ...]
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
-        if isinstance(self.schema_version, bool) or self.schema_version != 1:
-            raise ValueError("QualificationCaseResult schema_version must be 1")
+        if isinstance(self.schema_version, bool) or self.schema_version != 2:
+            raise ValueError("QualificationCaseResult schema_version must be 2")
         for name in (
             "protocol_sha256",
             "case_authority_sha256",
@@ -658,7 +728,9 @@ class QualificationCaseResult:
         ):
             object.__setattr__(self, name, _sha256(name, getattr(self, name)))
         if not self.rows:
-            raise ValueError("qualification case result must contain at least one budget row")
+            raise ValueError(
+                "qualification case result must contain at least one budget row"
+            )
         budgets = tuple(row.calibration_per_class for row in self.rows)
         if len(set(budgets)) != len(budgets):
             raise ValueError("qualification result cannot duplicate calibration budgets")
@@ -691,12 +763,15 @@ class QualificationCaseResult:
     @property
     def sha256(self) -> str:
         return _identity_sha256(
-            "neuros.qualification_case_result.v1",
+            "neuros.qualification_case_result.v2",
             self.to_dict(include_sha256=False),
         )
 
 
-def _canonical_class_labels(y: np.ndarray, source_indices: np.ndarray) -> tuple[str, ...]:
+def _canonical_class_labels(
+    y: np.ndarray,
+    source_indices: np.ndarray,
+) -> tuple[str, ...]:
     source_labels = np.asarray(y)[source_indices].astype(str)
     labels = tuple(sorted(np.unique(source_labels).tolist()))
     if len(labels) < 2:
@@ -711,32 +786,6 @@ def _canonical_class_labels(y: np.ndarray, source_indices: np.ndarray) -> tuple[
     return labels
 
 
-def _unlabeled_target_indices(
-    split: Any,
-    *,
-    labeled_calibration_indices: np.ndarray,
-    count: int,
-) -> np.ndarray:
-    if count == 0:
-        return np.asarray([], dtype=np.int64)
-    all_target = np.sort(
-        np.concatenate(
-            [np.asarray(values, dtype=np.int64) for values in split.calibration_order_by_class.values()]
-        )
-    )
-    remaining = np.setdiff1d(
-        all_target,
-        np.asarray(labeled_calibration_indices, dtype=np.int64),
-        assume_unique=True,
-    )
-    if count > len(remaining):
-        raise ValueError(
-            f"requested {count} unlabeled target examples but only {len(remaining)} "
-            "authorized non-evaluation target observations remain"
-        )
-    return remaining[:count].copy()
-
-
 def _failure_status(exc: Exception) -> QualificationStatus:
     if isinstance(exc, QualificationSkippedError):
         return "skipped"
@@ -744,7 +793,7 @@ def _failure_status(exc: Exception) -> QualificationStatus:
         return "unavailable"
     if isinstance(exc, QualificationNonConvergenceError):
         return "nonconverged"
-    if isinstance(exc, MemoryError):
+    if isinstance(exc, MemoryError) or "OutOfMemoryError" in type(exc).__name__:
         return "oom"
     return "failed"
 
@@ -772,18 +821,30 @@ def _validate_preflight(
             f"protocol dataset_id={protocol.dataset_id!r} does not match loaded "
             f"dataset_id={data.dataset_id!r}"
         )
-    if execution_context.observed_dataset_lineage_sha256 != protocol.dataset_lineage_sha256:
-        raise ValueError("observed dataset lineage SHA-256 differs from frozen protocol")
+    if (
+        execution_context.observed_dataset_lineage_sha256
+        != protocol.dataset_lineage_sha256
+    ):
+        raise ValueError(
+            "observed dataset lineage SHA-256 differs from frozen protocol"
+        )
     if protocol.metric_scorecard_sha256 != scorecard.sha256:
         raise ValueError("metric scorecard SHA-256 differs from frozen protocol")
     declared_metrics = (protocol.primary_metric, *protocol.secondary_metrics)
     if tuple(declared_metrics) != tuple(scorecard.metric_names):
         raise ValueError("protocol metric names/order differ from scorecard authority")
+    if execution_context.unlabeled_target_examples:
+        raise ValueError(
+            "LongitudinalCaseAuthority NSQ runner v1 is labeled-target only; "
+            "unlabeled adaptation requires a separately frozen unlabeled-target "
+            "observation authority and cannot reuse leftover calibration rows"
+        )
 
     split = authority.restore(data)
     if authority.split_unit not in protocol.grouping_hierarchy:
         raise ValueError(
-            f"case split unit {authority.split_unit!r} is absent from protocol grouping hierarchy"
+            f"case split unit {authority.split_unit!r} is absent from protocol "
+            "grouping hierarchy"
         )
     for budget in protocol.calibration_budgets_per_class:
         if budget > split.max_budget_per_class:
@@ -803,7 +864,9 @@ def _validate_preflight(
             "external method input_axes dimensionality differs from processed neural array"
         )
 
-    labels = _canonical_class_labels(np.asarray(data.y), split.source_train_indices)
+    labels = _canonical_class_labels(
+        np.asarray(data.y), np.asarray(split.source_train_indices, dtype=np.int64)
+    )
     return split, method_spec, labels
 
 
@@ -816,9 +879,9 @@ def run_external_qualification_case(
     execution_context: QualificationExecutionContext,
     scorecard: QualificationScorecard = DEFAULT_CLASSIFICATION_SCORECARD,
 ) -> QualificationCaseResult:
-    """Execute one external method across the frozen calibration frontier.
+    """Execute one external method across a frozen labeled-calibration frontier.
 
-    Scientific-authority failures are preflight errors and abort the entire case.
+    Scientific-authority failures abort before any external model is created.
     External model/runtime failures after a valid run contract exists are retained
     as explicit per-budget rows.
     """
@@ -836,44 +899,67 @@ def run_external_qualification_case(
     y = np.asarray(data.y).astype(str)
     evaluation_indices = np.asarray(split.evaluation_indices, dtype=np.int64)
     source_indices = np.asarray(split.source_train_indices, dtype=np.int64)
+    source_sha = _index_set_sha256(
+        "supervised_source_history",
+        authority.processed_data_sha256,
+        source_indices,
+    )
+    evaluation_sha = _index_set_sha256(
+        "untouched_final_assessment",
+        authority.processed_data_sha256,
+        evaluation_indices,
+    )
     rows: list[QualificationBudgetResult] = []
 
     for budget in protocol.calibration_budgets_per_class:
-        calibration_indices = np.asarray(split.calibration_indices(budget), dtype=np.int64)
-        train_indices = np.asarray(split.train_indices_for_budget(budget), dtype=np.int64)
-        unlabeled_indices = _unlabeled_target_indices(
-            split,
-            labeled_calibration_indices=calibration_indices,
-            count=execution_context.unlabeled_target_examples,
+        calibration_indices = np.asarray(
+            split.calibration_indices(budget), dtype=np.int64
         )
-        if np.intersect1d(unlabeled_indices, evaluation_indices).size:
-            raise RuntimeError("internal authority error: unlabeled target overlaps final assessment")
+        train_indices = np.asarray(
+            split.train_indices_for_budget(budget), dtype=np.int64
+        )
         if np.intersect1d(train_indices, evaluation_indices).size:
-            raise RuntimeError("internal authority error: fit set overlaps final assessment")
+            raise RuntimeError(
+                "internal authority error: fit set overlaps final assessment"
+            )
+        labeled_sha = _index_set_sha256(
+            "labeled_target_calibration",
+            authority.processed_data_sha256,
+            calibration_indices,
+        )
+        fit_sha = _index_set_sha256(
+            "supervised_fit",
+            authority.processed_data_sha256,
+            train_indices,
+        )
 
         run_contract = QualificationRunContract(
             protocol_sha256=protocol.sha256,
             method_spec_sha256=method_spec.sha256,
             case_authority_sha256=authority.authority_sha256,
             labeled_target_examples=int(len(calibration_indices)),
-            unlabeled_target_examples=int(len(unlabeled_indices)),
-            unlabeled_target_seconds=(
-                0.0
-                if execution_context.target_example_duration_s is None
-                else float(len(unlabeled_indices) * execution_context.target_example_duration_s)
-            ),
+            unlabeled_target_examples=0,
+            unlabeled_target_seconds=0.0,
             preprocessing_authority_sha256s=(
                 execution_context.preprocessing_authority_sha256s
             ),
             calibration_authority_sha256s=(
                 execution_context.calibration_authority_sha256s
             ),
-            metadata={"calibration_per_class": int(budget)},
+            metadata={
+                "calibration_per_class": int(budget),
+                "source_train_indices_sha256": source_sha,
+                "labeled_target_indices_sha256": labeled_sha,
+                "fit_indices_sha256": fit_sha,
+                "evaluation_indices_sha256": evaluation_sha,
+                "observation_authority_schema": "neuros.nsq_observation_roles.v1",
+            },
         )
 
         fit_s: float | None = None
-        adaptation_s: float | None = None
         inference_s: float | None = None
+        bound_state: QualificationModelState | None = None
+        learned_state: ExternalLearnedState | None = None
         try:
             decoder = factory.create()
             if not isinstance(decoder, ExternalQualificationDecoder):
@@ -886,19 +972,12 @@ def run_external_qualification_case(
             decoder.fit(X[train_indices], y[train_indices])
             fit_s = float(time.perf_counter() - started)
 
-            if len(unlabeled_indices):
-                if not isinstance(decoder, ExternalUnlabeledTargetAdapter):
-                    raise TypeError(
-                        "authorized unlabeled target observations require adapt_unlabeled(X)"
-                    )
-                started = time.perf_counter()
-                decoder.adapt_unlabeled(X[unlabeled_indices])
-                adaptation_s = float(time.perf_counter() - started)
-
             learned_state = decoder.learned_state()
             if not isinstance(learned_state, ExternalLearnedState):
-                raise TypeError("decoder.learned_state() must return ExternalLearnedState")
-            bound_state: QualificationModelState = bind_learned_state(
+                raise TypeError(
+                    "decoder.learned_state() must return ExternalLearnedState"
+                )
+            bound_state = bind_learned_state(
                 method_spec,
                 run_contract,
                 learned_state,
@@ -914,22 +993,29 @@ def run_external_qualification_case(
             ).astype(str)
 
             probability: np.ndarray | None = None
-            probability_available = method_spec.probability_semantics != "unavailable"
+            probability_available = (
+                method_spec.probability_semantics != "unavailable"
+            )
             if probability_available:
                 if not isinstance(decoder, ExternalProbabilityDecoder):
                     raise TypeError(
-                        "method declares probability output but decoder lacks predict_proba(X)"
+                        "method declares probability output but decoder lacks "
+                        "predict_proba(X)"
                     )
-                if not isinstance(decoder, ExternalProbabilityClassOrderProvider):
+                if not isinstance(
+                    decoder, ExternalProbabilityClassOrderProvider
+                ):
                     raise TypeError(
-                        "probability-capable decoder must expose probability_class_labels()"
+                        "probability-capable decoder must expose "
+                        "probability_class_labels()"
                     )
                 probability_labels = tuple(
                     str(value) for value in decoder.probability_class_labels()
                 )
                 if probability_labels != class_labels:
                     raise ValueError(
-                        "probability class order differs from canonical source-derived class order"
+                        "probability class order differs from canonical "
+                        "source-derived class order"
                     )
                 probability = validate_probability_output(
                     method_spec,
@@ -960,18 +1046,23 @@ def run_external_qualification_case(
                     observed_dataset_lineage_sha256=(
                         execution_context.observed_dataset_lineage_sha256
                     ),
-                    model_state_sha256=bound_state.sha256,
+                    source_train_indices_sha256=source_sha,
+                    labeled_target_indices_sha256=labeled_sha,
+                    fit_indices_sha256=fit_sha,
+                    evaluation_indices_sha256=evaluation_sha,
+                    qualification_model_state_sha256=bound_state.sha256,
+                    external_learned_state_sha256=learned_state.state_sha256,
+                    external_state_identity_kind=(
+                        learned_state.state_identity_kind
+                    ),
                     learned_state_addressable=bound_state.state_addressable,
                     source_train_samples=int(len(source_indices)),
                     labeled_target_examples=int(len(calibration_indices)),
-                    unlabeled_target_examples=int(len(unlabeled_indices)),
-                    unlabeled_target_seconds=run_contract.unlabeled_target_seconds,
                     evaluation_samples=int(len(evaluation_indices)),
                     class_labels=class_labels,
                     score=score,
                     probability_available=probability_available,
                     fit_s=fit_s,
-                    adaptation_s=adaptation_s,
                     inference_s=inference_s,
                 )
             )
@@ -993,18 +1084,33 @@ def run_external_qualification_case(
                     observed_dataset_lineage_sha256=(
                         execution_context.observed_dataset_lineage_sha256
                     ),
-                    model_state_sha256=None,
-                    learned_state_addressable=False,
+                    source_train_indices_sha256=source_sha,
+                    labeled_target_indices_sha256=labeled_sha,
+                    fit_indices_sha256=fit_sha,
+                    evaluation_indices_sha256=evaluation_sha,
+                    qualification_model_state_sha256=(
+                        None if bound_state is None else bound_state.sha256
+                    ),
+                    external_learned_state_sha256=(
+                        None if learned_state is None else learned_state.state_sha256
+                    ),
+                    external_state_identity_kind=(
+                        None
+                        if learned_state is None
+                        else learned_state.state_identity_kind
+                    ),
+                    learned_state_addressable=(
+                        False
+                        if bound_state is None
+                        else bound_state.state_addressable
+                    ),
                     source_train_samples=int(len(source_indices)),
                     labeled_target_examples=int(len(calibration_indices)),
-                    unlabeled_target_examples=int(len(unlabeled_indices)),
-                    unlabeled_target_seconds=run_contract.unlabeled_target_seconds,
                     evaluation_samples=int(len(evaluation_indices)),
                     class_labels=class_labels,
                     score=None,
                     probability_available=False,
                     fit_s=fit_s,
-                    adaptation_s=adaptation_s,
                     inference_s=inference_s,
                     failure_type=failure_type,
                     failure_reason=failure_reason,
