@@ -18,11 +18,12 @@ import json
 import math
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Literal, Mapping, Protocol, runtime_checkable
+from typing import Any, Literal, Mapping, Protocol, Sequence, runtime_checkable
 
 import numpy as np
 
 ProbabilitySemantics = Literal[
+    "uncalibrated_probability",
     "uncalibrated_softmax",
     "calibrated_probability",
     "unavailable",
@@ -36,6 +37,14 @@ StateIdentityKind = Literal[
 TargetAdaptationMode = Literal["none", "unlabeled"]
 
 _SHA256_HEX = frozenset("0123456789abcdef")
+_PROBABILITY_SEMANTICS = frozenset(
+    {
+        "uncalibrated_probability",
+        "uncalibrated_softmax",
+        "calibrated_probability",
+        "unavailable",
+    }
+)
 
 
 def _nonempty(name: str, value: Any) -> str:
@@ -155,13 +164,7 @@ def _identity_sha256(schema: str, payload: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class QualificationProtocolSpec:
-    """Model-independent scientific question and evaluation authority.
-
-    Human-readable metric names remain useful for tables, but a frozen protocol
-    must also bind the full SHA-256 of its immutable metric scorecard. That
-    scorecard can be produced by Scientific Authority v2 without introducing an
-    ORION dependency into neuros-foundation.
-    """
+    """Model-independent scientific question and evaluation authority."""
 
     protocol_id: str
     dataset_id: str
@@ -214,9 +217,7 @@ class QualificationProtocolSpec:
         secondary = _strings("secondary_metrics", self.secondary_metrics)
         if primary in secondary:
             raise ValueError("primary_metric must not be duplicated in secondary_metrics")
-        metric_scorecard = _optional_sha256(
-            "metric_scorecard_sha256", self.metric_scorecard_sha256
-        )
+        metric_scorecard = _optional_sha256("metric_scorecard_sha256", self.metric_scorecard_sha256)
         robustness = _strings("robustness_axes", self.robustness_axes)
         final_role = _nonempty("final_assessment_role", self.final_assessment_role)
         if final_role != "untouched_final_assessment":
@@ -272,13 +273,7 @@ class QualificationProtocolSpec:
 
 @dataclass(frozen=True, slots=True)
 class ExternalDecoderMethodSpec:
-    """Stable external algorithm/configuration identity, excluding learned state.
-
-    ``model_lineage_sha256=None`` means lineage is unknown, not disjoint. A
-    foundation/pretrained method can therefore participate while Scientific
-    Authority correctly refuses a verified-disjoint pretraining claim until its
-    lineage record is supplied and audited.
-    """
+    """Stable external algorithm/configuration identity, excluding learned state."""
 
     method_id: str
     implementation: str
@@ -301,19 +296,13 @@ class ExternalDecoderMethodSpec:
         axes = _strings("input_axes", self.input_axes)
         if not axes:
             raise ValueError("input_axes must be non-empty")
-        if self.probability_semantics not in {
-            "uncalibrated_softmax",
-            "calibrated_probability",
-            "unavailable",
-        }:
+        if self.probability_semantics not in _PROBABILITY_SEMANTICS:
             raise ValueError("unsupported probability_semantics")
         if self.target_adaptation_mode not in {"none", "unlabeled"}:
             raise ValueError("target_adaptation_mode must be 'none' or 'unlabeled'")
         uncertainty = _nonempty("uncertainty_semantics", self.uncertainty_semantics)
         model_lineage = _optional_sha256("model_lineage_sha256", self.model_lineage_sha256)
-        source = None if self.source_reference is None else _nonempty(
-            "source_reference", self.source_reference
-        )
+        source = None if self.source_reference is None else _nonempty("source_reference", self.source_reference)
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a mapping")
@@ -477,11 +466,7 @@ class QualificationModelState:
             raise ValueError("QualificationModelState schema_version must be 1")
         method_sha = _sha256("method_spec_sha256", self.method_spec_sha256)
         run_sha = _sha256("run_contract_sha256", self.run_contract_sha256)
-        if self.probability_semantics not in {
-            "uncalibrated_softmax",
-            "calibrated_probability",
-            "unavailable",
-        }:
+        if self.probability_semantics not in _PROBABILITY_SEMANTICS:
             raise ValueError("unsupported probability_semantics")
         if not isinstance(self.learned_state, ExternalLearnedState):
             raise TypeError("learned_state must be an ExternalLearnedState")
@@ -531,15 +516,23 @@ def bind_learned_state(
 
 @runtime_checkable
 class ExternalQualificationDecoder(Protocol):
-    """Minimal fitted-model surface used by the qualification runner."""
+    """Minimum task-utility surface required from every external decoder."""
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         ...
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X: np.ndarray) -> np.ndarray:
         ...
 
     def learned_state(self) -> ExternalLearnedState:
+        ...
+
+
+@runtime_checkable
+class ExternalProbabilityDecoder(Protocol):
+    """Optional probability surface used only when the method declares it."""
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
         ...
 
 
@@ -579,6 +572,36 @@ def validate_run_capabilities(
             )
         if not isinstance(decoder, ExternalUnlabeledTargetAdapter):
             raise TypeError("method declares unlabeled adaptation but decoder lacks adapt_unlabeled(X)")
+    if method_spec.probability_semantics != "unavailable" and not isinstance(
+        decoder, ExternalProbabilityDecoder
+    ):
+        raise TypeError(
+            "method declares probability output but decoder lacks predict_proba(X)"
+        )
+
+
+def validate_prediction_output(
+    prediction: Any,
+    *,
+    expected_samples: int,
+    allowed_labels: Sequence[Any] | None = None,
+) -> np.ndarray:
+    """Validate task labels without coercing or repairing an external method."""
+
+    values = np.asarray(prediction)
+    if values.ndim != 1 or values.shape != (expected_samples,):
+        raise ValueError(f"prediction output must have exact shape ({expected_samples},)")
+    if values.dtype.hasobject:
+        raise ValueError("prediction output cannot use object dtype")
+    if np.issubdtype(values.dtype, np.number) and not np.isfinite(values).all():
+        raise ValueError("numeric prediction output must be finite")
+    if allowed_labels is not None:
+        allowed = np.asarray(tuple(allowed_labels))
+        if allowed.ndim != 1 or not len(allowed):
+            raise ValueError("allowed_labels must contain at least one scalar label")
+        if not np.isin(values, allowed).all():
+            raise ValueError("prediction output contains labels outside the declared task classes")
+    return values
 
 
 def validate_probability_output(
@@ -611,6 +634,7 @@ def validate_probability_output(
 __all__ = [
     "ExternalDecoderMethodSpec",
     "ExternalLearnedState",
+    "ExternalProbabilityDecoder",
     "ExternalQualificationDecoder",
     "ExternalQualificationFactory",
     "ExternalUnlabeledTargetAdapter",
@@ -622,6 +646,7 @@ __all__ = [
     "StateIdentityKind",
     "TargetAdaptationMode",
     "bind_learned_state",
+    "validate_prediction_output",
     "validate_probability_output",
     "validate_run_capabilities",
 ]
