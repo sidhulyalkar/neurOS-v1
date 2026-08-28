@@ -498,12 +498,10 @@ def _make_case_authority(
         held_out_value=target_session,
         order=observed,
     )
-    case_seed = _stable_seed(
-        config.split_seed,
-        KUMAR2024_DATASET_ID,
-        subject,
-        target_session,
-    )
+    # The preregistered split seed is shared literally across every case.
+    # Subject/session identity is already bound by the case authority and must
+    # not be mixed into the split RNG seed.
+    case_seed = config.split_seed
     split = make_nested_calibration_split(
         partition,
         evaluation_fraction=config.evaluation_fraction,
