@@ -40,7 +40,7 @@ secondary: accuracy, ROC AUC where defined, Brier score, ECE
 final assessment: untouched
 ```
 
-The protocol is **draft** until its exact dataset-lineage authority is bound, the real-data execution is complete, and independent reproduction has occurred.
+The protocol is **draft** until its exact dataset-lineage authority and immutable metric scorecard are bound, the real-data execution is complete, and independent reproduction has occurred.
 
 ## Four identities
 
@@ -57,10 +57,15 @@ Its SHA-256 binds:
 - full dataset-lineage SHA-256;
 - independent repeated-measures unit and hierarchy;
 - calibration budget ladder;
-- primary/secondary metrics;
+- human-readable primary/secondary metric names;
+- full immutable **metric-scorecard SHA-256**;
 - declared robustness axes;
 - untouched final-assessment role;
 - deterministic metadata.
+
+Metric names are display metadata, not sufficient scientific identity. The metric-scorecard SHA is expected to bind the exact metric definitions, averaging/class semantics, implementation/version, aggregation unit, failure policy, and inference rules defined by Scientific Authority or an equivalent immutable scorecard.
+
+A draft protocol may exist before that scorecard is finalized. A protocol cannot become `frozen` without `metric_scorecard_sha256`.
 
 Adding a new model does not change the protocol SHA.
 
@@ -76,12 +81,15 @@ It binds:
 - probability semantics;
 - whether the method may consume an explicit unlabeled-target adaptation channel;
 - uncertainty semantics;
+- optional full **model-lineage SHA-256**;
 - citation/source reference;
 - deterministic method metadata.
 
 It intentionally **does not contain learned-state hashes**. A method is still the same method when it is freshly trained at a different calibration budget.
 
-It also contains no dynamically executed import path. The researcher constructs the implementation in trusted code.
+`model_lineage_sha256=None` means lineage is **unknown**, not disjoint. This permits an external pretrained/foundation method to enter a comparison while preventing it from earning a clean pretraining-disjoint claim until its lineage is supplied and independently audited against the evaluation dataset lineage.
+
+The method spec also contains no dynamically executed import path. The researcher constructs the implementation in trusted code.
 
 ### 3. `QualificationRunContract`
 
@@ -182,15 +190,16 @@ A method declaring `unavailable` cannot have arbitrary scores silently treated a
 The next implementation slice must:
 
 1. restore a full `LongitudinalCaseAuthority` before exposing any arrays;
-2. verify the run protocol/case/method SHA chain;
-3. call `factory.create()` separately for every calibration budget;
-4. expose only source + authorized labeled target observations to `fit()`;
-5. expose unlabeled target observations only through `adapt_unlabeled()` and only when both the method declaration and run budget authorize them;
-6. keep final-assessment rows unavailable to preprocessing, calibration, adaptation, and model selection;
-7. bind the learned state after all authorized fit/adaptation to that exact run contract;
-8. validate output semantics without repairing the submitted prediction;
-9. preserve failed, skipped, OOM, unavailable, and nonconvergent cases;
-10. emit full SHA-256 identities rather than short fingerprints as scientific joins.
+2. verify the dataset-lineage, metric-scorecard, run protocol/case/method, and model-lineage SHA chain;
+3. independently audit pretraining overlap rather than treating known lineage as disjoint lineage;
+4. call `factory.create()` separately for every calibration budget;
+5. expose only source + authorized labeled target observations to `fit()`;
+6. expose unlabeled target observations only through `adapt_unlabeled()` and only when both the method declaration and run budget authorize them;
+7. keep final-assessment rows unavailable to preprocessing, calibration, adaptation, and model selection;
+8. bind the learned state after all authorized fit/adaptation to that exact run contract;
+9. validate output semantics without repairing the submitted prediction;
+10. preserve failed, skipped, OOM, unavailable, and nonconvergent cases;
+11. emit full SHA-256 identities rather than short fingerprints as scientific joins.
 
 ## Baseline philosophy
 
@@ -208,7 +217,7 @@ A sophisticated neurOS method should never be benchmarked only against weak inte
 NSQ is a participation layer over existing contracts, not a replacement for them:
 
 - `LongitudinalCaseAuthority` freezes source/calibration/final rows;
-- ORION Scientific Authority v2 governs lineage, information roles, preprocessing fit, metrics, repeated measures, and failure preservation;
+- ORION Scientific Authority v2 governs lineage, pretraining overlap, information roles, preprocessing fit, immutable metric definitions, repeated measures, and failure preservation;
 - Model Artifact v1 governs safe promoted state for supported factories;
 - runtime descriptor lineage (#74) will eventually bind stream/transform semantics to artifact input authority;
 - Arena remains a pre-human systems falsification layer, not evidence of human performance.
