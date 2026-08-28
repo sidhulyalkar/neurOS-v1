@@ -1,0 +1,56 @@
+name: One-shot freeze EEGNet authority v2
+
+on:
+  push:
+    branches:
+      - feat/nsq-kumar2024-deep-baseline-authority
+    paths:
+      - .github/workflows/_tmp-freeze-eegnet-authority-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Execute guarded source patch payload
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          payload = Path(".github/workflows/_tmp-freeze-eegnet-authority.yml").read_text(encoding="utf-8")
+          begin_marker = "          from pathlib import Path\n"
+          end_marker = "          workflow = Path(\".github/workflows/nsq-kumar2024-ci.yml\")\n"
+          begin = payload.index(begin_marker)
+          end = payload.index(end_marker, begin)
+          source = payload[begin:end]
+          lines = []
+          for line in source.splitlines():
+              lines.append(line[10:] if line.startswith("          ") else line)
+          script = "\n".join(lines) + "\n"
+          exec(compile(script, "<eegnet-authority-patch>", "exec"), {})
+          PY
+      - name: Validate patched scientific surfaces
+        run: |
+          python -m compileall -q \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py \
+            packages/neuros/src/neuros/evidence/kumar2024.py
+          git diff --check
+          grep -q 'braindecode_epochs: int = 1000' packages/neuros/src/neuros/evidence/kumar2024.py
+          grep -q 'validation_relative_indices_sha256' packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py
+          grep -q 'EEGConformer is not a promoted Kumar2024 efficacy method yet' docs/NSQ_KUMAR2024_V1.md
+      - name: Commit scientific authority changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py \
+            packages/neuros/src/neuros/evidence/kumar2024.py \
+            tests/test_neural_system_qualification_baselines.py \
+            docs/NSQ_KUMAR2024_V1.md
+          git commit -m "Freeze upstream EEGNet NSQ training authority"
+          git push origin HEAD:${GITHUB_REF_NAME}
