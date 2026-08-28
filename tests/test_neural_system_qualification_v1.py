@@ -242,12 +242,7 @@ def test_probability_outputs_are_validated_not_repaired():
     assert returned is good
 
     with pytest.raises(ValueError, match="exact shape"):
-        validate_probability_output(
-            method,
-            good[:, :1],
-            expected_samples=2,
-            expected_classes=2,
-        )
+        validate_probability_output(method, good[:, :1], expected_samples=2, expected_classes=2)
     with pytest.raises(ValueError, match="floating dtype"):
         validate_probability_output(
             method,
@@ -293,6 +288,9 @@ def test_external_factory_is_structural_not_an_import_mechanism_and_can_create_f
     class ToyDecoder:
         def fit(self, X: np.ndarray, y: np.ndarray) -> None:
             del X, y
+
+        def predict(self, X: np.ndarray) -> np.ndarray:
+            return np.zeros(len(X), dtype=np.int64)
 
         def predict_proba(self, X: np.ndarray) -> np.ndarray:
             return np.full((len(X), 2), 0.5, dtype=np.float32)
