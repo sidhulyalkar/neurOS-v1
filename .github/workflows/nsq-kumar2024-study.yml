@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: nsq-kumar2024-study-cfd7ecb29dc999edbc7f342cf1167049b93454a1
+  group: nsq-kumar2024-study-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -65,7 +65,7 @@ jobs:
       - name: Upload immutable pilot bundle
         uses: actions/upload-artifact@v4
         with:
-          name: nsq-kumar2024-csp-pilot-cfd7ecb29dc999edbc7f342cf1167049b93454a1
-          path: /home/runner/work/_temp/nsq-kumar2024-csp-pilot
+          name: nsq-kumar2024-csp-pilot-${{ github.sha }}
+          path: ${{ runner.temp }}/nsq-kumar2024-csp-pilot
           if-no-files-found: error
           retention-days: 90
