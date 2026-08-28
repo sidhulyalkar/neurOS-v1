@@ -1,0 +1,154 @@
+name: One-shot finalize NSQ Kumar2024 PR
+
+on:
+  push:
+    branches:
+      - feat/nsq-kumar2024-v1
+    paths:
+      - .github/workflows/_tmp-finalize-nsq87.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply narrow evidence-semantic patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one replacement target, found {count}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          source = Path('packages/neuros/src/neuros/evidence/kumar2024.py')
+
+          replace_once(
+              source,
+              '''def full_config() -> Kumar2024StudyConfig:\n    """Predeclared full-study execution profile.\n\n    Twenty epochs is a fixed reference training budget, not an assertion that it\n    is optimal. Changing it after observing final results creates a new study\n    identity and must not rewrite the v1 result.\n    """\n''',
+              '''def full_config() -> Kumar2024StudyConfig:\n    """Unpromoted all-subject reference configuration.\n\n    This helper exists for feasibility work only. It is intentionally not exposed\n    by the CLI because the promoted comparison in issue #27 still requires the\n    shared split-seed ensemble, paired frontier-AUC endpoint, and predeclared\n    neural-model seed authority. Twenty epochs is only a reference compute budget.\n    """\n''',
+          )
+
+          replace_once(
+              source,
+              '''        "moabb_version": versions.get("moabb"),\n        "mne_version": versions.get("mne"),\n        "fit_kind": "fixed_upstream_transform_no_neuros_fit",\n''',
+              '''        "moabb_version": versions.get("moabb"),\n        "mne_version": versions.get("mne"),\n        "processed_value_units": {\n            "get_data_units_argument": None,\n            "unit_system": "MNE channel-type-specific default SI units",\n            "eeg": "V",\n        },\n        "fit_kind": "fixed_upstream_transform_no_neuros_fit",\n''',
+          )
+
+          replace_once(
+              source,
+              '''            "processed_event_id": contract["event_id"],\n        },\n''',
+              '''            "processed_event_id": contract["event_id"],\n            "processed_value_units": preprocessing_authority["processed_value_units"],\n        },\n''',
+          )
+
+          replace_once(
+              source,
+              '''        robustness_axes=(\n            "session",\n            "subject",\n            "channel_drop",\n            "artifact_sensitivity",\n            "montage",\n        ),\n''',
+              '''        robustness_axes=(\n            "session",\n            "subject",\n        ),\n''',
+          )
+
+          replace_once(
+              source,
+              '''            "analysis_independent_unit": "participant",\n            "study_scope": (\n''',
+              '''            "analysis_independent_unit": "participant",\n            "planned_not_executed_robustness_axes": [\n                "channel_drop",\n                "artifact_sensitivity",\n                "montage",\n            ],\n            "event_semantics": (\n                "processed MNE event_id is retained verbatim; task labels are separately "\n                "bound in GroupedEvaluationData targets and processed-data identity"\n            ),\n            "study_scope": (\n''',
+          )
+
+          text = source.read_text(encoding='utf-8')
+          start = text.index('    frontier_auc: list[dict[str, Any]] = []\n')
+          end = text.index('    paired: list[dict[str, Any]] = []\n', start)
+          replacement = '''    frontier_auc: list[dict[str, Any]] = []\n    frontier_participant_values: dict[str, dict[int, float]] = {}\n    expected_sessions = set(config.target_sessions)\n    for method_index, method in enumerate(methods):\n        by_case_budget: dict[tuple[int, str], dict[int, list[float]]] = defaultdict(\n            lambda: defaultdict(list)\n        )\n        for row in rows:\n            if row["method_id"] != method or row["status"] != "success":\n                continue\n            value = row.get("balanced_accuracy")\n            if value is None:\n                continue\n            key = (int(row["subject"]), str(row["held_out_session"]))\n            by_case_budget[key][int(row["calibration_per_class"])].append(float(value))\n\n        complete_case_auc: dict[tuple[int, str], float] = {}\n        for key, budget_values in by_case_budget.items():\n            if any(budget not in budget_values for budget in budgets):\n                continue\n            ys = [float(np.mean(budget_values[budget])) for budget in budgets]\n            complete_case_auc[key] = _normalized_trapezoid(budgets, ys)\n\n        by_participant: dict[int, list[float]] = defaultdict(list)\n        complete_sessions: dict[int, set[str]] = defaultdict(set)\n        for (participant, session), value in complete_case_auc.items():\n            by_participant[participant].append(value)\n            complete_sessions[participant].add(session)\n\n        auc_values = {\n            participant: float(np.mean(values))\n            for participant, values in by_participant.items()\n            if complete_sessions[participant] == expected_sessions\n        }\n        frontier_participant_values[method] = auc_values\n        frontier_auc.append(\n            {\n                "method_id": method,\n                "normalized_balanced_accuracy_frontier_auc": _bootstrap_mean_ci(\n                    auc_values,\n                    seed=_stable_seed(config.analysis_seed, "auc", method_index),\n                    replicates=config.analysis_bootstrap_replicates,\n                ),\n                "complete_frontier_participants": sorted(auc_values),\n                "complete_frontier_subject_session_cases": [\n                    [participant, session]\n                    for participant, session in sorted(complete_case_auc)\n                ],\n                "pairing_rule": (\n                    "a subject-session contributes only if every declared calibration budget "\n                    "succeeds; a participant contributes only if every declared target session "\n                    "has a complete subject-session frontier"\n                ),\n            }\n        )\n\n'''
+          text = text[:start] + replacement + text[end:]
+          source.write_text(text, encoding='utf-8')
+
+          text = source.read_text(encoding='utf-8')
+          marker = '''                paired.append(\n                    {\n                        "left_method": left,\n                        "right_method": right,\n                        "calibration_per_class": budget,\n                        "matched_subject_session_cases": len(matched),\n                        "left_minus_right_balanced_accuracy": _bootstrap_mean_ci(\n                            participant_differences,\n                            seed=_stable_seed(\n                                config.analysis_seed,\n                                "paired",\n                                left_index,\n                                right_index,\n                                budget,\n                            ),\n                            replicates=config.analysis_bootstrap_replicates,\n                        ),\n                    }\n                )\n\n'''
+          if text.count(marker) != 1:
+              raise SystemExit('paired-method insertion point not found exactly once')
+          paired_auc = marker + '''    paired_frontier_auc: list[dict[str, Any]] = []\n    for left_index, left in enumerate(methods):\n        for right_index in range(left_index + 1, len(methods)):\n            right = methods[right_index]\n            left_values = frontier_participant_values.get(left, {})\n            right_values = frontier_participant_values.get(right, {})\n            matched_participants = sorted(set(left_values) & set(right_values))\n            differences = {\n                participant: left_values[participant] - right_values[participant]\n                for participant in matched_participants\n            }\n            paired_frontier_auc.append(\n                {\n                    "left_method": left,\n                    "right_method": right,\n                    "matched_complete_frontier_participants": matched_participants,\n                    "left_minus_right_normalized_balanced_accuracy_frontier_auc": (\n                        _bootstrap_mean_ci(\n                            differences,\n                            seed=_stable_seed(\n                                config.analysis_seed,\n                                "paired-frontier-auc",\n                                left_index,\n                                right_index,\n                            ),\n                            replicates=config.analysis_bootstrap_replicates,\n                        )\n                    ),\n                }\n            )\n\n'''
+          source.write_text(text.replace(marker, paired_auc, 1), encoding='utf-8')
+
+          replace_once(
+              source,
+              '''        "primary_metric": "balanced_accuracy",\n        "performance": performance,\n        "calibration_efficiency": frontier_auc,\n        "paired_method_differences": paired,\n''',
+              '''        "primary_metric": "balanced_accuracy",\n        "primary_study_endpoint": "paired_normalized_balanced_accuracy_frontier_auc",\n        "performance": performance,\n        "calibration_efficiency": frontier_auc,\n        "paired_method_differences": paired,\n        "paired_calibration_efficiency": paired_frontier_auc,\n''',
+          )
+
+          replace_once(
+              source,
+              '''    parser.add_argument("--profile", choices=("pilot", "full"), default="pilot")\n''',
+              '''    parser.add_argument("--profile", choices=("pilot",), default="pilot")\n''',
+          )
+          replace_once(
+              source,
+              '''    base = full_config() if args.profile == "full" else pilot_config()\n''',
+              '''    base = pilot_config()\n''',
+          )
+
+          tests = Path('tests/test_kumar2024_nsq_study.py')
+          replace_once(
+              tests,
+              '''    config = Kumar2024StudyConfig(\n        methods=("mne-csp-lda", "braindecode-eegnet"),\n        budgets_per_class=(0, 1),\n        analysis_bootstrap_replicates=50,\n    )\n''',
+              '''    config = Kumar2024StudyConfig(\n        methods=("mne-csp-lda", "braindecode-eegnet"),\n        target_sessions=("1", "2"),\n        budgets_per_class=(0, 1),\n        analysis_bootstrap_replicates=50,\n    )\n''',
+          )
+          text = tests.read_text(encoding='utf-8')
+          insertion = '''\n\ndef test_frontier_auc_requires_same_cases_at_every_budget():\n    rows = _analysis_rows()\n    rows = [\n        row\n        for row in rows\n        if not (\n            row["method_id"] == "braindecode-eegnet"\n            and row["subject"] == 1\n            and row["held_out_session"] == "2"\n            and row["calibration_per_class"] == 1\n        )\n    ]\n    config = Kumar2024StudyConfig(\n        methods=("mne-csp-lda", "braindecode-eegnet"),\n        target_sessions=("1", "2"),\n        budgets_per_class=(0, 1),\n        analysis_bootstrap_replicates=25,\n    )\n    analysis = summarize_rows(rows, config=config)\n    eegnet = next(\n        item\n        for item in analysis["calibration_efficiency"]\n        if item["method_id"] == "braindecode-eegnet"\n    )\n    assert eegnet["complete_frontier_participants"] == [10]\n    assert [1, "2"] not in eegnet["complete_frontier_subject_session_cases"]\n    paired_auc = analysis["paired_calibration_efficiency"][0]\n    assert paired_auc["matched_complete_frontier_participants"] == [10]\n\n'''
+          anchor = '\n\ndef _sha(path: Path) -> str:\n'
+          if text.count(anchor) != 1:
+              raise SystemExit('test insertion anchor not found exactly once')
+          tests.write_text(text.replace(anchor, insertion + anchor, 1), encoding='utf-8')
+
+          docs = Path('docs/NSQ_KUMAR2024_V1.md')
+          text = docs.read_text(encoding='utf-8')
+          start = text.index('### Full\n')
+          end = text.index('\n## Installation\n', start)
+          replacement = '''### Promoted all-subject comparison: intentionally blocked\n\nThe code contains an internal all-18-subject reference configuration for feasibility work, but it is **not** exposed as a CLI profile and is **not** the promoted preregistration.\n\nBefore any headline all-subject comparison, issue #27 must be encoded explicitly:\n\n```text\nshared split seeds = 2026, 3407, 9109\nprimary study endpoint = paired normalized balanced-accuracy calibration-frontier AUC\nneural model seeds = predeclared and reported separately from split variation\n```\n\nThe training budget must also be frozen before final-assessment results are inspected. A convenient all-subject run must never masquerade as the promoted study.\n'''
+          text = text[:start] + replacement + text[end:]
+          old = '''Full predeclared profile:\n\n```bash\nneuros-nsq-kumar2024 \\\n  --profile full \\\n  --output /tmp/nsq-kumar2024-v1\n```\n\n'''
+          if old not in text:
+              raise SystemExit('full CLI docs block not found')
+          text = text.replace(old, '', 1)
+          unit_anchor = '''Only then are the values converted into the shared `GroupedEvaluationData` array contract.\n\n'''
+          unit_text = '''Only then are the values converted into the shared `GroupedEvaluationData` array contract. MNE `Epochs.get_data(units=None)` returns channel-type-specific default SI units; for EEG this study therefore binds the processed values as volts. Any later microvolt conversion or standardization used by a deep baseline must be declared as a separate fixed or fitted preprocessing authority.\n\nThe MNE `event_id` mapping is retained verbatim. Task labels (`left_hand` / `right_hand`) are separately bound to the processed row order by `GroupedEvaluationData` and its processed-data SHA rather than being guessed from event-ID display names.\n\n'''
+          if text.count(unit_anchor) != 1:
+              raise SystemExit('unit docs anchor not found exactly once')
+          text = text.replace(unit_anchor, unit_text, 1)
+          promotion_anchor = '''## Verify without retraining\n'''
+          study_workflow = '''## Canonical real-data execution\n\nThe pull-request data job is a pre-merge feasibility check because GitHub checks out a synthetic PR merge ref. The archival CSP pilot is produced by `.github/workflows/nsq-kumar2024-study.yml` from an exact durable `main` commit. The workflow runs once when first added to `main` and remains manually dispatchable afterward. It asserts that the bundle records the exact workflow SHA, all ten case authorities use literal split seed `2026`, all five budgets are present, and the expected 50 CSP result rows are preserved before uploading the artifact.\n\n'''
+          if text.count(promotion_anchor) != 1:
+              raise SystemExit('canonical workflow docs anchor not found')
+          text = text.replace(promotion_anchor, study_workflow + promotion_anchor, 1)
+          docs.write_text(text, encoding='utf-8')
+
+          ci = Path('.github/workflows/nsq-kumar2024-ci.yml')
+          text = ci.read_text(encoding='utf-8')
+          marker = '\n  real-csp-pilot:\n'
+          if text.count(marker) != 1:
+              raise SystemExit('real CSP PR job marker not found exactly once')
+          ci.write_text(text.split(marker, 1)[0].rstrip() + '\n', encoding='utf-8')
+
+          study = Path('.github/workflows/nsq-kumar2024-study.yml')
+          study.write_text('''name: NSQ Kumar2024 real-data study\n\non:\n  workflow_dispatch:\n  push:\n    branches: [main]\n    paths:\n      - ".github/workflows/nsq-kumar2024-study.yml"\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: nsq-kumar2024-study-${{ github.sha }}\n  cancel-in-progress: false\n\njobs:\n  csp-pilot:\n    name: Exact-main Kumar2024 CSP pilot\n    runs-on: ubuntu-latest\n    timeout-minutes: 45\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with:\n          python-version: "3.11"\n          cache: pip\n      - name: Install real-data evidence stack\n        run: |\n          python -m pip install --upgrade pip\n          python -m pip install -e packages/neuros-core\n          python -m pip install -e packages/neuros-drivers\n          python -m pip install -e packages/neuros-models\n          python -m pip install -e "packages/neuros-foundation[evidence]"\n          python -m pip install -e packages/orion\n          python -m pip install -e packages/neuros\n      - name: Execute exact-main CSP pilot\n        run: |\n          OUT="${RUNNER_TEMP}/nsq-kumar2024-csp-pilot"\n          neuros-nsq-kumar2024 \\\n            --profile pilot \\\n            --methods mne-csp-lda \\\n            --output "${OUT}"\n          neuros-nsq-kumar2024 --verify-only --output "${OUT}"\n          OUT="${OUT}" python - <<'PY'\n          import csv\n          import json\n          import os\n          from pathlib import Path\n\n          root = Path(os.environ["OUT"])\n          manifest = json.loads((root / "study_manifest.json").read_text())\n          authorities = json.loads((root / "case_authorities.json").read_text())["authorities"]\n          rows = list(csv.DictReader((root / "results.csv").open()))\n          assert manifest["git_revision"] == os.environ["GITHUB_SHA"]\n          assert len(authorities) == 10\n          assert {item["seed"] for item in authorities} == {2026}\n          assert {item["case_metadata"]["split_seed"] for item in authorities} == {2026}\n          assert all(item["case_id"].endswith("/split-2026") for item in authorities)\n          assert len(rows) == 50\n          assert {int(row["calibration_per_class"]) for row in rows} == {0, 1, 2, 5, 10}\n          assert {row["status"] for row in rows} == {"success"}\n          assert {row["method_id"] for row in rows} == {"mne-csp-lda"}\n          PY\n      - name: Upload immutable pilot bundle\n        uses: actions/upload-artifact@v4\n        with:\n          name: nsq-kumar2024-csp-pilot-${{ github.sha }}\n          path: ${{ runner.temp }}/nsq-kumar2024-csp-pilot\n          if-no-files-found: error\n          retention-days: 90\n''', encoding='utf-8')
+
+          temp = Path('.github/workflows/_tmp-finalize-nsq87.yml')
+          if not temp.exists():
+              raise SystemExit('temporary finalizer missing')
+          temp.unlink()
+          PY
+      - name: Validate and commit final PR shape
+        run: |
+          python -m compileall -q packages/neuros/src/neuros/evidence/kumar2024.py
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --stat
+          git commit -m "Finalize Kumar2024 pilot evidence semantics"
+          git push origin HEAD:${GITHUB_REF_NAME}
