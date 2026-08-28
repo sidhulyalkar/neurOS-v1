@@ -23,7 +23,7 @@ class FakeEpochs:
         return self._data.copy()
 
     def get_channel_types(self):
-        return ["eeg", "eeg"]
+        return ["eeg"] * len(self.ch_names)
 
 
 class FakeParadigm:
