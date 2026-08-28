@@ -21,7 +21,7 @@ A benchmark row such as `method -> score` hides scientific authority that matter
 - whether failed/OOM/nonconvergent cases disappeared from the aggregate;
 - whether repeated participant-session observations were treated as independent people.
 
-NSQ exists to make those distinctions machine-readable.
+NSQ exists to make those distinctions machine-readable and, where possible, mechanically enforceable.
 
 ## First proving ground
 
@@ -74,6 +74,7 @@ It binds:
 - implementation/package identity and version;
 - input-axis convention;
 - probability semantics;
+- whether the method may consume an explicit unlabeled-target adaptation channel;
 - uncertainty semantics;
 - citation/source reference;
 - deterministic method metadata.
@@ -99,9 +100,11 @@ Its SHA-256 includes:
 
 A run is `zero_shot` only if **all** labeled and unlabeled target-information budgets are zero.
 
+A nonzero unlabeled-target budget is not merely metadata. It requires the method to declare `target_adaptation_mode="unlabeled"` and the fitted decoder to expose the separate `adapt_unlabeled(X)` authority surface. This prevents an experiment from claiming controlled unsupervised adaptation when the benchmark cannot identify where target information entered the method.
+
 ### 4. `QualificationModelState`
 
-The learned state is bound *after fitting* to the method and run that produced it.
+The learned state is bound *after fitting and any authorized adaptation* to the method and run that produced it.
 
 An external adapter reports `ExternalLearnedState` using one of:
 
@@ -125,6 +128,9 @@ class ExternalQualificationDecoder(Protocol):
     def predict_proba(self, X): ...
     def learned_state(self) -> ExternalLearnedState: ...
 
+class ExternalUnlabeledTargetAdapter(Protocol):
+    def adapt_unlabeled(self, X) -> None: ...
+
 class ExternalQualificationFactory(Protocol):
     @property
     def method_spec(self) -> ExternalDecoderMethodSpec: ...
@@ -132,6 +138,8 @@ class ExternalQualificationFactory(Protocol):
 ```
 
 The **factory** is important. The benchmark runner must request a fresh decoder for every calibration budget rather than reusing a model that has already seen a larger target budget.
+
+The unlabeled adaptation surface is equally important. `fit(X, y)` and `adapt_unlabeled(X)` are separate channels because they consume scientifically different information. A method may implement only the first. If it declares unlabeled adaptation, the runner validates that the second surface actually exists before exposing any unlabeled target observations.
 
 The intended control boundary is:
 
@@ -142,6 +150,8 @@ frozen neurOS authority
         |
         +-> authorized X_train, y_train -> external trusted fit()
         |
+        +-> optional authorized X_target -> adapt_unlabeled()
+        |
         +-> learned_state() ------------> run-bound state identity
         |
         +-> untouched X_final ----------> external predict_proba()
@@ -149,7 +159,9 @@ frozen neurOS authority
         +-> semantic validation --------> failure-preserving result
 ```
 
-neurOS does not rewrite the submitted optimizer, architecture, augmentation policy, representation learner, or training loop.
+The untouched final-assessment observations are never routed through `fit()` or `adapt_unlabeled()`.
+
+neurOS does not rewrite the submitted optimizer, architecture, augmentation policy, representation learner, or training loop. Its authority comes from controlling which observations cross the external-model boundary and recording what those observations were permitted to mean.
 
 ## Probability semantics
 
@@ -172,10 +184,10 @@ The next implementation slice must:
 1. restore a full `LongitudinalCaseAuthority` before exposing any arrays;
 2. verify the run protocol/case/method SHA chain;
 3. call `factory.create()` separately for every calibration budget;
-4. expose only source + authorized target-calibration observations to `fit()`;
-5. record unlabeled target observation separately from labeled calibration;
+4. expose only source + authorized labeled target observations to `fit()`;
+5. expose unlabeled target observations only through `adapt_unlabeled()` and only when both the method declaration and run budget authorize them;
 6. keep final-assessment rows unavailable to preprocessing, calibration, adaptation, and model selection;
-7. bind the learned state after fit to that exact run contract;
+7. bind the learned state after all authorized fit/adaptation to that exact run contract;
 8. validate output semantics without repairing the submitted prediction;
 9. preserve failed, skipped, OOM, unavailable, and nonconvergent cases;
 10. emit full SHA-256 identities rather than short fingerprints as scientific joins.
@@ -200,6 +212,8 @@ NSQ is a participation layer over existing contracts, not a replacement for them
 - Model Artifact v1 governs safe promoted state for supported factories;
 - runtime descriptor lineage (#74) will eventually bind stream/transform semantics to artifact input authority;
 - Arena remains a pre-human systems falsification layer, not evidence of human performance.
+
+The long-term runner should compose those authorities rather than reproduce weaker local versions of them.
 
 ## Evidence boundary
 
