@@ -40,6 +40,7 @@ KUMAR2024_DATA_DOI = "10.5281/zenodo.10694880"
 KUMAR2024_DEFAULT_BUDGETS = (0, 1, 2, 5, 10)
 KUMAR2024_DEFAULT_METHODS = (
     "mne-csp-lda",
+    "pyriemann-rg-lr",
     "braindecode-eegnet",
     "braindecode-eegconformer",
 )
@@ -122,6 +123,7 @@ def _runtime_versions() -> dict[str, str | None]:
         "moabb",
         "mne",
         "scikit-learn",
+        "pyriemann",
         "braindecode",
         "torch",
         "numpy",
@@ -559,12 +561,15 @@ def _method_factories(
 ) -> tuple[Any, ...]:
     from neuros.foundation_models.qualification_baselines import (
         MNECSPLDAFactory,
+        RiemannianTangentLogRegFactory,
         UpstreamBraindecodeFactory,
     )
 
     factories: list[Any] = []
     if "mne-csp-lda" in config.methods:
         factories.append(MNECSPLDAFactory(n_components=config.csp_components))
+    if "pyriemann-rg-lr" in config.methods:
+        factories.append(RiemannianTangentLogRegFactory())
     common = {
         "sample_rate_hz": float(sample_rate_hz),
         "learning_rate": config.braindecode_learning_rate,

@@ -140,8 +140,11 @@ Lineage completeness is `partial` until exact raw content and all ancestry are i
 The NSQ execution surface supports:
 
 1. direct MNE CSP + scikit-learn LDA;
-2. direct upstream Braindecode EEGNet;
-3. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.
+2. direct pyRiemann covariance + tangent-space + scikit-learn logistic regression;
+3. direct upstream Braindecode EEGNet;
+4. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.
+
+The Riemannian comparator is frozen as sample covariance (`scm`) -> `TangentSpace(metric="riemann", tsupdate=False)` -> L2 `LogisticRegression(solver="lbfgs", C=1.0, max_iter=1000)`. `tsupdate=False` is part of the evidence contract so evaluation-batch composition cannot alter the tangent reference.
 
 Only **MNE CSP + LDA is currently part of the canonical pilot default**. The Braindecode adapters are explicit capability/integration surfaces, not yet qualified efficacy baselines. A deep baseline may enter the promoted comparison only after its fixed unit conversion, train-authorized standardization, validation/state-selection policy, optimization schedule, and neural-model seed authority are frozen and content-addressed. Until then it must be requested explicitly with `--methods`.
 

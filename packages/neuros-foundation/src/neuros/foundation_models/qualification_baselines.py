@@ -172,6 +172,163 @@ class MNECSPLDAFactory:
         return _MNECSPLDADecoder(n_components=self.n_components)
 
 
+class _RiemannianTangentLogRegDecoder:
+    def __init__(
+        self,
+        *,
+        covariance_estimator: str,
+        tangent_metric: str,
+        logistic_c: float,
+        max_iter: int,
+    ) -> None:
+        self.covariance_estimator = covariance_estimator
+        self.tangent_metric = tangent_metric
+        self.logistic_c = logistic_c
+        self.max_iter = max_iter
+        self._pipeline: Any | None = None
+
+    def _require_pipeline(self) -> Any:
+        if self._pipeline is None:
+            raise RuntimeError("pyRiemann RG+LR decoder has not been fitted")
+        return self._pipeline
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+        try:
+            from pyriemann.estimation import Covariances
+            from pyriemann.tangentspace import TangentSpace
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.pipeline import make_pipeline
+        except ImportError as exc:  # pragma: no cover - optional integration lane
+            raise ImportError(
+                "pyRiemann RG+LR requires pyriemann and scikit-learn"
+            ) from exc
+
+        array = np.asarray(X)
+        labels = np.asarray(y).astype(str)
+        if array.ndim != 3:
+            raise ValueError("pyRiemann RG+LR expects X=(sample, channel, time)")
+        if labels.ndim != 1 or len(labels) != len(array):
+            raise ValueError("pyRiemann RG+LR labels must align with X")
+        if not np.isfinite(array).all():
+            raise ValueError("pyRiemann RG+LR refuses non-finite neural input")
+        if len(np.unique(labels)) < 2:
+            raise ValueError("pyRiemann RG+LR requires at least two classes")
+
+        # Standard MOABB-style source-only Riemannian baseline. tsupdate=False
+        # makes the tangent reference a fitted training state rather than a
+        # transductive function of final-assessment batch composition.
+        pipeline = make_pipeline(
+            Covariances(estimator=self.covariance_estimator),
+            TangentSpace(metric=self.tangent_metric, tsupdate=False),
+            LogisticRegression(
+                solver="lbfgs",
+                penalty="l2",
+                C=self.logistic_c,
+                max_iter=self.max_iter,
+            ),
+        )
+        pipeline.fit(array, labels)
+        self._pipeline = pipeline
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return np.asarray(self._require_pipeline().predict(np.asarray(X))).astype(str)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        return np.asarray(
+            self._require_pipeline().predict_proba(np.asarray(X)),
+            dtype=np.float64,
+        )
+
+    def probability_class_labels(self) -> tuple[str, ...]:
+        estimator = self._require_pipeline().steps[-1][1]
+        return tuple(str(value) for value in estimator.classes_)
+
+    def learned_state(self) -> ExternalLearnedState:
+        self._require_pipeline()
+        return ExternalLearnedState(
+            state_identity_kind="opaque_unverified",
+            metadata={
+                "reason": "pyriemann_sklearn_state_serializer_not_qualified",
+                "covariance_estimator": self.covariance_estimator,
+                "tangent_metric": self.tangent_metric,
+                "tangent_space_update": False,
+                "logistic_c": self.logistic_c,
+                "max_iter": self.max_iter,
+            },
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RiemannianTangentLogRegFactory:
+    """Upstream pyRiemann covariance/tangent-space + sklearn LR baseline."""
+
+    covariance_estimator: str = "scm"
+    tangent_metric: str = "riemann"
+    logistic_c: float = 1.0
+    max_iter: int = 1000
+    source_reference: str = (
+        "pyRiemann Covariances + TangentSpace + scikit-learn LogisticRegression"
+    )
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        if isinstance(self.schema_version, bool) or self.schema_version != 1:
+            raise ValueError("RiemannianTangentLogRegFactory schema_version must be 1")
+        if not isinstance(self.covariance_estimator, str) or not self.covariance_estimator.strip():
+            raise ValueError("covariance_estimator must be non-empty")
+        if not isinstance(self.tangent_metric, str) or not self.tangent_metric.strip():
+            raise ValueError("tangent_metric must be non-empty")
+        c_value = float(self.logistic_c)
+        if not np.isfinite(c_value) or c_value <= 0:
+            raise ValueError("logistic_c must be finite and positive")
+        if isinstance(self.max_iter, bool) or not isinstance(self.max_iter, int):
+            raise ValueError("max_iter must be an integer without coercion")
+        if self.max_iter <= 0:
+            raise ValueError("max_iter must be positive")
+        object.__setattr__(self, "covariance_estimator", self.covariance_estimator.strip())
+        object.__setattr__(self, "tangent_metric", self.tangent_metric.strip())
+        object.__setattr__(self, "logistic_c", c_value)
+
+    @property
+    def method_spec(self) -> ExternalDecoderMethodSpec:
+        pyriemann_version = _package_version("pyriemann")
+        sklearn_version = _package_version("scikit-learn")
+        return ExternalDecoderMethodSpec(
+            method_id="pyriemann-rg-lr",
+            implementation=(
+                "pyriemann.estimation.Covariances+"
+                "pyriemann.tangentspace.TangentSpace+"
+                "sklearn.linear_model.LogisticRegression"
+            ),
+            implementation_version=(
+                f"pyriemann={pyriemann_version};scikit-learn={sklearn_version}"
+            ),
+            input_axes=("sample", "channel", "time"),
+            probability_semantics="uncalibrated_probability",
+            target_adaptation_mode="none",
+            source_reference=self.source_reference,
+            metadata={
+                "covariance_estimator": self.covariance_estimator,
+                "tangent_metric": self.tangent_metric,
+                "tangent_space_update": False,
+                "logistic_solver": "lbfgs",
+                "logistic_penalty": "l2",
+                "logistic_c": self.logistic_c,
+                "logistic_max_iter": self.max_iter,
+                "hidden_preprocessing": False,
+                "transductive_evaluation_batch_update": False,
+            },
+        )
+
+    def create(self) -> _RiemannianTangentLogRegDecoder:
+        return _RiemannianTangentLogRegDecoder(
+            covariance_estimator=self.covariance_estimator,
+            tangent_metric=self.tangent_metric,
+            logistic_c=self.logistic_c,
+            max_iter=self.max_iter,
+        )
+
+
 class _UpstreamBraindecodeDecoder:
     def __init__(
         self,
@@ -388,5 +545,6 @@ class UpstreamBraindecodeFactory:
 
 __all__ = [
     "MNECSPLDAFactory",
+    "RiemannianTangentLogRegFactory",
     "UpstreamBraindecodeFactory",
 ]
