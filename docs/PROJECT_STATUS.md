@@ -1,190 +1,131 @@
 # neurOS + ORION Project Status
 
-This page is the current capability and maturity map for the monorepo. It is intentionally stricter than a feature list: a package can contain useful code without being a qualified production surface.
+This page is the current maturity map for the repository. It intentionally distinguishes software contracts from scientific, hardware, closed-loop, and clinical evidence.
 
-> **Evidence boundary:** software maturity, package version, and passing CI do not imply hardware qualification, clinical validation, biological correctness, or safety certification.
+> Passing CI means a declared software contract passed its tests. It does not establish biological correctness, model superiority, hardware qualification, online BCI efficacy, safety certification, or clinical benefit.
 
-## Platform shape
+## Current product thesis
 
-neurOS is organized around execution, intelligence, and evidence, with Studio as the inspection surface:
+neurOS is converging on an **open execution and qualification layer for neural systems**.
+
+- **neurOS** owns acquisition/runtime contracts, timing, configuration, recording/replay, interoperability, deployment semantics, and reproducible execution.
+- **ORION** owns neural tokenization, learned representations, transfer, personalization, and governed adaptation.
+- **Evidence / NSQ** owns frozen protocol identity, observation-role authority, model participation contracts, scoring semantics, failure preservation, artifact identity, and claim qualification.
+- **Studio** is the future inspection surface over those same contracts. It must not become a second runtime.
+
+Arena is an Evidence subsystem for deterministic systems falsification. It is not a separate product and it is not a biological-truth authority.
+
+## What has genuinely landed
+
+### Runtime and reproducibility
+
+The maintained runtime now has canonical immutable `SignalFrame`/`StreamDescriptor` contracts, config-first `RuntimeGraph` execution, bounded queue policies, timing/quality telemetry, deterministic recording/replay, archive integrity, causal streaming DSP, and descriptor-bound session archives.
+
+### Packaging and external extension
+
+The workspace builds independent wheels with unique namespace ownership. The developer-preview journey installs built wheels in a clean environment and exercises the CLI. An out-of-tree example plugin is built and executed as its own wheel through public entry points rather than relying on monorepo imports.
+
+### Scientific Authority
+
+Scientific Authority v2 binds dataset/model lineage, processed-data identity, observation roles, preprocessing authority, target-information budgets, metric semantics, repeated-measures structure, and failure preservation. Leakage and pretraining overlap are explicit verdicts rather than implied cleanliness.
+
+### Model Artifact v1
+
+Promoted decoder artifacts are content-addressed, reconstructable through bounded trusted loaders, and bind input/output semantics, preprocessing/calibration provenance, learned state, rollback identity, and scientific lineage. Pickle is not the promoted artifact boundary.
+
+### Neural System Qualification
+
+NSQ v1 now provides a peer-facing external-method contract plus an executable runner. External implementations can retain their own training code while neurOS controls which observations may cross the boundary, what those observations mean, how outputs are scored, and whether failures remain visible.
+
+The production runner already has direct proving paths for canonical MNE/scikit-learn and upstream Braindecode participation. The next milestone is not another runner abstraction. It is the first frozen real-data qualification study.
+
+### ORION authority
+
+ORION has contract-first tokenization, representation, adaptation, state-selection, and untouched-final-assessment semantics. Its current strongest result is **process integrity**, not a claim that ORION already reduces calibration or outperforms established representations.
+
+## Package maturity
+
+| Package | Role | Status now |
+| --- | --- | --- |
+| `neuros-core` | contracts, runtime, timing, recording/replay, config, plugins | **maintained core** |
+| `neuros` | SDK, CLI, interoperability composition | **maintained public entry point** |
+| `neuros-drivers` | hardware/dataset/LSL/BrainFlow source integrations | **maintained integration layer**; device claims remain per-device |
+| `neuros-orion` (`packages/orion`) | tokenization, representations, adaptation authority | **active strategic layer**; real-data efficacy still to be earned |
+| `neuros-foundation` | upstream model/data adapters, longitudinal evidence, current NSQ implementation | **maintained evidence/interoperability layer**; namespace should be revisited only after NSQ proves broader use |
+| `neuros-models` | task decoders and inspectable model surfaces | **maintained supporting layer** |
+| `neuros-sourceweigher` | source/domain reliability and transfer weighting | **research-supported**; must prove incremental value under NSQ |
+| `neuros-mechint` | intervention/faithfulness/replication contracts | **research-supported**; empirical mechanism claims remain study-specific |
+| `neuros-arena` | causal synthetic worlds and counterexamples | **maintained falsification tool**, currently secondary to real-data NSQ |
+| `neuros-neurofm` | native foundation-model R&D | **experimental alpha**; not promoted ORION by default |
+| `neuros-ui` | Studio prototypes | **experimental integration surface**; package metadata currently overstates maturity |
+| `neuros-cloud` | distributed/provider integrations | **experimental integration surface**; package metadata currently overstates maturity |
+
+The root workspace is a build inventory, not evidence that every member has equal product maturity.
+
+## What is not established yet
+
+The repository still lacks the evidence needed for several strategically important claims:
+
+1. **No flagship real-data NSQ result yet.** The Kumar2024 longitudinal motor-imagery study in issue #82 is the immediate scientific gate.
+2. **No demonstrated ORION calibration advantage yet.** ORION should enter comparison only after strong external baselines are frozen under identical authority.
+3. **No named physical EEG device is publicly qualified end to end.** Simulator and driver conformance are not device qualification.
+4. **No independent external reproduction cohort yet.** Internal CI cannot substitute for outside users reproducing a frozen result from public artifacts.
+5. **No production closed-loop safety plane yet.** Action constraints, stale-data rejection, deadman behavior, emergency-stop semantics, and hardware-in-the-loop evidence remain future work.
+6. **No clinical evidence.** The project should continue to say this plainly.
+
+## Repository debt to remove
+
+The remaining cleanup is mostly organizational rather than architectural:
+
+- roughly thirty GitHub workflow files create duplicated CI orchestration and a large maintenance surface;
+- central CI still enumerates selected test files explicitly, so new tests need deliberate lane coverage rather than benefiting from universal discovery;
+- historical agent/feature branches substantially outnumber active workstreams and should be deleted after unique research is rescued or explicitly archived;
+- current docs have drifted behind recently merged Scientific Authority, Model Artifact, and NSQ work;
+- `neuros-ui` / `neuros-cloud` advertise beta/2.0-style package maturity without corresponding release qualification;
+- some experimental/research packages still contain TODO or intentionally incomplete surfaces and must remain visually distinct from promoted contracts;
+- repository-level branch protection/rulesets should match the exact-head qualification discipline enforced in code.
+
+## Immediate execution gate
+
+The next coherent milestone is **NSQ Kumar2024 v1** (#82):
 
 ```text
-neural hardware / datasets / replay
-              |
-              v
-      neurOS runtime plane
- contracts | timing | graph execution | recording | quality
-              |
-              +-----------------------------+
-              |                             |
-              v                             v
-       model / transfer plane              ORION
- task decoders | foundation adapters   tokenization | representations
- mechanism analysis | source trust     adaptation | personalization
-              |                             |
-              +--------------+--------------+
-                             |
-                             v
-                       Evidence plane
-        frozen protocols | Arena | qualification | claims
-                             |
-                             v
-                           Studio
+frozen MOABB Kumar2024 lineage + preprocessing
+        |
+        v
+prospective participant/session authority
+        |
+        +-> MNE CSP + LDA
+        +-> upstream Braindecode EEGNet
+        +-> upstream EEGConformer when supported
+        |
+        v
+participant-level calibration frontier
+        |
+        v
+immutable qualification bundle
 ```
 
-The runtime plane should remain small and conservative. Research and model layers may move faster, but they must cross explicit contracts before they become deployment dependencies. Arena belongs to Evidence: it is a deterministic adversarial systems laboratory, not a biological-truth authority.
+The flagship question is:
 
-## Package maturity map
+> Under identical prospective longitudinal authority, how much held-out task utility does each method achieve as a function of per-user labeled calibration cost?
 
-| Surface | Role | Current evidence | Intended use now |
-| --- | --- | --- | --- |
-| `neuros-core` | data contracts, runtime graph, timing, recording/replay, config, quality, plugin semantics | kernel contract matrix on Python 3.10-3.12; replay and recording tests | maintained kernel and integration substrate |
-| `neuros` | user-facing SDK and CLI composition | installed BCI/config/CLI/record/replay smoke execution | primary developer entry point |
-| `neuros-drivers` | hardware, simulated, and dataset sources | BCI profile, plugin/config tests, dedicated driver contracts; device-specific qualification remains separate | maintained integration surface, not blanket hardware qualification |
-| `neuros-arena` | causal synthetic BCI worlds, display/device/transport faults, populations, counterexamples, public-data anchoring utilities | dedicated deterministic Arena suite, scientific-validation policy, workspace-wheel/release-candidate qualification | maintained scientific-synthetic systems laboratory; not human physiological validation |
-| `neuros-models` | task-specific classical and neural decoders | v2.1 model/mech-int contract job; faithful PyTorch model identity; analysis-manifest regression tests | maintained decoder layer; model artifacts still need stronger deployment serialization |
-| `neuros-foundation` | neural foundation-model catalog, adapters, probes, benchmark protocols | package regressions plus dependency-light examples in monorepo CI | maintained interoperability/evaluation layer; upstream-model claims remain provenance-sensitive |
-| `neuros-sourceweigher` | reliability-aware source/domain weighting and fusion | regression matrix on Python 3.10-3.12 plus dependency-light examples | maintained research/deployment-support component for transfer and declared domain similarity |
-| `neuros-orion` (`packages/orion`) | tokenization, representation, adaptation, and final-assessment authority | ORION contracts, controlled tokenizer benchmarks, leakage/adaptation/final-assessment authority workflows | active neural-intelligence layer with explicit promotion gates |
-| `neuros-mechint` | causal mechanism experiments, evidence artifacts, replication contracts | v1 software-contract gates, Python 3.10-3.12, executed CPU tutorials, ecosystem import checks | mature research software contract; empirical neuroscience evidence remains study-specific and incomplete by default |
-| `neuros-neurofm` | native neural foundation-model R&D | alpha research package and ORION/mech-int integration tests | experimental model research, not a promoted ORION implementation by default |
-| `neuros-ui` | dashboard/API/visualization surfaces | package metadata exists, but it is not yet a release-blocking qualification lane | integration/prototyping surface until dedicated product tests exist |
-| `neuros-cloud` | distributed/cloud/export/monitoring integrations | package metadata exists, but it is not yet a release-blocking qualification lane | optional integration surface until provider-specific tests and release gates exist |
+Only after that baseline is frozen should ORION, foundation representations, SourceWeigher, or governed adaptation compete for an improvement claim.
 
-The repository directory is `packages/orion`, while the installable distribution is `neuros-orion`. The root `pyproject.toml` workspace is the canonical maintained-distribution inventory. CI, release-candidate wheel builds, and repository hygiene derive package membership from that authority rather than keeping parallel package lists.
+## Promotion rule
 
-External plugin examples under `examples/plugins/` are deliberately **not** workspace members. Their separate wheel/install path is part of the compatibility test: an extension should be able to cross the same packaging boundary used by an independent lab or company.
-
-## What is genuinely usable today
-
-### 1. Build and execute a reproducible software BCI pipeline
-
-```bash
-python scripts/bootstrap.py --profile bci --test-tools
-neuros doctor --json
-neuros validate configs/examples/mock_bci.yaml --json
-neuros run configs/examples/mock_bci.yaml --duration 2 --json
-```
-
-The config path resolves plugins into the same native `RuntimeGraph` used by the Python pipeline facades.
-
-### 2. Record, verify, and replay the same neural contract
-
-```bash
-neuros record configs/examples/mock_bci.yaml --output /tmp/session --session-id demo --duration 2
-neuros inspect /tmp/session --verify --json
-neuros replay /tmp/session --config configs/examples/mock_bci.yaml --json
-```
-
-The canonical session archive preserves neurOS timing, quality, sequence, provenance, and integrity semantics. NWB and Zarr are interoperability exports rather than the authoritative replay format.
-
-### 3. Stress a BCI system in the deterministic Arena
-
-Arena separates requested stimulus, actually emitted display history, neural-world dynamics, sensor/device effects, transport faults, decoder behavior, and application authority. Built-in presets provide reproducible smoke and torture worlds, while portable manifests preserve complete world identity.
-
-```bash
-neuros-arena --preset dual-target-smoke --output arena-report.json
-```
-
-World models are extensible through the `neuros.world_models` entry-point group. The default driven state-space model is phenomenological. Semi-synthetic and lead-field-backed modes strengthen specific simulation assumptions without turning synthetic output into evidence about human prevalence or clinical performance.
-
-### 4. Compare task-specific neural decoders without changing their algorithm identity
-
-```bash
-neuros-models list
-neuros-models list --mechint-ready
-neuros-models show eeg-conformer
-```
-
-The maintained deep decoders expose logits, embeddings, stable model identity, and explicit mechanistic-analysis surfaces. Missing optional backends fail closed instead of silently swapping in a different algorithm.
-
-### 5. Inspect neural representations and foundation-model integrations
-
-`neuros-foundation` separates catalog metadata from locally runnable adapters. Its probes and protocol fingerprints are intended to make cross-model comparisons explicit about subject/session/site/device split semantics and representation preprocessing.
-
-### 6. Estimate which sources should be trusted for a target domain
-
-`neuros-sourceweigher` provides constrained source mixtures, distribution-distance baselines, online drift adaptation, representation-space weighting, and neurOS runtime fusion without forcing the HTTP service into the core install.
-
-### 7. Run causal mechanism studies without confusing tooling with evidence
-
-`neuros-mechint` provides causal intervention, faithfulness, held-out evidence, replication, and artifact contracts. Its release status deliberately separates **software contract readiness** from **empirical evidence completion**.
-
-### 8. Benchmark tokenization and auditable adaptation behind ORION contracts
-
-ORION compares tokenizer families under controlled synthetic motifs and exposes separate authority for calibration, qualification/model selection, and untouched final assessment. Synthetic known-ground-truth tests remain falsification tools. Real-data promotion requires deployment-unit-disjoint evidence and frozen assessment identity.
-
-### 9. Build an extension outside the neurOS workspace
-
-The maintained `examples/plugins/neuros-example-plugin` reference is a standalone Python distribution, not a hidden workspace package. It contributes a structural source and transform through Python entry points, depends only on a bounded `neuros-core` range, and can be instantiated from ordinary versioned neurOS YAML.
-
-The `External Plugin Contract` matrix builds exact neurOS and plugin wheels on Python 3.10, 3.11, and 3.12, installs them into a fresh environment, runs `pip check`, verifies entry-point distribution/version provenance, tests the public `Source`/`Transform` protocols, and executes the external source/transform through the installed `neuros` CLI.
-
-This establishes the software extension boundary. It does not qualify a physical device or a scientific algorithm supplied by a plugin.
-
-## Important gaps before neurOS should be marketed as a broadly deployable BCI platform
-
-### Independent plugin ecosystem and compatibility certification
-
-The repository now proves that out-of-tree wheels work. The next ecosystem gate is stronger: move the starter into an independent repository, exercise compatibility against released neurOS artifacts rather than only same-revision monorepo wheels, and qualify at least one genuinely external hardware or model integration without a kernel fork.
-
-Longer term, plugin authors should be able to run a reusable neurOS conformance suite and publish machine-readable compatibility evidence for the exact neurOS/plugin/Python/device or model tuple they claim.
-
-### Hardware qualification
-
-There is not yet a public qualification matrix showing reproducible packet loss, drift, synchronization uncertainty, reconnect behavior, sustained recording reliability, and latency for named hardware/firmware/software combinations.
-
-### Durable model artifacts
-
-The model layer still needs a production artifact format based on explicit architecture/configuration, `state_dict` or backend-native weights, input schema, calibration state, training/evaluation provenance, and immutable hashes. Trusted Python pickle should not be the long-term deployment boundary.
-
-### Real-data ORION and Arena anchoring evidence
-
-Synthetic known-ground-truth tests are valuable falsification tools, but ORION needs leakage-controlled multi-session real neural datasets before tokenizer or representation superiority claims should be made. Arena likewise needs held-out public-subject anchoring studies to characterize where its declared synthetic envelope resembles or misses real data. Similarity weighting is not a truth probability.
-
-### Cross-subject/session/device mechanism stability
-
-Mechanistic interpretability becomes strategically valuable for BCI only when candidate mechanisms remain predictive and causal across the deployment units that matter. Subject/session/montage/device robustness should be measured as a first-class benchmark dimension.
-
-### Closed-loop safety plane
-
-The runtime needs explicit action constraints, deadman behavior, stale-data rejection, quality/confidence gates, rate limits, emergency stop semantics, and hardware-in-the-loop qualification before consequential closed-loop control is treated as a product capability.
-
-### UI/cloud qualification
-
-`neuros-ui` and `neuros-cloud` should either gain dedicated contract/release tests and supported reference deployments or be labeled more explicitly as optional integration packages. Public package version numbers alone should not imply equal maturity with the kernel.
-
-## Contribution and promotion rule
-
-New work should enter at the weakest accurate maturity level:
+New work should enter at the weakest accurate level and earn promotion:
 
 ```text
 experiment
-   -> research package
-   -> stable contract adapter
-   -> integration/replay evidence
-   -> scientific-synthetic evidence
-   -> real-dataset evidence
-   -> hardware qualification
-   -> closed-loop qualification
+  -> research implementation
+  -> stable contract
+  -> integration/replay evidence
+  -> scientific synthetic evidence
+  -> real-dataset evidence
+  -> hardware qualification
+  -> closed-loop qualification
+  -> clinical evidence (separate regulated work)
 ```
 
-Promotion should require evidence, not enthusiasm. A sophisticated method that cannot be replayed, versioned, falsified, or compared fairly is still research debt.
-
-## Near-term release objective
-
-The next coherent public milestone should be a **developer preview** in which an external contributor can:
-
-1. install from a clean environment and verify exact built wheels;
-2. run and inspect a mock pipeline;
-3. record and replay it;
-4. run a deterministic Arena world and understand its evidence boundary;
-5. select an inspectable decoder;
-6. compare or adapt representations through the foundation/SourceWeigher layers;
-7. run an ORION tokenizer/adaptation study under frozen authority;
-8. build/install an out-of-tree plugin without modifying kernel code;
-9. understand exactly which claims are supported by software, synthetic, dataset, hardware, or closed-loop evidence.
-
-The repository now has executable evidence for item 8 through the clean-wheel external-plugin matrix. The remaining developer-preview work should focus on closing the other end-to-end usability and evidence gaps rather than multiplying internal packages.
-
-That milestone is more valuable than simply adding more algorithms. It turns neurOS from a large repository into a legible, extensible platform.
+The repository no longer needs a broad rewrite. It needs **fewer simultaneous workstreams, stronger external falsification, and a public result that makes the qualification layer indispensable**.
