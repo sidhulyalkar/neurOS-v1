@@ -86,7 +86,10 @@ def validate_output_contract(output: ModelOutputContract) -> None:
     if output.score_semantics != "class_logits":
         raise ValueError("built-in Model Artifact v1 factories emit class_logits")
     if output.probability_semantics != "uncalibrated_softmax":
-        raise ValueError("built-in Model Artifact v1 factories emit uncalibrated_softmax only")
+        raise ValueError(
+            "built-in Model Artifact v1 factories emit uncalibrated softmax "
+            "(`uncalibrated_softmax`) only"
+        )
     if output.uncertainty_semantics != "none":
         raise ValueError(
             "built-in Model Artifact v1 factories do not emit a qualified uncertainty estimate"
