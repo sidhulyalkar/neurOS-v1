@@ -1,16 +1,12 @@
 """Peer-facing contracts for neural-system qualification.
 
-The qualification layer deliberately does not own model training. External
-researchers may bring sklearn, Braindecode, foundation-model, or custom decoder
-implementations while neurOS owns the immutable protocol, target-information
-budget, output semantics, and evidence identity around the comparison.
+neurOS owns the authority around a comparison, not the external researcher's
+training code. The authority chain is deliberately explicit:
 
-The authority chain is intentionally explicit:
+    protocol -> method spec -> run contract -> learned-state identity
 
-    protocol -> external method spec -> run contract -> learned-state identity
-
-A learned checkpoint must never be confused with the method configuration that
-produced it, and benchmark metadata is never treated as executable import code.
+Benchmark metadata never becomes executable import code, and target information
+can enter an external method only through a separately declared authority path.
 """
 
 from __future__ import annotations
@@ -35,6 +31,7 @@ StateIdentityKind = Literal[
     "checkpoint_sha256",
     "opaque_unverified",
 ]
+TargetAdaptationMode = Literal["none", "unlabeled"]
 
 _SHA256_HEX = frozenset("0123456789abcdef")
 
@@ -74,12 +71,12 @@ def _strings(name: str, values: Any) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{name} must be a sequence of strings")
     try:
-        normalized = tuple(_nonempty(name, value) for value in values)
+        result = tuple(_nonempty(name, value) for value in values)
     except TypeError as exc:
         raise ValueError(f"{name} must be a sequence of strings") from exc
-    if len(set(normalized)) != len(normalized):
+    if len(set(result)) != len(result):
         raise ValueError(f"{name} cannot contain duplicates")
-    return normalized
+    return result
 
 
 def _exact_nonnegative_int(name: str, value: Any) -> int:
@@ -112,10 +109,10 @@ def _canonical_json(value: Any) -> Any:
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         for key, item in value.items():
-            normalized_key = _nonempty("metadata key", key)
-            if normalized_key in result:
+            normalized = _nonempty("metadata key", key)
+            if normalized in result:
                 raise ValueError("qualification metadata keys collide after normalization")
-            result[normalized_key] = _canonical_json(item)
+            result[normalized] = _canonical_json(item)
         return {key: result[key] for key in sorted(result)}
     if isinstance(value, (tuple, list)):
         return [_canonical_json(item) for item in value]
@@ -156,13 +153,7 @@ def _identity_sha256(schema: str, payload: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class QualificationProtocolSpec:
-    """Immutable scientific question and evaluation authority for one benchmark.
-
-    The protocol is model-independent. Adding a new external method therefore
-    does not change the protocol SHA. ``dataset_lineage_sha256`` binds the
-    benchmark question to a separately auditable dataset lineage record instead
-    of relying on a human-readable dataset name alone.
-    """
+    """Model-independent scientific question and evaluation authority."""
 
     protocol_id: str
     dataset_id: str
@@ -199,10 +190,7 @@ class QualificationProtocolSpec:
         independent_unit = _nonempty("independent_unit", self.independent_unit)
         hierarchy = _strings("grouping_hierarchy", self.grouping_hierarchy)
         if not hierarchy or hierarchy[0] != independent_unit:
-            raise ValueError(
-                "grouping_hierarchy must start with the declared independent_unit"
-            )
-
+            raise ValueError("grouping_hierarchy must start with the declared independent_unit")
         if isinstance(self.calibration_budgets_per_class, (str, bytes)):
             raise ValueError("calibration_budgets_per_class must be a sequence of integers")
         budgets = tuple(
@@ -212,10 +200,7 @@ class QualificationProtocolSpec:
         if not budgets or budgets[0] != 0:
             raise ValueError("calibration_budgets_per_class must start at zero")
         if tuple(sorted(set(budgets))) != budgets:
-            raise ValueError(
-                "calibration_budgets_per_class must be unique and strictly increasing"
-            )
-
+            raise ValueError("calibration_budgets_per_class must be unique and strictly increasing")
         primary = _nonempty("primary_metric", self.primary_metric)
         secondary = _strings("secondary_metrics", self.secondary_metrics)
         if primary in secondary:
@@ -223,15 +208,12 @@ class QualificationProtocolSpec:
         robustness = _strings("robustness_axes", self.robustness_axes)
         final_role = _nonempty("final_assessment_role", self.final_assessment_role)
         if final_role != "untouched_final_assessment":
-            raise ValueError(
-                "v1 final_assessment_role must be 'untouched_final_assessment'"
-            )
+            raise ValueError("v1 final_assessment_role must be 'untouched_final_assessment'")
         if self.protocol_status not in {"draft", "frozen", "retired"}:
             raise ValueError("protocol_status must be draft, frozen, or retired")
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a mapping")
-
         object.__setattr__(self, "protocol_id", protocol_id)
         object.__setattr__(self, "dataset_id", dataset_id)
         object.__setattr__(self, "dataset_lineage_sha256", dataset_lineage)
@@ -274,18 +256,14 @@ class QualificationProtocolSpec:
 
 @dataclass(frozen=True, slots=True)
 class ExternalDecoderMethodSpec:
-    """Stable algorithm/configuration identity for a method supplied outside neurOS.
-
-    Learned checkpoint identity is intentionally absent. Every calibration
-    budget is expected to create a fresh learned state while preserving this
-    method-spec identity.
-    """
+    """Stable external algorithm/configuration identity, excluding learned state."""
 
     method_id: str
     implementation: str
     implementation_version: str
     input_axes: tuple[str, ...]
     probability_semantics: ProbabilitySemantics
+    target_adaptation_mode: TargetAdaptationMode = "none"
     uncertainty_semantics: str = "none"
     source_reference: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -296,9 +274,7 @@ class ExternalDecoderMethodSpec:
             raise ValueError("ExternalDecoderMethodSpec schema_version must be 1")
         method_id = _nonempty("method_id", self.method_id)
         implementation = _nonempty("implementation", self.implementation)
-        implementation_version = _nonempty(
-            "implementation_version", self.implementation_version
-        )
+        implementation_version = _nonempty("implementation_version", self.implementation_version)
         axes = _strings("input_axes", self.input_axes)
         if not axes:
             raise ValueError("input_axes must be non-empty")
@@ -308,16 +284,15 @@ class ExternalDecoderMethodSpec:
             "unavailable",
         }:
             raise ValueError("unsupported probability_semantics")
+        if self.target_adaptation_mode not in {"none", "unlabeled"}:
+            raise ValueError("target_adaptation_mode must be 'none' or 'unlabeled'")
         uncertainty = _nonempty("uncertainty_semantics", self.uncertainty_semantics)
-        source = (
-            None
-            if self.source_reference is None
-            else _nonempty("source_reference", self.source_reference)
+        source = None if self.source_reference is None else _nonempty(
+            "source_reference", self.source_reference
         )
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a mapping")
-
         object.__setattr__(self, "method_id", method_id)
         object.__setattr__(self, "implementation", implementation)
         object.__setattr__(self, "implementation_version", implementation_version)
@@ -334,6 +309,7 @@ class ExternalDecoderMethodSpec:
             "implementation_version": self.implementation_version,
             "input_axes": list(self.input_axes),
             "probability_semantics": self.probability_semantics,
+            "target_adaptation_mode": self.target_adaptation_mode,
             "uncertainty_semantics": self.uncertainty_semantics,
             "source_reference": self.source_reference,
             "metadata": _thaw(self.metadata),
@@ -350,7 +326,7 @@ class ExternalDecoderMethodSpec:
 
 @dataclass(frozen=True, slots=True)
 class QualificationRunContract:
-    """Immutable information budget and authority for one model/case execution."""
+    """Exact target-information and preprocessing authority for one execution."""
 
     protocol_sha256: str
     method_spec_sha256: str
@@ -366,52 +342,14 @@ class QualificationRunContract:
     def __post_init__(self) -> None:
         if isinstance(self.schema_version, bool) or self.schema_version != 1:
             raise ValueError("QualificationRunContract schema_version must be 1")
-        object.__setattr__(
-            self, "protocol_sha256", _sha256("protocol_sha256", self.protocol_sha256)
-        )
-        object.__setattr__(
-            self,
-            "method_spec_sha256",
-            _sha256("method_spec_sha256", self.method_spec_sha256),
-        )
-        object.__setattr__(
-            self,
-            "case_authority_sha256",
-            _sha256("case_authority_sha256", self.case_authority_sha256),
-        )
-        object.__setattr__(
-            self,
-            "labeled_target_examples",
-            _exact_nonnegative_int("labeled_target_examples", self.labeled_target_examples),
-        )
-        object.__setattr__(
-            self,
-            "unlabeled_target_examples",
-            _exact_nonnegative_int(
-                "unlabeled_target_examples", self.unlabeled_target_examples
-            ),
-        )
-        object.__setattr__(
-            self,
-            "unlabeled_target_seconds",
-            _finite_nonnegative_float(
-                "unlabeled_target_seconds", self.unlabeled_target_seconds
-            ),
-        )
-        object.__setattr__(
-            self,
-            "preprocessing_authority_sha256s",
-            _sha_tuple(
-                "preprocessing_authority_sha256s", self.preprocessing_authority_sha256s
-            ),
-        )
-        object.__setattr__(
-            self,
-            "calibration_authority_sha256s",
-            _sha_tuple(
-                "calibration_authority_sha256s", self.calibration_authority_sha256s
-            ),
-        )
+        object.__setattr__(self, "protocol_sha256", _sha256("protocol_sha256", self.protocol_sha256))
+        object.__setattr__(self, "method_spec_sha256", _sha256("method_spec_sha256", self.method_spec_sha256))
+        object.__setattr__(self, "case_authority_sha256", _sha256("case_authority_sha256", self.case_authority_sha256))
+        object.__setattr__(self, "labeled_target_examples", _exact_nonnegative_int("labeled_target_examples", self.labeled_target_examples))
+        object.__setattr__(self, "unlabeled_target_examples", _exact_nonnegative_int("unlabeled_target_examples", self.unlabeled_target_examples))
+        object.__setattr__(self, "unlabeled_target_seconds", _finite_nonnegative_float("unlabeled_target_seconds", self.unlabeled_target_seconds))
+        object.__setattr__(self, "preprocessing_authority_sha256s", _sha_tuple("preprocessing_authority_sha256s", self.preprocessing_authority_sha256s))
+        object.__setattr__(self, "calibration_authority_sha256s", _sha_tuple("calibration_authority_sha256s", self.calibration_authority_sha256s))
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a mapping")
@@ -425,6 +363,10 @@ class QualificationRunContract:
             and self.unlabeled_target_seconds == 0.0
         )
 
+    @property
+    def consumes_unlabeled_target(self) -> bool:
+        return self.unlabeled_target_examples > 0 or self.unlabeled_target_seconds > 0.0
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
@@ -434,9 +376,7 @@ class QualificationRunContract:
             "labeled_target_examples": self.labeled_target_examples,
             "unlabeled_target_examples": self.unlabeled_target_examples,
             "unlabeled_target_seconds": self.unlabeled_target_seconds,
-            "preprocessing_authority_sha256s": list(
-                self.preprocessing_authority_sha256s
-            ),
+            "preprocessing_authority_sha256s": list(self.preprocessing_authority_sha256s),
             "calibration_authority_sha256s": list(self.calibration_authority_sha256s),
             "metadata": _thaw(self.metadata),
         }
@@ -448,13 +388,7 @@ class QualificationRunContract:
 
 @dataclass(frozen=True, slots=True)
 class ExternalLearnedState:
-    """Adapter-reported learned-state identity after one fit.
-
-    `opaque_unverified` is allowed for scientific comparison but carries no
-    content-addressable deployment claim. The runner must preserve that weaker
-    evidence state rather than manufacturing a checksum from Python object
-    serialization.
-    """
+    """Adapter-reported learned-state identity after one authorized fit/adaptation."""
 
     state_identity_kind: StateIdentityKind = "opaque_unverified"
     state_sha256: str | None = None
@@ -472,9 +406,7 @@ class ExternalLearnedState:
         }:
             raise ValueError("unsupported state_identity_kind")
         state_sha = _optional_sha256("state_sha256", self.state_sha256)
-        calibration_sha = _optional_sha256(
-            "calibration_state_sha256", self.calibration_state_sha256
-        )
+        calibration_sha = _optional_sha256("calibration_state_sha256", self.calibration_state_sha256)
         if self.state_identity_kind == "opaque_unverified" and state_sha is not None:
             raise ValueError("opaque_unverified state cannot claim state_sha256")
         if self.state_identity_kind != "opaque_unverified" and state_sha is None:
@@ -502,7 +434,7 @@ class ExternalLearnedState:
 
 @dataclass(frozen=True, slots=True)
 class QualificationModelState:
-    """System-created binding of a run authority to the state produced by it."""
+    """System-created binding of one learned state to the exact run that produced it."""
 
     method_spec_sha256: str
     run_contract_sha256: str
@@ -526,13 +458,9 @@ class QualificationModelState:
         calibration_sha = self.learned_state.calibration_state_sha256
         if self.probability_semantics == "calibrated_probability":
             if calibration_sha is None:
-                raise ValueError(
-                    "calibrated_probability requires calibration_state_sha256 for this fitted state"
-                )
+                raise ValueError("calibrated_probability requires calibration_state_sha256 for this fitted state")
         elif calibration_sha is not None:
-            raise ValueError(
-                "calibration_state_sha256 may only accompany calibrated_probability"
-            )
+            raise ValueError("calibration_state_sha256 may only accompany calibrated_probability")
         object.__setattr__(self, "method_spec_sha256", method_sha)
         object.__setattr__(self, "run_contract_sha256", run_sha)
 
@@ -586,6 +514,14 @@ class ExternalQualificationDecoder(Protocol):
 
 
 @runtime_checkable
+class ExternalUnlabeledTargetAdapter(Protocol):
+    """Separate authority channel for methods that consume unlabeled target data."""
+
+    def adapt_unlabeled(self, X: np.ndarray) -> None:
+        ...
+
+
+@runtime_checkable
 class ExternalQualificationFactory(Protocol):
     """Trusted-code factory used to obtain a fresh decoder for every budget."""
 
@@ -595,6 +531,28 @@ class ExternalQualificationFactory(Protocol):
 
     def create(self) -> ExternalQualificationDecoder:
         ...
+
+
+def validate_run_capabilities(
+    method_spec: ExternalDecoderMethodSpec,
+    run_contract: QualificationRunContract,
+    decoder: ExternalQualificationDecoder,
+) -> None:
+    """Ensure the declared target-information budget has a matching data path."""
+
+    if run_contract.method_spec_sha256 != method_spec.sha256:
+        raise ValueError("run contract does not authorize this external method specification")
+    if run_contract.consumes_unlabeled_target:
+        if method_spec.target_adaptation_mode != "unlabeled":
+            raise ValueError(
+                "run consumes unlabeled target information but method does not declare unlabeled adaptation"
+            )
+        if not isinstance(decoder, ExternalUnlabeledTargetAdapter):
+            raise TypeError(
+                "method declares unlabeled adaptation but decoder lacks adapt_unlabeled(X)"
+            )
+    elif method_spec.target_adaptation_mode == "none":
+        return
 
 
 def validate_probability_output(
@@ -611,10 +569,7 @@ def validate_probability_output(
         raise ValueError("model declares probability_semantics='unavailable'")
     probs = np.asarray(probability)
     if probs.ndim != 2 or probs.shape != (expected_samples, expected_classes):
-        raise ValueError(
-            "probability output must have exact shape "
-            f"({expected_samples}, {expected_classes})"
-        )
+        raise ValueError(f"probability output must have exact shape ({expected_samples}, {expected_classes})")
     if not np.issubdtype(probs.dtype, np.floating):
         raise ValueError("probability output must use a floating dtype")
     if not np.isfinite(probs).all():
@@ -632,12 +587,15 @@ __all__ = [
     "ExternalLearnedState",
     "ExternalQualificationDecoder",
     "ExternalQualificationFactory",
+    "ExternalUnlabeledTargetAdapter",
     "ProbabilitySemantics",
     "ProtocolStatus",
     "QualificationModelState",
     "QualificationProtocolSpec",
     "QualificationRunContract",
     "StateIdentityKind",
+    "TargetAdaptationMode",
     "bind_learned_state",
     "validate_probability_output",
+    "validate_run_capabilities",
 ]
