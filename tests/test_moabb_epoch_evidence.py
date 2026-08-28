@@ -52,22 +52,18 @@ class FakeDataset:
 
 def test_collect_moabb_epochs_preserves_processed_signal_contract():
     paradigm = FakeParadigm(FakeEpochs())
+    dataset = FakeDataset()
     data, descriptor = collect_moabb_epochs(
-        FakeDataset(),
+        dataset,
         paradigm,
         subjects=[1],
         dataset_id="fixture-moabb",
     )
 
-    assert paradigm.calls == [
-        {
-            "dataset": pytest.approx(paradigm.calls[0]["dataset"]),
-            "subjects": [1],
-            "return_epochs": True,
-        }
-    ]
-    # Compare the dataset object by identity because pytest.approx is numeric-only.
-    assert paradigm.calls[0]["dataset"].__class__ is FakeDataset
+    assert len(paradigm.calls) == 1
+    assert paradigm.calls[0]["dataset"] is dataset
+    assert paradigm.calls[0]["subjects"] == [1]
+    assert paradigm.calls[0]["return_epochs"] is True
     assert data.X.shape == (8, 2, 5)
     assert data.groups["session"].tolist() == ["0", "0", "0", "0", "1", "1", "1", "1"]
     assert descriptor.channel_names == ("C3", "C4")
