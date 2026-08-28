@@ -5,8 +5,10 @@ training code. The authority chain is deliberately explicit:
 
     protocol -> method spec -> run contract -> learned-state identity
 
-Benchmark metadata never becomes executable import code, and target information
-can enter an external method only through a separately declared authority path.
+Benchmark metadata never becomes executable import code. Target information can
+enter an external method only through a separately declared authority path.
+Full SHA references compose with Scientific Authority without making this
+package depend on ORION's implementation classes.
 """
 
 from __future__ import annotations
@@ -153,7 +155,13 @@ def _identity_sha256(schema: str, payload: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class QualificationProtocolSpec:
-    """Model-independent scientific question and evaluation authority."""
+    """Model-independent scientific question and evaluation authority.
+
+    Human-readable metric names remain useful for tables, but a frozen protocol
+    must also bind the full SHA-256 of its immutable metric scorecard. That
+    scorecard can be produced by Scientific Authority v2 without introducing an
+    ORION dependency into neuros-foundation.
+    """
 
     protocol_id: str
     dataset_id: str
@@ -169,6 +177,7 @@ class QualificationProtocolSpec:
         "brier_score",
         "expected_calibration_error",
     )
+    metric_scorecard_sha256: str | None = None
     robustness_axes: tuple[str, ...] = (
         "session",
         "subject",
@@ -205,12 +214,17 @@ class QualificationProtocolSpec:
         secondary = _strings("secondary_metrics", self.secondary_metrics)
         if primary in secondary:
             raise ValueError("primary_metric must not be duplicated in secondary_metrics")
+        metric_scorecard = _optional_sha256(
+            "metric_scorecard_sha256", self.metric_scorecard_sha256
+        )
         robustness = _strings("robustness_axes", self.robustness_axes)
         final_role = _nonempty("final_assessment_role", self.final_assessment_role)
         if final_role != "untouched_final_assessment":
             raise ValueError("v1 final_assessment_role must be 'untouched_final_assessment'")
         if self.protocol_status not in {"draft", "frozen", "retired"}:
             raise ValueError("protocol_status must be draft, frozen, or retired")
+        if self.protocol_status == "frozen" and metric_scorecard is None:
+            raise ValueError("frozen qualification protocol requires metric_scorecard_sha256")
         metadata = _freeze(self.metadata)
         if not isinstance(metadata, Mapping):
             raise TypeError("metadata must be a mapping")
@@ -223,6 +237,7 @@ class QualificationProtocolSpec:
         object.__setattr__(self, "calibration_budgets_per_class", budgets)
         object.__setattr__(self, "primary_metric", primary)
         object.__setattr__(self, "secondary_metrics", secondary)
+        object.__setattr__(self, "metric_scorecard_sha256", metric_scorecard)
         object.__setattr__(self, "robustness_axes", robustness)
         object.__setattr__(self, "final_assessment_role", final_role)
         object.__setattr__(self, "metadata", metadata)
@@ -239,6 +254,7 @@ class QualificationProtocolSpec:
             "calibration_budgets_per_class": list(self.calibration_budgets_per_class),
             "primary_metric": self.primary_metric,
             "secondary_metrics": list(self.secondary_metrics),
+            "metric_scorecard_sha256": self.metric_scorecard_sha256,
             "robustness_axes": list(self.robustness_axes),
             "final_assessment_role": self.final_assessment_role,
             "protocol_status": self.protocol_status,
@@ -256,7 +272,13 @@ class QualificationProtocolSpec:
 
 @dataclass(frozen=True, slots=True)
 class ExternalDecoderMethodSpec:
-    """Stable external algorithm/configuration identity, excluding learned state."""
+    """Stable external algorithm/configuration identity, excluding learned state.
+
+    ``model_lineage_sha256=None`` means lineage is unknown, not disjoint. A
+    foundation/pretrained method can therefore participate while Scientific
+    Authority correctly refuses a verified-disjoint pretraining claim until its
+    lineage record is supplied and audited.
+    """
 
     method_id: str
     implementation: str
@@ -265,6 +287,7 @@ class ExternalDecoderMethodSpec:
     probability_semantics: ProbabilitySemantics
     target_adaptation_mode: TargetAdaptationMode = "none"
     uncertainty_semantics: str = "none"
+    model_lineage_sha256: str | None = None
     source_reference: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     schema_version: int = 1
@@ -287,6 +310,7 @@ class ExternalDecoderMethodSpec:
         if self.target_adaptation_mode not in {"none", "unlabeled"}:
             raise ValueError("target_adaptation_mode must be 'none' or 'unlabeled'")
         uncertainty = _nonempty("uncertainty_semantics", self.uncertainty_semantics)
+        model_lineage = _optional_sha256("model_lineage_sha256", self.model_lineage_sha256)
         source = None if self.source_reference is None else _nonempty(
             "source_reference", self.source_reference
         )
@@ -298,8 +322,13 @@ class ExternalDecoderMethodSpec:
         object.__setattr__(self, "implementation_version", implementation_version)
         object.__setattr__(self, "input_axes", axes)
         object.__setattr__(self, "uncertainty_semantics", uncertainty)
+        object.__setattr__(self, "model_lineage_sha256", model_lineage)
         object.__setattr__(self, "source_reference", source)
         object.__setattr__(self, "metadata", metadata)
+
+    @property
+    def lineage_known(self) -> bool:
+        return self.model_lineage_sha256 is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -311,6 +340,7 @@ class ExternalDecoderMethodSpec:
             "probability_semantics": self.probability_semantics,
             "target_adaptation_mode": self.target_adaptation_mode,
             "uncertainty_semantics": self.uncertainty_semantics,
+            "model_lineage_sha256": self.model_lineage_sha256,
             "source_reference": self.source_reference,
             "metadata": _thaw(self.metadata),
         }
@@ -548,11 +578,7 @@ def validate_run_capabilities(
                 "run consumes unlabeled target information but method does not declare unlabeled adaptation"
             )
         if not isinstance(decoder, ExternalUnlabeledTargetAdapter):
-            raise TypeError(
-                "method declares unlabeled adaptation but decoder lacks adapt_unlabeled(X)"
-            )
-    elif method_spec.target_adaptation_mode == "none":
-        return
+            raise TypeError("method declares unlabeled adaptation but decoder lacks adapt_unlabeled(X)")
 
 
 def validate_probability_output(
