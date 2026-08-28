@@ -203,7 +203,9 @@ class Kumar2024StudyConfig:
     subjects: tuple[int, ...] = (1, 10)
     target_sessions: tuple[str, ...] = KUMAR2024_TARGET_SESSIONS
     budgets_per_class: tuple[int, ...] = KUMAR2024_DEFAULT_BUDGETS
-    methods: tuple[str, ...] = KUMAR2024_DEFAULT_METHODS
+    # Deep adapters are supported, but their efficacy preprocessing/state-selection
+    # authority is not frozen yet. Keep the canonical pilot default classical.
+    methods: tuple[str, ...] = ("mne-csp-lda",)
     split_seed: int = 2026
     evaluation_fraction: float = 0.5
     csp_components: int = 8

@@ -75,6 +75,7 @@ def test_profiles_make_pilot_explicit_and_full_study_predeclared():
     assert pilot.profile == "pilot"
     assert pilot.subjects == (1, 10)
     assert pilot.braindecode_epochs == 1
+    assert pilot.methods == ("mne-csp-lda",)
     assert full.profile == "full"
     assert full.subjects == KUMAR2024_ALL_SUBJECTS
     assert full.braindecode_epochs == 20

@@ -137,15 +137,15 @@ Lineage completeness is `partial` until exact raw content and all ancestry are i
 
 ## External methods v1
 
-The canonical first comparison uses:
+The NSQ execution surface supports:
 
 1. direct MNE CSP + scikit-learn LDA;
 2. direct upstream Braindecode EEGNet;
 3. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.
 
-These participate through the same NSQ factory protocol. neurOS does not substitute its own model implementation behind an external method name.
+Only **MNE CSP + LDA is currently part of the canonical pilot default**. The Braindecode adapters are explicit capability/integration surfaces, not yet qualified efficacy baselines. A deep baseline may enter the promoted comparison only after its fixed unit conversion, train-authorized standardization, validation/state-selection policy, optimization schedule, and neural-model seed authority are frozen and content-addressed. Until then it must be requested explicitly with `--methods`.
 
-Every calibration budget creates a **fresh external model instance**. Warm-starting one point on the frontier from another point is forbidden.
+These methods participate through the same NSQ factory protocol. neurOS does not substitute its own model implementation behind an external method name. Every calibration budget creates a **fresh external model instance**; warm-starting one frontier point from another is forbidden.
 
 ## Metrics
 
@@ -188,8 +188,10 @@ The default command is a provenance/execution pilot:
 subjects = 1,10
 split seed = 2026
 budgets = 0,1,2,5,10 / class
-Braindecode epochs = 1
+default method = MNE CSP + LDA only
 ```
+
+`braindecode_epochs = 1` remains part of the pilot configuration only for explicit deep-adapter integration runs. It is not a qualified training recipe.
 
 One participant comes from each original GR/PAR cohort. This pilot exists to validate data identity, runtime behavior, artifact semantics, and dependency feasibility. It is **not** the headline model-comparison claim.
 
