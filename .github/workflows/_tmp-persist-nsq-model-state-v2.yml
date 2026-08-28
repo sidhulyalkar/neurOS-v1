@@ -1,0 +1,121 @@
+name: One-shot persist NSQ model-state evidence v2
+
+on:
+  push:
+    branches:
+      - feat/nsq-kumar2024-deep-baseline-authority
+    paths:
+      - .github/workflows/_tmp-persist-nsq-model-state-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add inspectable bound model state to result rows
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          runner = Path("packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py")
+          replace_once(
+              runner,
+              "    class_labels: tuple[str, ...]\n    score: QualificationScore | None = None\n",
+              "    class_labels: tuple[str, ...]\n    qualification_model_state: QualificationModelState | None = None\n    score: QualificationScore | None = None\n",
+              "budget-result field",
+          )
+          replace_once(
+              runner,
+              "    schema_version: int = 2\n\n    def __post_init__(self) -> None:\n        if self.status not in {",
+              "    schema_version: int = 3\n\n    def __post_init__(self) -> None:\n        if self.status not in {",
+              "budget-result schema",
+          )
+          replace_once(
+              runner,
+              '        if isinstance(self.schema_version, bool) or self.schema_version != 2:\n            raise ValueError("QualificationBudgetResult schema_version must be 2")\n',
+              '        if isinstance(self.schema_version, bool) or self.schema_version != 3:\n            raise ValueError("QualificationBudgetResult schema_version must be 3")\n',
+              "budget-result schema validation",
+          )
+          replace_once(
+              runner,
+              '''        elif self.external_learned_state_sha256 is not None:\n            raise ValueError(\n                "opaque learned state cannot expose external_learned_state_sha256"\n            )\n\n        if self.status == "success":\n''',
+              '''        elif self.external_learned_state_sha256 is not None:\n            raise ValueError(\n                "opaque learned state cannot expose external_learned_state_sha256"\n            )\n\n        state = self.qualification_model_state\n        if state is not None:\n            if not isinstance(state, QualificationModelState):\n                raise TypeError("qualification_model_state must be QualificationModelState")\n            if self.qualification_model_state_sha256 != state.sha256:\n                raise ValueError("qualification model-state object differs from declared SHA-256")\n            if state.method_spec_sha256 != self.method_spec_sha256:\n                raise ValueError("qualification model state differs from row method identity")\n            if state.run_contract_sha256 != self.run_contract_sha256:\n                raise ValueError("qualification model state differs from row run contract")\n            learned = state.learned_state\n            if learned.state_identity_kind != self.external_state_identity_kind:\n                raise ValueError("bound learned-state kind differs from row state kind")\n            if learned.state_sha256 != self.external_learned_state_sha256:\n                raise ValueError("bound learned-state SHA differs from row external state SHA")\n            if state.state_addressable != self.learned_state_addressable:\n                raise ValueError("bound state addressability differs from row declaration")\n        elif self.qualification_model_state_sha256 is not None:\n            raise ValueError(\n                "qualification_model_state_sha256 requires inspectable qualification_model_state"\n            )\n\n        if self.status == "success":\n''',
+              "bound-state validation",
+          )
+          replace_once(
+              runner,
+              '''            "class_labels": list(self.class_labels),\n            "score": None if self.score is None else self.score.to_dict(),\n''',
+              '''            "class_labels": list(self.class_labels),\n            "qualification_model_state": (\n                None\n                if self.qualification_model_state is None\n                else self.qualification_model_state.to_dict()\n            ),\n            "score": None if self.score is None else self.score.to_dict(),\n''',
+              "budget-result serialization",
+          )
+          replace_once(
+              runner,
+              '    schema_version: int = 2\n\n    def __post_init__(self) -> None:\n        if isinstance(self.schema_version, bool) or self.schema_version != 2:\n            raise ValueError("QualificationCaseResult schema_version must be 2")\n',
+              '    schema_version: int = 3\n\n    def __post_init__(self) -> None:\n        if isinstance(self.schema_version, bool) or self.schema_version != 3:\n            raise ValueError("QualificationCaseResult schema_version must be 3")\n',
+              "case-result schema",
+          )
+          replace_once(
+              runner,
+              '''                    qualification_model_state_sha256=bound_state.sha256,\n                    external_learned_state_sha256=learned_state.state_sha256,\n''',
+              '''                    qualification_model_state_sha256=bound_state.sha256,\n                    external_learned_state_sha256=learned_state.state_sha256,\n                    qualification_model_state=bound_state,\n''',
+              "success model state",
+          )
+          replace_once(
+              runner,
+              '''                    external_learned_state_sha256=(\n                        None if learned_state is None else learned_state.state_sha256\n                    ),\n                    external_state_identity_kind=(\n''',
+              '''                    external_learned_state_sha256=(\n                        None if learned_state is None else learned_state.state_sha256\n                    ),\n                    qualification_model_state=bound_state,\n                    external_state_identity_kind=(\n''',
+              "failure model state",
+          )
+
+          runner_tests = Path("tests/test_neural_system_qualification_runner.py")
+          replace_once(
+              runner_tests,
+              '''        return ExternalLearnedState(\n            state_identity_kind="tensor_sha256",\n            state_sha256=STATE_SHA,\n        )\n''',
+              '''        return ExternalLearnedState(\n            state_identity_kind="tensor_sha256",\n            state_sha256=STATE_SHA,\n            metadata={"fixture_note": "inspectable"},\n        )\n''',
+              "runner fixture learned state",
+          )
+          replace_once(
+              runner_tests,
+              '''    assert row.qualification_model_state_sha256 is not None\n    assert row.qualification_model_state_sha256 != STATE_SHA\n''',
+              '''    assert row.qualification_model_state_sha256 is not None\n    assert row.qualification_model_state_sha256 != STATE_SHA\n    assert row.qualification_model_state is not None\n    assert row.qualification_model_state.sha256 == row.qualification_model_state_sha256\n    assert row.qualification_model_state.learned_state.metadata["fixture_note"] == "inspectable"\n    serialized = row.to_dict()\n    assert serialized["schema_version"] == 3\n    assert serialized["qualification_model_state"]["learned_state"]["metadata"] == {\n        "fixture_note": "inspectable"\n    }\n''',
+              "runner inspectable state assertions",
+          )
+
+          baseline_tests = Path("tests/test_neural_system_qualification_baselines.py")
+          replace_once(
+              baseline_tests,
+              '''    assert row.external_learned_state_sha256 is not None\n    assert row.qualification_model_state_sha256 is not None\n    assert row.external_learned_state_sha256 != row.qualification_model_state_sha256\n    assert row.score is not None\n''',
+              '''    assert row.external_learned_state_sha256 is not None\n    assert row.qualification_model_state_sha256 is not None\n    assert row.external_learned_state_sha256 != row.qualification_model_state_sha256\n    assert row.qualification_model_state is not None\n    metadata = row.qualification_model_state.learned_state.metadata\n    assert metadata["validation_policy"] == "skorch.ValidSplit"\n    assert metadata["final_assessment_used_for_state_selection"] is False\n    assert len(metadata["validation_relative_indices_sha256"]) == 64\n    assert row.score is not None\n''',
+              "Braindecode result inspectability assertions",
+          )
+          PY
+      - name: Validate result-schema migration
+        run: |
+          python -m compileall -q packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py
+          git diff --check
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation pytest pytest-asyncio
+          pytest -q tests/test_neural_system_qualification_runner.py
+      - name: Commit inspectable state evidence
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py \
+            tests/test_neural_system_qualification_runner.py \
+            tests/test_neural_system_qualification_baselines.py
+          git commit -m "Persist inspectable NSQ model-state evidence"
+          git push origin HEAD:${GITHUB_REF_NAME}
