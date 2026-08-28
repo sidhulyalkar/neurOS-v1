@@ -156,13 +156,28 @@ def test_braindecode_factory_is_direct_upstream_not_neuros_model_wrapper():
     factory = UpstreamBraindecodeFactory(
         model_name="EEGNet",
         sample_rate_hz=128.0,
-        n_epochs=1,
+        optimizer_name="Adam",
+        learning_rate=0.000625,
+        n_epochs=2,
         batch_size=8,
         random_state=3,
+        validation_fraction=0.2,
+        validation_seed=7,
+        early_stopping_patience=1,
+        restore_best=True,
     )
     spec = factory.method_spec
     assert spec.implementation.startswith("braindecode.models.EEGNet+")
     assert spec.metadata["neuros_model_wrapper_used"] is False
+    assert spec.metadata["optimizer"] == "torch.optim.Adam"
+    assert spec.metadata["train_split"] == {
+        "implementation": "skorch.dataset.ValidSplit",
+        "fraction": 0.2,
+        "stratified": False,
+        "seed": 7,
+    }
+    assert spec.metadata["state_selection"]["restore_best"] is True
+    assert spec.metadata["final_assessment_used_for_state_selection"] is False
     assert spec.probability_semantics == "uncalibrated_softmax"
 
 
@@ -174,9 +189,15 @@ def test_upstream_braindecode_executes_through_same_nsq_referee():
     factory = UpstreamBraindecodeFactory(
         model_name="EEGNet",
         sample_rate_hz=128.0,
-        n_epochs=1,
+        optimizer_name="Adam",
+        learning_rate=0.000625,
+        n_epochs=2,
         batch_size=8,
         random_state=3,
+        validation_fraction=0.2,
+        validation_seed=7,
+        early_stopping_patience=1,
+        restore_best=True,
     )
     result = run_external_qualification_case(
         data,
@@ -197,6 +218,44 @@ def test_upstream_braindecode_executes_through_same_nsq_referee():
     assert row.external_learned_state_sha256 != row.qualification_model_state_sha256
     assert row.score is not None
     assert row.score.availability["brier_score"] == "available"
+
+
+def test_upstream_braindecode_binds_validation_membership_and_selected_tensor_state():
+    pytest.importorskip("braindecode")
+    pytest.importorskip("torch")
+    data = _eeg_data()
+    factory = UpstreamBraindecodeFactory(
+        model_name="EEGNet",
+        sample_rate_hz=128.0,
+        optimizer_name="Adam",
+        learning_rate=0.000625,
+        n_epochs=2,
+        batch_size=8,
+        random_state=11,
+        validation_fraction=0.2,
+        validation_seed=13,
+        early_stopping_patience=1,
+        restore_best=True,
+    )
+    decoder = factory.create()
+    decoder.fit(data.X[:32], data.y[:32])
+    learned = decoder.learned_state()
+    metadata = learned.metadata
+
+    assert learned.state_identity_kind == "tensor_sha256"
+    assert learned.state_sha256 is not None
+    assert metadata["model_seed"] == 11
+    assert metadata["validation_seed"] == 13
+    assert metadata["validation_policy"] == "skorch.ValidSplit"
+    assert metadata["validation_stratified"] is False
+    assert metadata["restore_best"] is True
+    assert metadata["final_assessment_used_for_state_selection"] is False
+    assert metadata["validation_samples"] == len(metadata["validation_relative_indices"])
+    assert len(set(metadata["validation_relative_indices"])) == metadata["validation_samples"]
+    assert metadata["best_observed_epoch"] <= metadata["stopped_epoch"]
+    assert len(metadata["validation_relative_indices_sha256"]) == 64
+    assert len(metadata["train_relative_indices_sha256"]) == 64
+
 
 
 def test_missing_upstream_braindecode_architecture_is_preserved_as_unavailable():
