@@ -1,290 +1,300 @@
 # neurOS + ORION Roadmap
 
-This roadmap describes the active qualification and productization sequence for neurOS and ORION. Historical plans and session reports live under `docs/archive/` and are not active roadmaps. For the package-by-package maturity snapshot, see [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
+The broad platform refactor is complete. The next phase is not package expansion. It is **external scientific proof, product convergence, and progressively stronger qualification**.
 
-## Completed convergence foundation
+See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for the current maturity map and [`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md) for evidence-language rules.
 
-The 2026 architecture/refactor sequence is now merged into `main`:
+## North star
 
-1. **PR #1: neurOS kernel and ORION contracts**
-   - canonical `SignalFrame`, stream metadata, decoder outputs, queue policies, timing, config/plugin foundations, replay primitives, workspace packaging.
-2. **PR #8: Runtime v3**
-   - native `RuntimeGraph` executor, failure supervision, typed execution classes, p50/p95/p99 telemetry, single/multimodal execution convergence.
-3. **PR #9: CLI v3**
-   - config-first `doctor`, `plugins`, `devices`, `validate`, `run`, and benchmark execution with modular command ownership.
-4. **PR #10: Recording v3**
-   - lossless session archives, exact replay, source overrides, provenance, integrity verification, optional NWB/Zarr exports.
-5. **PR #11: Quality v3**
-   - version-controlled runtime quality gates, deterministic fault injection, benchmark manifests, known-signal scientific validity probes.
-6. **PR #12: ORION tokenization v1**
-   - seven tokenizer families, synthetic motif ground truth, fit/test separation, robustness benchmarks, tokenizer evidence reports.
-7. **PR #13: Repository v3**
-   - product/research/archive separation, historical cleanup, current documentation, and repository-hygiene enforcement.
-8. **PR #14: neuros-mechint v1**
-   - reproducible causal-evidence contracts, artifact schemas, held-out evidence, replication and explicit software-vs-empirical release status.
-9. **PR #16: neural foundation-model interoperability**
-   - capability registry, fail-closed adapters, representation probes, protocol fingerprints, and fair cross-model benchmark surfaces.
-10. **PR #17: SourceWeigher reliability engine**
-    - constrained source mixtures, distribution/reliability methods, online drift adaptation, diagnostics, and runtime fusion.
-11. **PR #18: mechanistically inspectable task models**
-    - faithful PyTorch decoder implementations, analysis manifests, model embeddings, neurOS-to-mech-int adapter, and dedicated model/mech-int CI.
-
-The repository therefore no longer needs another broad architectural rewrite. The next phase is **qualification, release discipline, evidence on real data/hardware, and a sharper public developer experience**.
-
----
-
-## North-star architecture
+neurOS should become the open qualification and execution layer for neural AI systems:
 
 ```text
-physical neural system
-        |
-        v
-hardware / sensors / datasets / replay
-        |
-        v
-neuros Source plugins
-        |
-        v
-SignalFrame + StreamDescriptor
-        |
-        v
-RuntimeGraph
- acquisition | synchronization | transforms | fusion | inference | sinks
-        |
-        +---------------------> recording / replay / quality evidence
-        |
-        +---------------------> task models / embeddings
-        |                           |
-        |                           +-> foundation-model interoperability
-        |                           +-> SourceWeigher transfer reliability
-        |                           +-> mech-int causal evidence
-        |
-        v
-ORION representation boundary
- tokenization | neural encoders | adaptation | personalization
-        |
-        v
-application / closed-loop controller
+hardware / public data / replay
+          |
+          v
+       neurOS
+runtime + timing + replay + provenance
+          |
+          +--------------------+
+          |                    |
+          v                    v
+        ORION              external methods
+representation +           MNE / Braindecode /
+adaptation                 future model plugins
+          \                    /
+           +--------+---------+
+                    v
+                    NSQ
+ protocol + observation authority + scoring + artifact identity
+                    |
+                    v
+          reproducible evidence bundle
 ```
 
-neurOS should make neural computation operationally predictable. ORION should make neural representation and adaptation increasingly powerful without weakening runtime reliability.
+The strategic ORION hypothesis is deliberately falsifiable:
+
+> A learned neural representation/adaptation system can preserve or improve held-out neural utility while materially reducing per-user calibration cost, without trading away robustness, latency, uncertainty calibration, provenance, or representation stability.
+
+Until real longitudinal evidence supports that statement, it remains a research hypothesis rather than a product claim.
 
 ---
 
-# Priority 0: public developer preview and release discipline
+# Phase 0: repository convergence
 
 ## Goal
 
-Turn the monorepo from a sophisticated internal platform into something an external BCI researcher or engineer can install, understand, test, extend, and trust within one session.
+Make the repository communicate one active program rather than every useful idea at once.
 
-## Work
+## Actions
 
-- keep `docs/PROJECT_STATUS.md` as the canonical package maturity map;
-- add clean-install build/wheel checks for every package promoted as maintained;
-- verify local workspace installs separately from published-package installs;
-- define semantic-versioning and deprecation policy for stable contracts;
-- publish a package compatibility matrix for `neuros-core`, `neuros`, `neuros-models`, `neuros-foundation`, `neuros-sourceweigher`, `neuros-mechint`, and `neuros-orion`;
-- add a generated or tested configuration/schema reference;
-- provide one supported end-to-end developer journey covering install -> validate -> run -> record -> replay -> inspect;
-- provide one plugin-author journey that creates an external source/transform/decoder without kernel edits;
-- add dedicated qualification lanes before `neuros-ui` or `neuros-cloud` are presented as equally mature with the kernel.
+- keep the four public concepts legible: neurOS, ORION, Evidence/NSQ, Studio;
+- keep Arena explicitly inside Evidence;
+- close completed bookkeeping issues rather than leaving historical milestones active;
+- park historical stacked research PRs behind explicit re-entry issues;
+- reduce CI workflow duplication and replace brittle hand-curated test lists with reusable qualification lanes and explicit coverage ownership;
+- align package metadata with actual maturity, especially `neuros-ui` and `neuros-cloud`;
+- migrate deprecated packaging license metadata before the setuptools deadline tracked in #59;
+- protect `main` with repository rules that match exact-head qualification discipline;
+- delete obsolete branches only after unique research has been rescued or explicitly rejected.
 
-## Exit gates
+## Exit gate
 
-A clean external environment can install the documented profile, run the supported examples, build the maintained distributions, and reproduce the same contract checks without relying on an editable monorepo checkout.
+A newcomer can understand the active scientific program from the README, project status, open PR list, and open issues without reconstructing repository history.
 
 ---
 
-# Priority 1: hardware qualification
+# Phase 1: NSQ Kumar2024 v1
+
+Tracking issue: **#82**.
 
 ## Goal
 
-Move from simulated and software-level integration evidence to explicit device qualification without conflating hardware validation with generic CI.
+Produce the first externally meaningful result using the production Neural System Qualification runner on a real longitudinal EEG dataset.
 
-## Work
+## Frozen first comparison
 
-- define a `HardwareQualificationManifest` containing manufacturer, device/model, firmware, driver/plugin version, OS, transport, channel layout, reference/montage, nominal sample rate, clock source, experiment config hash, Git SHA, and environment versions;
-- implement deterministic qualification protocols for representative EEG and biosignal hardware;
-- measure packet loss, reconnect behavior, clock drift, synchronization uncertainty, source-to-host latency, queue pressure, and sustained recording reliability;
-- validate stop/restart/disconnect behavior and corrupted/partial-session recovery;
-- publish machine-readable qualification reports rather than prose performance claims;
-- maintain hardware-specific thresholds outside generic CI.
+- MOABB Kumar2024 bar-feedback subset;
+- participant as the independent inferential unit;
+- prospective prior-session history;
+- labeled calibration budgets `0, 1, 2, 5, 10` examples/class where the frozen authority permits them;
+- untouched final assessment;
+- exact preprocessing and dataset lineage;
+- MNE/scikit-learn CSP + LDA;
+- upstream Braindecode EEGNet;
+- upstream EEGConformer where the pinned upstream API/input geometry supports it;
+- balanced accuracy primary, with accuracy/AUC/Brier/ECE as semantically available;
+- all failures/unavailable/OOM/nonconvergent cases retained.
 
-## Exit gates
+## Product result
 
-A device is called **qualified** only when its exact hardware/firmware/software combination has a reproducible report and all mandatory runtime/recording checks pass.
+Ship a small immutable study bundle that another researcher can verify without trusting manually curated tables.
+
+The important output is the **calibration frontier**, not a single leaderboard number.
+
+## Exit gate
+
+One command from clean released/built artifacts can reproduce a frozen public slice and independently verify the result identities.
 
 ---
 
-# Priority 2: durable model artifacts and decoder deployment safety
+# Phase 2: ORION earns its first real-data claim
 
 ## Goal
 
-Make model deployment reproducible, inspectable, rollbackable, and safe enough for long-lived BCI experiments.
+Evaluate ORION only after the external baseline floor is frozen.
 
-## Work
+## Comparison ladder
 
-- replace trusted-environment pickle persistence in promoted paths with backend-specific artifacts plus stable manifests;
-- store architecture/configuration, input contract, `state_dict` or backend-native weights, preprocessing, training dataset hashes, subject/session scope, calibration state, metrics, Git SHA, package versions, and artifact SHA-256;
-- bind the `InterpretabilityManifest` fingerprint to the artifact so layer/path changes cannot silently invalidate mechanistic evidence;
-- add decoder compatibility checks against stream/representation schemas before runtime start;
-- add probability/calibration capability tests and preserve `confidence=None` when uncertainty is unavailable;
-- implement immutable model registry identifiers and explicit stages such as experimental, validated, and qualified;
-- add rollback and replay-based regression tests for every promoted artifact.
+1. frozen external classical/deep baselines from Phase 1;
+2. matched-capacity task decoder baselines;
+3. frozen upstream foundation representations when lineage/licensing permit honest evaluation;
+4. ORION tokenizer/representation variants;
+5. SourceWeigher only as an explicitly tested transfer strategy;
+6. governed adaptation only after target observation roles are frozen independently.
 
-## Exit gates
+## Required axes
 
-A promoted decoder is reproducibly loadable, schema-compatible, replay-tested, mechanism-manifest-compatible where applicable, and associated with a complete provenance manifest.
+- performance vs labeled calibration cost;
+- separately declared unlabeled target cost;
+- cross-session and cross-subject transfer;
+- montage/channel-drop robustness;
+- artifact and preprocessing sensitivity;
+- representation geometry and deployment-unit leakage;
+- uncertainty calibration;
+- model/artifact identity and pretraining-overlap verdict;
+- latency/resource cost;
+- failure rate.
+
+## Scientific rule
+
+Matched downstream capacity and identical observation authority are mandatory. A representation may not choose a friendlier split or adaptation budget than a competing method.
+
+## Exit gate
+
+Either:
+
+- ORION demonstrates a reproducible advantage on a predeclared deployment-relevant metric, or
+- the experiment clearly falsifies the current ORION hypothesis and tells us what to change.
+
+Both outcomes are valuable.
 
 ---
 
-# Priority 3: ORION and model benchmarks on real neural datasets
+# Phase 3: adaptive NSQ authority
+
+Tracking issue: **#81**.
 
 ## Goal
 
-Determine which tokenization, representation, transfer, and mechanistic ideas survive contact with real deployment-unit variation.
+Freeze target observations into independent scientific roles before enabling unlabeled adaptation claims.
 
-## Work
+Required pairwise-disjoint roles:
 
-- add NWB/data adapters using the canonical replay/data contracts;
-- evaluate across multiple preparations, sessions, animals/subjects, sites, devices/montages, and behavioral tasks where scientifically appropriate;
-- benchmark task decoders and foundation representations under the same subject/session-disjoint protocols;
-- include held-out neural prediction, behavior/state decoding, cross-session transfer, few-shot calibration, and compute-normalized metrics;
-- evaluate robustness to jitter, unit/channel dropout, sorting instability, rate shifts, artifacts, montage changes, and session drift;
-- keep tokenizer fit data, representation-model training data, adaptation data, mechanistic-discovery data, and final held-out evaluation data distinct;
-- compare ORION tokenization against event, count, rate-summary, randomized, and architecture-matched controls;
-- integrate SourceWeigher as an explicitly evaluated transfer strategy rather than an unconditional preprocessing step;
-- test whether candidate mechanisms remain causal and stable across subjects/sessions/devices instead of only within one trained model distribution.
+```text
+source history
+labeled target calibration
+unlabeled target adaptation
+qualification / state selection
+untouched final assessment
+```
 
-## NeuroFM promotion rule
+Every role must have exact indices and a content-bound SHA. Labeled and unlabeled budgets must be independent. “Whatever target rows are left” is not an unlabeled adaptation protocol.
 
-Existing `neuros-neurofm` implementations are research candidates, not automatically ORION components. A NeuroFM component moves behind a promoted ORION interface only when it:
+## Exit gate
 
-1. satisfies interface and artifact contracts;
-2. has leakage-controlled evidence;
-3. improves a meaningful metric or offers a clear efficiency/interpretability advantage;
-4. remains stable under perturbation and cross-session tests;
-5. has reproducible compute/data manifests;
-6. is compared against simpler baselines under matched budgets.
+The NSQ runner can execute an external adaptive method while proving that no target observation silently changes scientific role across the calibration frontier.
 
 ---
 
-# Priority 4: multimodal timing and reliability-aware fusion
+# Phase 4: real hardware qualification
 
 ## Goal
 
-Turn explicit clock and source-reliability semantics into best-in-class multimodal BCI synchronization and fusion.
+Qualify one named EEG hardware/firmware/transport/host combination end to end instead of expanding a generic driver catalog.
 
-## Work
+## Measure
 
-- extend the affine clock estimator to multiple hardware clock domains and intermittent synchronization observations;
-- propagate synchronization uncertainty through fusion decisions;
-- add fusion policies that reject stale or temporally incompatible frames rather than blindly reuse the latest sample;
-- attach contributing-frame provenance and timing uncertainty to fusion outputs;
-- combine timing/quality evidence with SourceWeigher reliability without conflating domain similarity, task utility, signal quality, and predictive uncertainty;
-- benchmark synthetic known-offset/drift scenarios and recorded multimodal sessions;
-- expose timing/reliability uncertainty to ORION so learned representations can distinguish system uncertainty from biological variation.
+- channel/montage identity;
+- sample-rate behavior;
+- device and host clocks;
+- packet/sequence loss;
+- reconnect/restart behavior;
+- synchronization uncertainty and drift;
+- queue pressure/drop behavior;
+- sustained recording integrity;
+- source-to-host and end-to-end latency;
+- exact configuration/software identities.
 
-## Exit gates
+Runtime artifact binding / descriptor propagation in **#74** should be completed before artifact-backed execution is treated as fully compositional through transforms.
 
-Fusion outputs report contributing source frames, synchronized timestamps, quality/reliability evidence, and the uncertainty under which the fusion decision was made.
+## Exit gate
+
+A public machine-readable qualification bundle supports the exact named hardware configuration. No blanket vendor or device-family claim is inferred.
 
 ---
 
-# Priority 5: adaptive and personalized BCI intelligence
+# Phase 5: external adoption and methods-paper readiness
+
+Tracking issue: **#76**.
 
 ## Goal
 
-Make adaptation explicit, constrained, reversible, and scientifically measurable.
+Turn internal rigor into external trust.
 
-## Work
+## Required proof
 
-- implement adaptation proposal/review/apply lifecycle rather than hidden online mutation;
-- distinguish calibration, unsupervised domain adaptation, supervised online learning, and user-specific personalization;
-- maintain baseline and candidate model states with rollback;
-- evaluate adaptation under simulated and real nonstationarity, electrode/channel degradation, and behavioral drift;
-- log every adaptation trigger, training window, objective, resulting artifact, and before/after metrics;
-- use mechanistic evidence as an additional stability signal only after its predictive value is validated;
-- measure calibration cost and time-to-usable-control as first-class user-facing metrics.
+- at least three independent users reproduce the small NSQ task from public instructions and built artifacts;
+- at least one external model participates without neurOS training code;
+- at least one genuinely external plugin/repository passes the conformance path;
+- at least one substantive external contribution lands;
+- reproducibility failures are published rather than hidden;
+- a concise methods paper explains the qualification problem and state of the field instead of presenting package count as novelty.
 
-## Exit gates
+## Exit gate
 
-No adaptive component silently alters a promoted decoder. Every update is attributable, replayable, bounded, reversible, and evaluated against a no-adaptation baseline.
+An external researcher can reasonably say:
 
----
-
-# Priority 6: closed-loop safety plane
-
-## Goal
-
-Make neurOS suitable as a research substrate for increasingly consequential closed-loop applications without pretending software tests constitute medical validation.
-
-## Work
-
-- introduce a first-class safety/constraint node type or equivalent policy layer;
-- add action-rate limits, deadman states, confidence/quality gating, stale-data rejection, and emergency-stop semantics;
-- distinguish advisory decoder outputs from commands sent to an actuator;
-- create hardware-in-the-loop simulation before physical closed-loop control;
-- record proposed actions, accepted actions, rejected actions, reasons, neural quality, decoder state, and timing;
-- develop task-specific hazard analyses and qualification profiles.
-
-## Exit gates
-
-A closed-loop demo fails safe under source loss, runtime overload, decoder failure, stale synchronization, policy rejection, and explicit user/operator stop.
+> I do not need neurOS to train my model. I use it because it makes my neural-system claim harder to accidentally overstate and easier to reproduce.
 
 ---
 
-# Priority 7: ecosystem and productization
+# Phase 6: resume Arena only against concrete falsification targets
 
-## Goal
+Tracking issue: **#83**.
 
-Make the platform valuable to researchers, neurotechnology teams, and BCI developers beyond this repository while preserving an open, inspectable core.
+The parked Arena v2 stack contains valuable causal work around sample-indexed artifacts, participant response, presentation epochs, and measured display evidence. Preserve it, but do not let synthetic sophistication outrun the real-data NSQ program.
 
-## Work
+Resume when either:
 
-- stabilize versioned plugin APIs and compatibility policy;
-- publish independently installable, well-tested device and decoder plugins;
-- provide supported examples for motor imagery, replay analysis, multimodal fusion, model/mechanism auditing, foundation representations, SourceWeigher transfer, and ORION tokenization;
-- build UI surfaces from the same config/runtime/event APIs rather than separate orchestration logic;
-- define a remote experiment/telemetry control plane without moving core real-time execution into the cloud;
-- create machine-readable qualification and benchmark artifacts suitable for CI, papers, and enterprise audit trails;
-- keep optional commercial integrations above open kernel contracts rather than forking the architecture.
+- the first NSQ real-data baseline is frozen and Arena perturbations can test a concrete robustness hypothesis, or
+- a physical display/device experiment needs the measured-evidence boundary.
 
-## Exit gates
-
-A new contributor can add a plugin without kernel changes, and a team can reproduce the same experiment/qualification artifact on another machine or site with explicit compatibility/provenance information.
+When resumed, reconstruct the semantics cleanly on current `main` rather than carrying stale stacked ancestry forward.
 
 ---
 
-# Evidence hierarchy
+# Phase 7: Studio and closed-loop safety
 
-Claims should always identify their evidence tier:
+These are downstream product surfaces, not current proof priorities.
 
-1. **Unit:** local function/class correctness.
-2. **Contract:** implementation satisfies a stable neurOS/ORION interface.
-3. **Integration:** multiple real packages execute together.
-4. **Replay:** deterministic recorded session reproduces expected behavior.
-5. **Scientific synthetic:** known ground truth is recovered under controlled perturbation.
-6. **Dataset:** leakage-controlled real-data evaluation.
-7. **Hardware qualification:** measured on named hardware/firmware/software.
-8. **Closed-loop qualification:** hardware-in-the-loop or physical system safety/reliability testing.
-9. **Clinical evidence:** separate regulated/clinical work, not implied by the software repository.
+## Studio
 
-No lower tier should be described using language that implies a higher tier.
+Studio should visualize runtime state, recordings/replay, NSQ results, ORION representations/adaptation, artifact lineage, latency/quality, and claim/evidence status through existing APIs. It must not become a second executor.
+
+## Closed-loop safety
+
+Before consequential actuation, add first-class policy for:
+
+- stale-data rejection;
+- signal-quality/confidence gates;
+- action bounds/rate limits;
+- deadman/fallback states;
+- emergency stop;
+- explicit advisory-vs-actuation semantics;
+- hardware-in-the-loop fault qualification.
+
+Software tests do not constitute medical-device validation.
 
 ---
 
-# Immediate execution sequence
+# What we should not build now
 
-The highest-value next sequence is:
+Do not spend the next cycle on:
 
-1. finish the public developer-preview/release gates;
-2. define the model artifact v1 format and remove pickle from promoted deployment paths;
-3. qualify one real EEG device end to end using a machine-readable hardware manifest;
-4. add one real public neural dataset to the ORION/model benchmark harness;
-5. run subject/session-disjoint decoder + foundation + SourceWeigher + mechanism-stability comparisons;
-6. add uncertainty-aware multimodal fusion;
-7. build adaptation lifecycle with rollback and provenance;
-8. add a closed-loop safety policy layer before more consequential demos.
+- another generic EEG preprocessing stack;
+- another broad decoder/model zoo;
+- a competing BIDS/NWB/MOABB catalog;
+- dozens of device drivers already covered upstream;
+- another foundation-model architecture without a frozen benchmark and trained artifact;
+- UI/cloud polish that outruns evidence;
+- synthetic physiological complexity with no real-data falsification target;
+- opaque AutoML or adaptation that weakens information-role authority.
 
-The guiding question remains: **what are the smallest stable abstractions from which serious BCI systems can be built, measured, replayed, falsified, and improved?**
+Every new subsystem should satisfy the scope-firewall logic in #77: identify the established ecosystem owner, explain why integration is insufficient, state neurOS's unique authority, define an external falsification target, quantify maintenance cost, and name the removal condition.
+
+---
+
+# Company/product direction
+
+The open-source wedge should remain the trusted local execution + qualification standard. Commercial value should accumulate above stable open contracts rather than by hiding scientific semantics:
+
+- team/organization artifact registry;
+- qualification history and comparison service;
+- fleet/device compatibility evidence;
+- reproducibility and audit workflows;
+- collaborative Studio;
+- managed benchmark execution;
+- private deployment governance;
+- regulated/enterprise support when justified.
+
+That creates a credible business path without making the scientific core less inspectable.
+
+---
+
+# Next three moves
+
+1. **Finish #82 and publish the first frozen NSQ Kumar2024 baseline artifact.**
+2. **Run ORION against that exact authority and find out whether it actually reduces calibration burden.**
+3. **Qualify one real EEG system and recruit external users to reproduce the same evidence workflow.**
+
+Everything else should be judged by whether it accelerates one of those three moves.
