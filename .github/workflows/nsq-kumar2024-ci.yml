@@ -117,7 +117,7 @@ jobs:
           python -m pip install -e packages/neuros-core
           python -m pip install -e packages/neuros-models
           python -m pip install -e "packages/neuros-foundation[evidence]"
-          python -m pip install pytest
+          python -m pip install pytest pytest-asyncio
       - name: Execute RG+LR through production NSQ referee
         run: |
           pytest -q \
