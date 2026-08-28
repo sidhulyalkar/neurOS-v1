@@ -46,6 +46,14 @@ research = [
     "neuros-foundation[all]>=2.0.0",
     "neuros-sourceweigher>=0.2.0",
 ]
+evidence = [
+    "neuros-foundation[evidence]>=2.1.0",
+    "neuros-orion>=0.1.0",
+]
+evidence-braindecode = [
+    "neuros-foundation[evidence,braindecode-evidence]>=2.1.0; python_version >= '3.11'",
+    "neuros-orion>=0.1.0; python_version >= '3.11'",
+]
 deployment = [
     "neuros-ui[all]>=2.0.0",
     "neuros-cloud[all]>=2.0.0",
@@ -63,6 +71,7 @@ dev = [
 
 [project.scripts]
 neuros = "neuros.cli:main"
+neuros-nsq-kumar2024 = "neuros.evidence.kumar2024:main"
 
 [project.urls]
 Homepage = "https://github.com/sidhulyalkar/neurOS-v1"
