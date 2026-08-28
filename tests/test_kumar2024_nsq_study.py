@@ -316,3 +316,51 @@ def test_bundle_verification_detects_tampering_without_rerunning_training(tmp_pa
         assert "hash mismatch" in str(exc)
     else:
         raise AssertionError("tampered bundle unexpectedly verified")
+
+
+def test_cli_overrides_preserve_frozen_eegnet_authority(tmp_path: Path, monkeypatch):
+    from neuros.evidence import kumar2024 as module
+
+    captured = {}
+
+    def fake_run_study(output, *, config, preprocessing, overwrite):
+        captured["output"] = Path(output)
+        captured["config"] = config
+        captured["preprocessing"] = preprocessing
+        captured["overwrite"] = overwrite
+        return {"validated": True}
+
+    monkeypatch.setattr(module, "run_study", fake_run_study)
+    base = module.pilot_config()
+    output = tmp_path / "cli-authority"
+
+    result = module.main(
+        [
+            "--output",
+            str(output),
+            "--methods",
+            "mne-csp-lda,pyriemann-rg-lr",
+            "--braindecode-epochs",
+            "123",
+        ]
+    )
+
+    assert result == 0
+    config = captured["config"]
+    assert captured["output"] == output
+    assert config.methods == ("mne-csp-lda", "pyriemann-rg-lr")
+    assert config.braindecode_epochs == 123
+    assert config.braindecode_batch_size == base.braindecode_batch_size
+    assert config.braindecode_optimizer == base.braindecode_optimizer
+    assert config.braindecode_learning_rate == base.braindecode_learning_rate
+    assert config.braindecode_weight_decay == base.braindecode_weight_decay
+    assert config.braindecode_validation_fraction == base.braindecode_validation_fraction
+    assert config.braindecode_validation_seed == base.braindecode_validation_seed
+    assert (
+        config.braindecode_early_stopping_patience
+        == base.braindecode_early_stopping_patience
+    )
+    assert config.braindecode_model_seed == base.braindecode_model_seed
+    assert config.device == base.device
+    assert captured["preprocessing"] == module.Kumar2024PreprocessingSpec()
+    assert captured["overwrite"] is False
