@@ -5,6 +5,7 @@ on:
     paths:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
       - "tests/test_neural_system_qualification_v1.py"
+      - "tests/test_neural_system_qualification_adaptation.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
   push:
@@ -12,6 +13,7 @@ on:
     paths:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
       - "tests/test_neural_system_qualification_v1.py"
+      - "tests/test_neural_system_qualification_adaptation.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
 
@@ -44,7 +46,9 @@ jobs:
           python -m pip install -e packages/neuros-foundation pytest pytest-asyncio
       - name: Exercise peer-facing qualification contracts
         run: |
-          pytest -q tests/test_neural_system_qualification_v1.py
+          pytest -q \
+            tests/test_neural_system_qualification_v1.py \
+            tests/test_neural_system_qualification_adaptation.py
       - name: Prove deterministic protocol identity
         run: |
           python - <<'PY'
