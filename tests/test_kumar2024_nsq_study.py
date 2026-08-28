@@ -4,11 +4,14 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
+
 from neuros.evidence.kumar2024 import (
     KUMAR2024_ALL_SUBJECTS,
     Kumar2024PreprocessingSpec,
     Kumar2024StudyConfig,
     _identity_sha256,
+    _make_case_authority,
     _preprocessing_authority,
     build_dataset_lineage,
     build_protocol,
@@ -18,9 +21,11 @@ from neuros.evidence.kumar2024 import (
     verify_bundle,
 )
 from neuros.foundation_models.moabb_epochs import MOABBEpochDescriptor
+from neuros.foundation_models.moabb_longitudinal import get_moabb_longitudinal_spec
 from neuros.foundation_models.qualification_runner import (
     DEFAULT_CLASSIFICATION_SCORECARD,
 )
+from neuros.foundation_models.real_world import GroupedEvaluationData
 
 
 def _descriptor(n_trials: int = 80) -> MOABBEpochDescriptor:
@@ -45,6 +50,24 @@ def _versions():
     }
 
 
+def _six_session_fixture() -> GroupedEvaluationData:
+    trials_per_session = 40
+    n_samples = 6 * trials_per_session
+    return GroupedEvaluationData(
+        dataset_id="moabb-kumar2024",
+        X=np.arange(n_samples * 2, dtype=np.float64).reshape(n_samples, 2),
+        y=np.asarray(["left", "right"] * (n_samples // 2), dtype=str),
+        groups={
+            "subject": np.asarray(["1"] * n_samples, dtype=str),
+            "session": np.repeat(
+                np.asarray(["0", "1", "2", "3", "4", "5"], dtype=str),
+                trials_per_session,
+            ),
+            "trial": np.asarray([f"t{index:03d}" for index in range(n_samples)], dtype=str),
+        },
+    )
+
+
 def test_profiles_make_pilot_explicit_and_full_study_predeclared():
     pilot = pilot_config()
     full = full_config()
@@ -58,6 +81,39 @@ def test_profiles_make_pilot_explicit_and_full_study_predeclared():
     assert pilot.budgets_per_class == (0, 1, 2, 5, 10)
     assert len(pilot.sha256) == 64
     assert pilot.sha256 != full.sha256
+
+
+def test_preregistered_split_seed_is_literal_and_shared_across_cases():
+    data = _six_session_fixture()
+    spec = get_moabb_longitudinal_spec("kumar2024")
+    config = Kumar2024StudyConfig(
+        subjects=(1,),
+        methods=("mne-csp-lda",),
+        split_seed=2026,
+    )
+
+    session_one = _make_case_authority(
+        data=data,
+        dataset_spec=spec,
+        subject=1,
+        target_session="1",
+        config=config,
+    )
+    session_five = _make_case_authority(
+        data=data,
+        dataset_spec=spec,
+        subject=1,
+        target_session="5",
+        config=config,
+    )
+
+    assert session_one.seed == 2026
+    assert session_five.seed == 2026
+    assert session_one.case_metadata["split_seed"] == 2026
+    assert session_five.case_metadata["split_seed"] == 2026
+    assert session_one.case_id.endswith("/split-2026")
+    assert session_five.case_id.endswith("/split-2026")
+    assert session_one.partition_fingerprint != session_five.partition_fingerprint
 
 
 def test_lineage_is_partial_and_does_not_manufacture_raw_content_hash():
