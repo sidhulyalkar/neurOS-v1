@@ -115,6 +115,8 @@ def test_mne_csp_lda_participates_as_external_probability_method():
     # Scientific comparison is allowed without pretending joblib/pickle is a
     # qualified promoted-state identity.
     assert all(row.learned_state_addressable is False for row in result.rows)
+    assert all(row.external_learned_state_sha256 is None for row in result.rows)
+    assert all(row.qualification_model_state_sha256 is not None for row in result.rows)
 
 
 def test_braindecode_factory_is_direct_upstream_not_neuros_model_wrapper():
@@ -158,6 +160,9 @@ def test_upstream_braindecode_executes_through_same_nsq_referee():
     assert row.status == "success"
     assert row.probability_available is True
     assert row.learned_state_addressable is True
-    assert row.model_state_sha256 is not None
+    assert row.external_state_identity_kind == "tensor_sha256"
+    assert row.external_learned_state_sha256 is not None
+    assert row.qualification_model_state_sha256 is not None
+    assert row.external_learned_state_sha256 != row.qualification_model_state_sha256
     assert row.score is not None
     assert row.score.availability["brier_score"] == "available"
