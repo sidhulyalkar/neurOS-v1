@@ -58,6 +58,12 @@ Promoting an integration or claim requires executable evidence at the promoted t
 
 Foundational changes should remain draft until the exact head is green. Consequential merges should use an expected-head guard when tooling permits. Tests should be strengthened or semantics fixed when failures expose ambiguity; tests should not be weakened merely to obtain green CI.
 
+For a contract/scientific pull request whose qualification evidence binds an exact head SHA, the preferred merge is a **merge commit that preserves that qualified head unchanged as an ancestor of `main`**. Squash or rebase creates a different source commit and therefore does not automatically inherit exact-head qualification. If a qualification-critical change is squashed, rebased, or otherwise rewritten, the resulting commit must be requalified before it is treated as carrying the original evidence.
+
+Routine maintenance and documentation changes may use squash/rebase when no scientific or contract artifact depends on preserving the pull-request head identity.
+
+Repository branch protection/rulesets should require the stable qualification checks appropriate to the change class once those check names are converged. Administrative settings are part of the evidence boundary: an unprotected `main` should not be described as enforcing exact-head merge discipline merely because the policy exists in prose.
+
 ## Releases
 
 Releases follow `docs/RELEASE_POLICY.md`. Release artifacts must be buildable from the tagged source, pass metadata checks, and carry cryptographic checksums. Package publication credentials are intentionally separate from ordinary pull-request CI.
