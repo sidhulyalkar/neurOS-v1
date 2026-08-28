@@ -727,7 +727,7 @@ class QualificationBudgetResult:
     @property
     def sha256(self) -> str:
         return _identity_sha256(
-            "neuros.qualification_budget_result.v2",
+            "neuros.qualification_budget_result.v3",
             self.to_dict(include_sha256=False),
         )
 
@@ -791,7 +791,7 @@ class QualificationCaseResult:
     @property
     def sha256(self) -> str:
         return _identity_sha256(
-            "neuros.qualification_case_result.v2",
+            "neuros.qualification_case_result.v3",
             self.to_dict(include_sha256=False),
         )
 

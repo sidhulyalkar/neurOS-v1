@@ -18,6 +18,7 @@ from neuros.foundation_models.qualification_runner import (
     DEFAULT_CLASSIFICATION_SCORECARD,
     ClassificationScorecardV1,
     QualificationExecutionContext,
+    _identity_sha256,
     run_external_qualification_case,
 )
 from neuros.foundation_models.real_world import GroupedEvaluationData
@@ -431,6 +432,14 @@ def test_probability_method_separates_external_state_from_run_binding_state():
     assert serialized["qualification_model_state"]["learned_state"]["metadata"] == {
         "fixture_note": "inspectable"
     }
+    assert row.sha256 == _identity_sha256(
+        "neuros.qualification_budget_result.v3",
+        row.to_dict(include_sha256=False),
+    )
+    assert result.sha256 == _identity_sha256(
+        "neuros.qualification_case_result.v3",
+        result.to_dict(include_sha256=False),
+    )
 
 
 def test_external_failures_remain_in_the_frontier_instead_of_disappearing():
