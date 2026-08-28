@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
     paths:
+      - "packages/neuros-foundation/pyproject.toml"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024.py"
       - ".github/workflows/nsq-kumar2024-study.yml"
 
 permissions:
@@ -15,8 +18,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  csp-pilot:
-    name: Exact-main Kumar2024 CSP pilot
+  classical-pilot:
+    name: Exact-main Kumar2024 classical baseline pilot
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -34,12 +37,12 @@ jobs:
           python -m pip install -e "packages/neuros-foundation[evidence]"
           python -m pip install -e packages/orion
           python -m pip install -e packages/neuros
-      - name: Execute exact-main CSP pilot
+      - name: Execute exact-main paired classical pilot
         run: |
-          OUT="${RUNNER_TEMP}/nsq-kumar2024-csp-pilot"
+          OUT="${RUNNER_TEMP}/nsq-kumar2024-classical-pilot"
           neuros-nsq-kumar2024 \
             --profile pilot \
-            --methods mne-csp-lda \
+            --methods mne-csp-lda,pyriemann-rg-lr \
             --output "${OUT}"
           neuros-nsq-kumar2024 --verify-only --output "${OUT}"
           OUT="${OUT}" python - <<'PY'
@@ -51,21 +54,37 @@ jobs:
           root = Path(os.environ["OUT"])
           manifest = json.loads((root / "study_manifest.json").read_text())
           authorities = json.loads((root / "case_authorities.json").read_text())["authorities"]
+          analysis = json.loads((root / "analysis.json").read_text())
           rows = list(csv.DictReader((root / "results.csv").open()))
+
           assert manifest["git_revision"] == os.environ["GITHUB_SHA"]
+          assert manifest["config"]["methods"] == ["mne-csp-lda", "pyriemann-rg-lr"]
           assert len(authorities) == 10
           assert {item["seed"] for item in authorities} == {2026}
           assert {item["case_metadata"]["split_seed"] for item in authorities} == {2026}
           assert all(item["case_id"].endswith("/split-2026") for item in authorities)
-          assert len(rows) == 50
+
+          assert len(rows) == 100
           assert {int(row["calibration_per_class"]) for row in rows} == {0, 1, 2, 5, 10}
           assert {row["status"] for row in rows} == {"success"}
-          assert {row["method_id"] for row in rows} == {"mne-csp-lda"}
+          assert {row["method_id"] for row in rows} == {
+              "mne-csp-lda",
+              "pyriemann-rg-lr",
+          }
+
+          assert analysis["primary_study_endpoint"] == (
+              "paired_normalized_balanced_accuracy_frontier_auc"
+          )
+          assert len(analysis["paired_calibration_efficiency"]) == 1
+          pair = analysis["paired_calibration_efficiency"][0]
+          assert pair["left_method"] == "mne-csp-lda"
+          assert pair["right_method"] == "pyriemann-rg-lr"
+          assert pair["matched_complete_frontier_participants"] == [1, 10]
           PY
-      - name: Upload immutable pilot bundle
+      - name: Upload immutable paired classical bundle
         uses: actions/upload-artifact@v4
         with:
-          name: nsq-kumar2024-csp-pilot-${{ github.sha }}
-          path: ${{ runner.temp }}/nsq-kumar2024-csp-pilot
+          name: nsq-kumar2024-classical-pilot-${{ github.sha }}
+          path: ${{ runner.temp }}/nsq-kumar2024-classical-pilot
           if-no-files-found: error
           retention-days: 90
