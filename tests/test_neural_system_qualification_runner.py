@@ -173,6 +173,7 @@ class ProbabilityDecoder(LabelOnlyDecoder):
         return ExternalLearnedState(
             state_identity_kind="tensor_sha256",
             state_sha256=STATE_SHA,
+            metadata={"fixture_note": "inspectable"},
         )
 
 
@@ -422,6 +423,14 @@ def test_probability_method_separates_external_state_from_run_binding_state():
     assert row.external_learned_state_sha256 == STATE_SHA
     assert row.qualification_model_state_sha256 is not None
     assert row.qualification_model_state_sha256 != STATE_SHA
+    assert row.qualification_model_state is not None
+    assert row.qualification_model_state.sha256 == row.qualification_model_state_sha256
+    assert row.qualification_model_state.learned_state.metadata["fixture_note"] == "inspectable"
+    serialized = row.to_dict()
+    assert serialized["schema_version"] == 3
+    assert serialized["qualification_model_state"]["learned_state"]["metadata"] == {
+        "fixture_note": "inspectable"
+    }
 
 
 def test_external_failures_remain_in_the_frontier_instead_of_disappearing():

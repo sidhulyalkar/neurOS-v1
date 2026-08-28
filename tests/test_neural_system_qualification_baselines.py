@@ -216,6 +216,11 @@ def test_upstream_braindecode_executes_through_same_nsq_referee():
     assert row.external_learned_state_sha256 is not None
     assert row.qualification_model_state_sha256 is not None
     assert row.external_learned_state_sha256 != row.qualification_model_state_sha256
+    assert row.qualification_model_state is not None
+    metadata = row.qualification_model_state.learned_state.metadata
+    assert metadata["validation_policy"] == "skorch.ValidSplit"
+    assert metadata["final_assessment_used_for_state_selection"] is False
+    assert len(metadata["validation_relative_indices_sha256"]) == 64
     assert row.score is not None
     assert row.score.availability["brier_score"] == "available"
 

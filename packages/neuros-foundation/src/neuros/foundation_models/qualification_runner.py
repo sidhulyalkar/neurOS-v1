@@ -584,13 +584,14 @@ class QualificationBudgetResult:
     labeled_target_examples: int
     evaluation_samples: int
     class_labels: tuple[str, ...]
+    qualification_model_state: QualificationModelState | None = None
     score: QualificationScore | None = None
     probability_available: bool = False
     fit_s: float | None = None
     inference_s: float | None = None
     failure_type: str | None = None
     failure_reason: str | None = None
-    schema_version: int = 2
+    schema_version: int = 3
 
     def __post_init__(self) -> None:
         if self.status not in {
@@ -602,8 +603,8 @@ class QualificationBudgetResult:
             "oom",
         }:
             raise ValueError(f"unsupported qualification status {self.status!r}")
-        if isinstance(self.schema_version, bool) or self.schema_version != 2:
-            raise ValueError("QualificationBudgetResult schema_version must be 2")
+        if isinstance(self.schema_version, bool) or self.schema_version != 3:
+            raise ValueError("QualificationBudgetResult schema_version must be 3")
         for name in (
             "protocol_sha256",
             "case_authority_sha256",
@@ -635,6 +636,28 @@ class QualificationBudgetResult:
         elif self.external_learned_state_sha256 is not None:
             raise ValueError(
                 "opaque learned state cannot expose external_learned_state_sha256"
+            )
+
+        state = self.qualification_model_state
+        if state is not None:
+            if not isinstance(state, QualificationModelState):
+                raise TypeError("qualification_model_state must be QualificationModelState")
+            if self.qualification_model_state_sha256 != state.sha256:
+                raise ValueError("qualification model-state object differs from declared SHA-256")
+            if state.method_spec_sha256 != self.method_spec_sha256:
+                raise ValueError("qualification model state differs from row method identity")
+            if state.run_contract_sha256 != self.run_contract_sha256:
+                raise ValueError("qualification model state differs from row run contract")
+            learned = state.learned_state
+            if learned.state_identity_kind != self.external_state_identity_kind:
+                raise ValueError("bound learned-state kind differs from row state kind")
+            if learned.state_sha256 != self.external_learned_state_sha256:
+                raise ValueError("bound learned-state SHA differs from row external state SHA")
+            if state.state_addressable != self.learned_state_addressable:
+                raise ValueError("bound state addressability differs from row declaration")
+        elif self.qualification_model_state_sha256 is not None:
+            raise ValueError(
+                "qualification_model_state_sha256 requires inspectable qualification_model_state"
             )
 
         if self.status == "success":
@@ -685,6 +708,11 @@ class QualificationBudgetResult:
             "unlabeled_target_seconds": 0.0,
             "evaluation_samples": self.evaluation_samples,
             "class_labels": list(self.class_labels),
+            "qualification_model_state": (
+                None
+                if self.qualification_model_state is None
+                else self.qualification_model_state.to_dict()
+            ),
             "score": None if self.score is None else self.score.to_dict(),
             "probability_available": self.probability_available,
             "fit_s": self.fit_s,
@@ -714,11 +742,11 @@ class QualificationCaseResult:
     execution_context_sha256: str
     metric_scorecard_sha256: str
     rows: tuple[QualificationBudgetResult, ...]
-    schema_version: int = 2
+    schema_version: int = 3
 
     def __post_init__(self) -> None:
-        if isinstance(self.schema_version, bool) or self.schema_version != 2:
-            raise ValueError("QualificationCaseResult schema_version must be 2")
+        if isinstance(self.schema_version, bool) or self.schema_version != 3:
+            raise ValueError("QualificationCaseResult schema_version must be 3")
         for name in (
             "protocol_sha256",
             "case_authority_sha256",
@@ -1052,6 +1080,7 @@ def run_external_qualification_case(
                     evaluation_indices_sha256=evaluation_sha,
                     qualification_model_state_sha256=bound_state.sha256,
                     external_learned_state_sha256=learned_state.state_sha256,
+                    qualification_model_state=bound_state,
                     external_state_identity_kind=(
                         learned_state.state_identity_kind
                     ),
@@ -1094,6 +1123,7 @@ def run_external_qualification_case(
                     external_learned_state_sha256=(
                         None if learned_state is None else learned_state.state_sha256
                     ),
+                    qualification_model_state=bound_state,
                     external_state_identity_kind=(
                         None
                         if learned_state is None
