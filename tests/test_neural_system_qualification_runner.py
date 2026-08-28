@@ -29,8 +29,8 @@ STATE_SHA = "d" * 64
 
 
 def _data() -> GroupedEvaluationData:
-    # Every sample encodes its row index, allowing tests to audit exactly which
-    # observations crossed the external-model boundary.
+    # Every sample encodes its row index so tests can audit the observations
+    # actually delivered to an external model.
     n_samples = 36
     X = np.arange(n_samples, dtype=np.float32)[:, None, None]
     X = np.repeat(X, 8, axis=2)
@@ -67,7 +67,10 @@ def _authority(data: GroupedEvaluationData) -> LongitudinalCaseAuthority:
     )
 
 
-def _protocol(data: GroupedEvaluationData, authority: LongitudinalCaseAuthority):
+def _protocol(
+    data: GroupedEvaluationData,
+    authority: LongitudinalCaseAuthority,
+):
     from neuros.foundation_models.qualification import QualificationProtocolSpec
 
     split = authority.restore(data)
@@ -78,20 +81,27 @@ def _protocol(data: GroupedEvaluationData, authority: LongitudinalCaseAuthority)
         task_id="left-vs-right-motor-imagery",
         independent_unit="participant",
         grouping_hierarchy=("participant", "session", "trial"),
-        calibration_budgets_per_class=tuple(range(split.max_budget_per_class + 1)),
+        calibration_budgets_per_class=tuple(
+            range(split.max_budget_per_class + 1)
+        ),
         metric_scorecard_sha256=DEFAULT_CLASSIFICATION_SCORECARD.sha256,
         protocol_status="frozen",
         metadata={"fixture": True},
     )
 
 
-def _context(*, unlabeled_target_examples: int = 0) -> QualificationExecutionContext:
+def _context(
+    *,
+    unlabeled_target_examples: int = 0,
+) -> QualificationExecutionContext:
     return QualificationExecutionContext(
         observed_dataset_lineage_sha256=LINEAGE_SHA,
         preprocessing_authority_sha256s=(PREPROCESSING_SHA,),
         calibration_authority_sha256s=(CALIBRATION_SHA,),
         unlabeled_target_examples=unlabeled_target_examples,
-        target_example_duration_s=1.25 if unlabeled_target_examples else None,
+        target_example_duration_s=(
+            1.25 if unlabeled_target_examples else None
+        ),
     )
 
 
@@ -135,29 +145,15 @@ class LabelOnlyFactory:
 
 
 class AdaptiveDecoder(LabelOnlyDecoder):
-    def __init__(self) -> None:
-        super().__init__()
-        self.adaptation_indices: tuple[int, ...] = ()
-
     def adapt_unlabeled(self, X: np.ndarray) -> None:
-        self.adaptation_indices = tuple(int(value) for value in X[:, 0, 0])
-
-
-class AdaptiveFactory:
-    def __init__(self) -> None:
-        self.created: list[AdaptiveDecoder] = []
-        self._spec = ExternalDecoderMethodSpec(
-            method_id="fixture-unlabeled-adapter",
-            implementation="tests.AdaptiveDecoder",
-            implementation_version="1",
-            input_axes=("sample", "channel", "time"),
-            probability_semantics="unavailable",
-            target_adaptation_mode="unlabeled",
+        raise AssertionError(
+            "labeled-only runner must never expose an unlabeled target array"
         )
 
-    @property
-    def method_spec(self) -> ExternalDecoderMethodSpec:
-        return self._spec
+
+class AdaptiveFactory(LabelOnlyFactory):
+    def __init__(self) -> None:
+        super().__init__(adaptation="unlabeled")
 
     def create(self) -> AdaptiveDecoder:
         decoder = AdaptiveDecoder()
@@ -254,9 +250,9 @@ def test_default_scorecard_has_full_stable_identity_and_explicit_semantics():
         "brier_score",
         "expected_calibration_error",
     )
-    assert first.to_dict()["metric_semantics"]["roc_auc"]["positive_class"] == (
-        "second_canonical_source_label"
-    )
+    assert first.to_dict()["metric_semantics"]["roc_auc"][
+        "positive_class"
+    ] == "second_canonical_source_label"
 
 
 def test_runner_creates_fresh_external_state_for_every_declared_budget():
@@ -274,7 +270,9 @@ def test_runner_creates_fresh_external_state_for_every_declared_budget():
     )
 
     assert len(factory.created) == len(protocol.calibration_budgets_per_class)
-    assert len({id(decoder) for decoder in factory.created}) == len(factory.created)
+    assert len({id(decoder) for decoder in factory.created}) == len(
+        factory.created
+    )
     assert tuple(row.calibration_per_class for row in result.rows) == (
         protocol.calibration_budgets_per_class
     )
@@ -287,56 +285,73 @@ def test_final_assessment_rows_never_cross_the_fit_boundary():
     authority = _authority(data)
     split = authority.restore(data)
     evaluation = set(split.evaluation_indices.tolist())
-    protocol = _protocol(data, authority)
     factory = LabelOnlyFactory()
 
-    run_external_qualification_case(
+    result = run_external_qualification_case(
         data,
         authority,
-        protocol,
+        _protocol(data, authority),
         factory,
         execution_context=_context(),
     )
 
     for decoder in factory.created:
         assert not evaluation.intersection(decoder.fit_indices)
+    assert len({row.evaluation_indices_sha256 for row in result.rows}) == 1
+    assert len({row.source_train_indices_sha256 for row in result.rows}) == 1
 
 
-def test_unlabeled_target_rows_use_only_non_evaluation_authorized_target_pool():
+def test_exact_observation_sets_are_bound_into_each_run_identity():
     data = _data()
     authority = _authority(data)
-    split = authority.restore(data)
-    evaluation = set(split.evaluation_indices.tolist())
-    source = set(split.source_train_indices.tolist())
-    protocol = _protocol(data, authority)
-    factory = AdaptiveFactory()
-
     result = run_external_qualification_case(
         data,
         authority,
-        protocol,
-        factory,
-        execution_context=_context(unlabeled_target_examples=1),
+        _protocol(data, authority),
+        LabelOnlyFactory(),
+        execution_context=_context(),
     )
 
-    assert all(row.status == "success" for row in result.rows)
-    assert all(row.unlabeled_target_examples == 1 for row in result.rows)
-    assert all(row.unlabeled_target_seconds == pytest.approx(1.25) for row in result.rows)
-    for decoder in factory.created:
-        assert len(decoder.adaptation_indices) == 1
-        assert not evaluation.intersection(decoder.adaptation_indices)
-        assert not source.intersection(decoder.adaptation_indices)
-        assert not evaluation.intersection(decoder.fit_indices)
+    # Increasing labeled calibration changes the labeled and fit authorities,
+    # while source history and untouched final assessment stay fixed.
+    assert len({row.run_contract_sha256 for row in result.rows}) == len(
+        result.rows
+    )
+    assert len({row.labeled_target_indices_sha256 for row in result.rows}) == len(
+        result.rows
+    )
+    assert len({row.fit_indices_sha256 for row in result.rows}) == len(result.rows)
+    assert len({row.source_train_indices_sha256 for row in result.rows}) == 1
+    assert len({row.evaluation_indices_sha256 for row in result.rows}) == 1
+
+
+def test_labeled_longitudinal_runner_refuses_unlabeled_target_role_conflation():
+    data = _data()
+    authority = _authority(data)
+    factory = AdaptiveFactory()
+
+    with pytest.raises(
+        ValueError,
+        match="labeled-target only.*separately frozen unlabeled-target",
+    ):
+        run_external_qualification_case(
+            data,
+            authority,
+            _protocol(data, authority),
+            factory,
+            execution_context=_context(unlabeled_target_examples=1),
+        )
+    # The authority error occurs before any external code sees data.
+    assert factory.created == []
 
 
 def test_label_only_method_keeps_probability_metrics_explicitly_unavailable():
     data = _data()
     authority = _authority(data)
-    protocol = _protocol(data, authority)
     result = run_external_qualification_case(
         data,
         authority,
-        protocol,
+        _protocol(data, authority),
         LabelOnlyFactory(),
         execution_context=_context(),
     )
@@ -348,8 +363,13 @@ def test_label_only_method_keeps_probability_metrics_explicitly_unavailable():
     assert row.score.availability["balanced_accuracy"] == "available"
     assert row.score.availability["accuracy"] == "available"
     assert row.score.metrics["brier_score"] is None
-    assert row.score.availability["brier_score"] == "unavailable_probability_output"
-    assert row.score.metrics["expected_calibration_error"] is None
+    assert (
+        row.score.availability["brier_score"]
+        == "unavailable_probability_output"
+    )
+    assert row.external_state_identity_kind == "opaque_unverified"
+    assert row.external_learned_state_sha256 is None
+    assert row.qualification_model_state_sha256 is not None
 
 
 def test_probability_method_requires_exact_fitted_class_order():
@@ -367,17 +387,26 @@ def test_probability_method_requires_exact_fitted_class_order():
     assert len(result.rows) == len(protocol.calibration_budgets_per_class)
     assert all(row.status == "failed" for row in result.rows)
     assert all(row.failure_type == "ValueError" for row in result.rows)
-    assert all("probability class order" in row.failure_reason for row in result.rows)
+    assert all(
+        "probability class order" in row.failure_reason for row in result.rows
+    )
+    # Fit succeeded before semantic output validation, so partial state evidence
+    # remains visible even though the budget row failed.
+    assert all(
+        row.external_learned_state_sha256 == STATE_SHA for row in result.rows
+    )
+    assert all(
+        row.qualification_model_state_sha256 is not None for row in result.rows
+    )
 
 
-def test_probability_method_scores_only_after_validated_class_order():
+def test_probability_method_separates_external_state_from_run_binding_state():
     data = _data()
     authority = _authority(data)
-    protocol = _protocol(data, authority)
     result = run_external_qualification_case(
         data,
         authority,
-        protocol,
+        _protocol(data, authority),
         ProbabilityFactory(),
         execution_context=_context(),
     )
@@ -390,6 +419,9 @@ def test_probability_method_scores_only_after_validated_class_order():
     assert row.score.availability["expected_calibration_error"] == "available"
     assert row.score.availability["roc_auc"] == "available"
     assert row.learned_state_addressable is True
+    assert row.external_learned_state_sha256 == STATE_SHA
+    assert row.qualification_model_state_sha256 is not None
+    assert row.qualification_model_state_sha256 != STATE_SHA
 
 
 def test_external_failures_remain_in_the_frontier_instead_of_disappearing():
@@ -426,7 +458,6 @@ def test_external_failures_remain_in_the_frontier_instead_of_disappearing():
 def test_observed_dataset_lineage_mismatch_fails_before_external_model_creation():
     data = _data()
     authority = _authority(data)
-    protocol = _protocol(data, authority)
     factory = LabelOnlyFactory()
     wrong = QualificationExecutionContext(
         observed_dataset_lineage_sha256="f" * 64,
@@ -436,7 +467,7 @@ def test_observed_dataset_lineage_mismatch_fails_before_external_model_creation(
         run_external_qualification_case(
             data,
             authority,
-            protocol,
+            _protocol(data, authority),
             factory,
             execution_context=wrong,
         )
@@ -446,7 +477,10 @@ def test_observed_dataset_lineage_mismatch_fails_before_external_model_creation(
 def test_metric_authority_mismatch_fails_before_external_model_creation():
     data = _data()
     authority = _authority(data)
-    protocol = replace(_protocol(data, authority), metric_scorecard_sha256="f" * 64)
+    protocol = replace(
+        _protocol(data, authority),
+        metric_scorecard_sha256="f" * 64,
+    )
     factory = LabelOnlyFactory()
 
     with pytest.raises(ValueError, match="metric scorecard"):
@@ -463,7 +497,6 @@ def test_metric_authority_mismatch_fails_before_external_model_creation():
 def test_processed_array_tampering_is_rejected_by_existing_case_authority():
     data = _data()
     authority = _authority(data)
-    protocol = _protocol(data, authority)
     factory = LabelOnlyFactory()
     tampered_X = data.X.copy()
     tampered_X[0, 0, 0] += 0.125
@@ -478,7 +511,7 @@ def test_processed_array_tampering_is_rejected_by_existing_case_authority():
         run_external_qualification_case(
             tampered,
             authority,
-            protocol,
+            _protocol(data, authority),
             factory,
             execution_context=_context(),
         )
@@ -508,7 +541,10 @@ def test_protocol_budget_beyond_case_authority_fails_before_fit():
 def test_runner_refuses_draft_protocol_even_when_every_other_hash_matches():
     data = _data()
     authority = _authority(data)
-    protocol = replace(_protocol(data, authority), protocol_status="draft")
+    protocol = replace(
+        _protocol(data, authority),
+        protocol_status="draft",
+    )
     with pytest.raises(ValueError, match="requires protocol_status='frozen'"):
         run_external_qualification_case(
             data,
