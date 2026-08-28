@@ -1,0 +1,74 @@
+name: One-shot fix NSQ v3 identity domains
+
+on:
+  push:
+    branches:
+      - feat/nsq-kumar2024-deep-baseline-authority
+    paths:
+      - .github/workflows/_tmp-fix-nsq-v3-identity.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Align NSQ identity domains with schema v3
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one anchor, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          runner = Path("packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py")
+          replace_once(
+              runner,
+              '"neuros.qualification_budget_result.v2",',
+              '"neuros.qualification_budget_result.v3",',
+              "budget result identity domain",
+          )
+          replace_once(
+              runner,
+              '"neuros.qualification_case_result.v2",',
+              '"neuros.qualification_case_result.v3",',
+              "case result identity domain",
+          )
+
+          tests = Path("tests/test_neural_system_qualification_runner.py")
+          replace_once(
+              tests,
+              '''from neuros.foundation_models.qualification_runner import (\n    DEFAULT_CLASSIFICATION_SCORECARD,\n    ClassificationScorecardV1,\n    QualificationExecutionContext,\n    run_external_qualification_case,\n)\n''',
+              '''from neuros.foundation_models.qualification_runner import (\n    DEFAULT_CLASSIFICATION_SCORECARD,\n    ClassificationScorecardV1,\n    QualificationExecutionContext,\n    _identity_sha256,\n    run_external_qualification_case,\n)\n''',
+              "runner test import",
+          )
+          replace_once(
+              tests,
+              '''    assert serialized["qualification_model_state"]["learned_state"]["metadata"] == {\n        "fixture_note": "inspectable"\n    }\n''',
+              '''    assert serialized["qualification_model_state"]["learned_state"]["metadata"] == {\n        "fixture_note": "inspectable"\n    }\n    assert row.sha256 == _identity_sha256(\n        "neuros.qualification_budget_result.v3",\n        row.to_dict(include_sha256=False),\n    )\n    assert result.sha256 == _identity_sha256(\n        "neuros.qualification_case_result.v3",\n        result.to_dict(include_sha256=False),\n    )\n''',
+              "v3 identity regression assertions",
+          )
+          PY
+      - name: Validate v3 identity contract
+        run: |
+          python -m compileall -q packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py tests/test_neural_system_qualification_runner.py
+          git diff --check
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation pytest pytest-asyncio
+          pytest -q tests/test_neural_system_qualification_runner.py
+      - name: Commit v3 identity correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py tests/test_neural_system_qualification_runner.py
+          git commit -m "Align NSQ result identity domains with schema v3"
+          git push origin HEAD:${GITHUB_REF_NAME}
