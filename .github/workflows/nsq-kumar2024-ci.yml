@@ -3,6 +3,7 @@ name: NSQ Kumar2024 v1
 on:
   pull_request:
     paths:
+      - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
       - "packages/neuros/src/neuros/evidence/**"
@@ -15,6 +16,7 @@ on:
   push:
     branches: [main]
     paths:
+      - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
       - "packages/neuros/src/neuros/evidence/**"
@@ -98,4 +100,47 @@ jobs:
           assert dataset.n_sessions == 6
           print("moabb", importlib.metadata.version("moabb"))
           print("return_epochs", signature.parameters["return_epochs"].default)
+          PY
+
+  riemann-baseline-contract:
+    name: Upstream pyRiemann RG+LR NSQ contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install Riemannian evidence stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence]"
+          python -m pip install pytest pytest-asyncio
+      - name: Execute RG+LR through production NSQ referee
+        run: |
+          pytest -q \
+            tests/test_neural_system_qualification_baselines.py::test_pyriemann_rg_lr_participates_without_transductive_test_update
+      - name: Verify frozen upstream identity
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          from neuros.foundation_models.qualification_baselines import (
+              RiemannianTangentLogRegFactory,
+          )
+
+          factory = RiemannianTangentLogRegFactory()
+          spec = factory.method_spec
+          assert spec.method_id == "pyriemann-rg-lr"
+          assert spec.metadata["covariance_estimator"] == "scm"
+          assert spec.metadata["tangent_metric"] == "riemann"
+          assert spec.metadata["tangent_space_update"] is False
+          assert spec.metadata["transductive_evaluation_batch_update"] is False
+          assert spec.metadata["logistic_solver"] == "lbfgs"
+          assert spec.metadata["logistic_penalty"] == "l2"
+          assert spec.metadata["logistic_c"] == 1.0
+          assert spec.metadata["logistic_max_iter"] == 1000
+          print("pyriemann", importlib.metadata.version("pyriemann"))
+          print("method_sha256", spec.sha256)
           PY

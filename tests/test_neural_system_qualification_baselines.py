@@ -11,6 +11,7 @@ from neuros.foundation_models.longitudinal_authority import LongitudinalCaseAuth
 from neuros.foundation_models.qualification import QualificationProtocolSpec
 from neuros.foundation_models.qualification_baselines import (
     MNECSPLDAFactory,
+    RiemannianTangentLogRegFactory,
     UpstreamBraindecodeFactory,
 )
 from neuros.foundation_models.qualification_runner import (
@@ -117,6 +118,36 @@ def test_mne_csp_lda_participates_as_external_probability_method():
     assert all(row.learned_state_addressable is False for row in result.rows)
     assert all(row.external_learned_state_sha256 is None for row in result.rows)
     assert all(row.qualification_model_state_sha256 is not None for row in result.rows)
+
+
+def test_pyriemann_rg_lr_participates_without_transductive_test_update():
+    pytest.importorskip("pyriemann")
+    pytest.importorskip("sklearn")
+    data = _eeg_data()
+    authority = _authority(data)
+    factory = RiemannianTangentLogRegFactory()
+    spec = factory.method_spec
+
+    assert spec.method_id == "pyriemann-rg-lr"
+    assert spec.metadata["covariance_estimator"] == "scm"
+    assert spec.metadata["tangent_metric"] == "riemann"
+    assert spec.metadata["tangent_space_update"] is False
+    assert spec.metadata["transductive_evaluation_batch_update"] is False
+
+    result = run_external_qualification_case(
+        data,
+        authority,
+        _protocol(data, authority, budgets=(0, 1)),
+        factory,
+        execution_context=_context(),
+    )
+    assert all(row.status == "success" for row in result.rows)
+    assert all(row.probability_available for row in result.rows)
+    assert all(row.score is not None for row in result.rows)
+    assert all(row.learned_state_addressable is False for row in result.rows)
+    assert all(row.external_learned_state_sha256 is None for row in result.rows)
+    assert all(row.qualification_model_state_sha256 is not None for row in result.rows)
+
 
 
 def test_braindecode_factory_is_direct_upstream_not_neuros_model_wrapper():

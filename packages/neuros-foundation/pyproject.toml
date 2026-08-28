@@ -46,7 +46,7 @@ cebra = ["cebra>=0.3.0"]
 allen = ["allensdk>=2.15.0"]
 legacy = ["torch>=2.1.0"]
 eeg = ["mne>=1.6.0"]
-evidence = ["moabb>=1.5.0,<2"]
+evidence = ["moabb>=1.5.0,<2", "pyriemann>=0.10,<0.13"]
 moabb = ["moabb>=1.5.0,<2"]
 braindecode-evidence = ["braindecode>=1.7,<1.8; python_version >= '3.11'"]
 ngclearn = ["ngclearn>=3.2,<3.3; python_version < '3.12'"]
@@ -64,6 +64,7 @@ all = [
     "zuna",
     "mne>=1.6.0",
     "moabb>=1.5.0,<2",
+    "pyriemann>=0.10,<0.13",
     "allensdk>=2.15.0",
 ]
 
