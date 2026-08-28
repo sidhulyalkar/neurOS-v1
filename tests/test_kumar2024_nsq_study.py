@@ -74,11 +74,24 @@ def test_profiles_make_pilot_explicit_and_full_study_predeclared():
 
     assert pilot.profile == "pilot"
     assert pilot.subjects == (1, 10)
-    assert pilot.braindecode_epochs == 1
     assert pilot.methods == ("mne-csp-lda",)
     assert full.profile == "full"
     assert full.subjects == KUMAR2024_ALL_SUBJECTS
-    assert full.braindecode_epochs == 20
+
+    # Profile controls participant/execution scope, not neural-method quality.
+    # Pilot and full therefore carry one identical preregistered EEGNet authority
+    # even though the canonical pilot executes CSP only.
+    for config in (pilot, full):
+        assert config.braindecode_epochs == 1000
+        assert config.braindecode_batch_size == 64
+        assert config.braindecode_optimizer == "Adam"
+        assert config.braindecode_learning_rate == 0.000625
+        assert config.braindecode_weight_decay == 0.0
+        assert config.braindecode_validation_fraction == 0.2
+        assert config.braindecode_validation_seed == 17011
+        assert config.braindecode_early_stopping_patience == 300
+        assert config.braindecode_model_seed == 31415
+
     assert pilot.budgets_per_class == (0, 1, 2, 5, 10)
     assert len(pilot.sha256) == 64
     assert pilot.sha256 != full.sha256

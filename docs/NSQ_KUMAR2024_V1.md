@@ -137,16 +137,31 @@ Lineage completeness is `partial` until exact raw content and all ancestry are i
 
 ## External methods v1
 
-The NSQ execution surface supports:
+The promoted Kumar2024 study surface supports:
 
 1. direct MNE CSP + scikit-learn LDA;
 2. direct pyRiemann covariance + tangent-space + scikit-learn logistic regression;
-3. direct upstream Braindecode EEGNet;
-4. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.
+3. direct upstream Braindecode EEGNet under the frozen neural-training authority below.
+
+The generic Braindecode adapter can still probe other installed upstream architectures, including EEGConformer when available, but **EEGConformer is not a promoted Kumar2024 efficacy method yet**. It needs its own model-appropriate training authority before entering this study.
 
 The Riemannian comparator is frozen as sample covariance (`scm`) -> `TangentSpace(metric="riemann", tsupdate=False)` -> L2 `LogisticRegression(solver="lbfgs", C=1.0, max_iter=1000)`. `tsupdate=False` is part of the evidence contract so evaluation-batch composition cannot alter the tangent reference.
 
-Only **MNE CSP + LDA is currently part of the canonical pilot default**. The Braindecode adapters are explicit capability/integration surfaces, not yet qualified efficacy baselines. A deep baseline may enter the promoted comparison only after its fixed unit conversion, train-authorized standardization, validation/state-selection policy, optimization schedule, and neural-model seed authority are frozen and content-addressed. Until then it must be requested explicitly with `--methods`.
+The EEGNet v1 training authority is frozen before any promoted EEGNet final-assessment result is inspected:
+
+- the same NSQ/MOABB 8–30 Hz epoch arrays used by the classical methods, with no hidden model-specific normalization;
+- direct upstream `braindecode.models.EEGNet` + `EEGClassifier`;
+- `torch.optim.Adam`, learning rate `0.000625`, weight decay `0`;
+- batch size `64`;
+- maximum `1000` epochs as a ceiling;
+- `skorch.dataset.ValidSplit(0.2, stratified=False, random_state=17011)` inside the NSQ-authorized fit set;
+- early stopping on validation loss with patience `300`, zero improvement threshold, and restoration of the best observed validation-loss module state;
+- model seed `31415`, separate from the study split seed and analysis seed;
+- deterministic cuDNN flags when CUDA is available;
+- exact validation membership recorded as relative indices plus SHA-256 in learned-state evidence;
+- the restored inference tensor/buffer state content-addressed without pickle.
+
+The canonical CLI pilot still defaults to **MNE CSP + LDA only**. The exact-main archival classical workflow explicitly runs CSP + RG together. EEGNet must be requested explicitly and should not be executed against promoted final-assessment data until this training authority itself has passed exact-head qualification.
 
 These methods participate through the same NSQ factory protocol. neurOS does not substitute its own model implementation behind an external method name. Every calibration budget creates a **fresh external model instance**; warm-starting one frontier point from another is forbidden.
 
@@ -194,7 +209,7 @@ budgets = 0,1,2,5,10 / class
 default method = MNE CSP + LDA only
 ```
 
-`braindecode_epochs = 1` remains part of the pilot configuration only for explicit deep-adapter integration runs. It is not a qualified training recipe.
+The stored pilot configuration now carries the frozen EEGNet training authority above, but no deep model is part of the default pilot method set. This separates *method authority* from *whether a final-assessment run has been authorized*.
 
 One participant comes from each original GR/PAR cohort. This pilot exists to validate data identity, runtime behavior, artifact semantics, and dependency feasibility. It is **not** the headline model-comparison claim.
 

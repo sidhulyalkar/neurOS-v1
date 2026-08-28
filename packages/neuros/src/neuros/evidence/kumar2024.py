@@ -42,7 +42,6 @@ KUMAR2024_DEFAULT_METHODS = (
     "mne-csp-lda",
     "pyriemann-rg-lr",
     "braindecode-eegnet",
-    "braindecode-eegconformer",
 )
 _BUNDLE_FILES = (
     "study_manifest.json",
@@ -126,6 +125,7 @@ def _runtime_versions() -> dict[str, str | None]:
         "pyriemann",
         "braindecode",
         "torch",
+        "skorch",
         "numpy",
     ):
         try:
@@ -211,11 +211,17 @@ class Kumar2024StudyConfig:
     split_seed: int = 2026
     evaluation_fraction: float = 0.5
     csp_components: int = 8
-    braindecode_epochs: int = 1
-    braindecode_batch_size: int = 32
-    braindecode_learning_rate: float = 1e-3
+    # Frozen direct-upstream EEGNet training authority. These choices are bound
+    # before any promoted EEGNet final-assessment result is inspected.
+    braindecode_epochs: int = 1000
+    braindecode_batch_size: int = 64
+    braindecode_optimizer: str = "Adam"
+    braindecode_learning_rate: float = 0.000625
     braindecode_weight_decay: float = 0.0
-    braindecode_random_state: int = 2026
+    braindecode_validation_fraction: float = 0.2
+    braindecode_validation_seed: int = 17011
+    braindecode_early_stopping_patience: int = 300
+    braindecode_model_seed: int = 31415
     device: str = "cpu"
     analysis_bootstrap_replicates: int = 2000
     analysis_seed: int = 9109
@@ -251,8 +257,18 @@ class Kumar2024StudyConfig:
             raise ValueError("csp_components must be positive")
         if self.braindecode_epochs <= 0 or self.braindecode_batch_size <= 0:
             raise ValueError("Braindecode epochs and batch size must be positive")
+        if self.braindecode_optimizer != "Adam":
+            raise ValueError("Kumar2024 EEGNet v1 freezes optimizer='Adam'")
         if self.braindecode_learning_rate <= 0 or self.braindecode_weight_decay < 0:
             raise ValueError("Braindecode optimizer values are invalid")
+        validation_fraction = float(self.braindecode_validation_fraction)
+        if not 0.0 < validation_fraction < 1.0:
+            raise ValueError("Braindecode validation fraction must lie in (0, 1)")
+        if self.braindecode_validation_seed < 0 or self.braindecode_model_seed < 0:
+            raise ValueError("Braindecode validation/model seeds must be non-negative")
+        if self.braindecode_early_stopping_patience <= 0:
+            raise ValueError("Braindecode early-stopping patience must be positive")
+        object.__setattr__(self, "braindecode_validation_fraction", validation_fraction)
         if self.analysis_bootstrap_replicates <= 0:
             raise ValueError("analysis_bootstrap_replicates must be positive")
         if self.analysis_seed < 0:
@@ -281,12 +297,27 @@ class Kumar2024StudyConfig:
             "evaluation_fraction": self.evaluation_fraction,
             "csp_components": self.csp_components,
             "braindecode": {
-                "epochs": self.braindecode_epochs,
+                "model": "EEGNet",
+                "optimizer": self.braindecode_optimizer,
+                "epochs_ceiling": self.braindecode_epochs,
                 "batch_size": self.braindecode_batch_size,
                 "learning_rate": self.braindecode_learning_rate,
                 "weight_decay": self.braindecode_weight_decay,
-                "random_state": self.braindecode_random_state,
+                "validation": {
+                    "implementation": "skorch.dataset.ValidSplit",
+                    "fraction": self.braindecode_validation_fraction,
+                    "stratified": False,
+                    "seed": self.braindecode_validation_seed,
+                },
+                "state_selection": {
+                    "monitor": "valid_loss",
+                    "patience": self.braindecode_early_stopping_patience,
+                    "threshold": 0.0,
+                    "restore_best": True,
+                },
+                "model_seed": self.braindecode_model_seed,
                 "device": self.device,
+                "additional_preprocessing": "none",
             },
             "analysis": {
                 "independent_unit": "participant",
@@ -315,7 +346,6 @@ def full_config() -> Kumar2024StudyConfig:
 
     return Kumar2024StudyConfig(
         subjects=KUMAR2024_ALL_SUBJECTS,
-        braindecode_epochs=20,
         profile="full",
     )
 
@@ -572,17 +602,25 @@ def _method_factories(
         factories.append(RiemannianTangentLogRegFactory())
     common = {
         "sample_rate_hz": float(sample_rate_hz),
+        "optimizer_name": config.braindecode_optimizer,
         "learning_rate": config.braindecode_learning_rate,
         "weight_decay": config.braindecode_weight_decay,
         "n_epochs": config.braindecode_epochs,
         "batch_size": config.braindecode_batch_size,
         "device": config.device,
-        "random_state": config.braindecode_random_state,
+        "random_state": config.braindecode_model_seed,
+        "validation_fraction": config.braindecode_validation_fraction,
+        "validation_seed": config.braindecode_validation_seed,
+        "early_stopping_patience": config.braindecode_early_stopping_patience,
+        "early_stopping_threshold": 0.0,
+        "restore_best": True,
+        "source_reference": (
+            "Braindecode maintained MOABB cross-session EEGNet training family; "
+            "Kumar2024 preprocessing remains the shared NSQ authority"
+        ),
     }
     if "braindecode-eegnet" in config.methods:
         factories.append(UpstreamBraindecodeFactory(model_name="EEGNet", **common))
-    if "braindecode-eegconformer" in config.methods:
-        factories.append(UpstreamBraindecodeFactory(model_name="EEGConformer", **common))
     return tuple(factories)
 
 

@@ -329,6 +329,65 @@ class RiemannianTangentLogRegFactory:
         )
 
 
+class _RecordingValidSplit:
+    """Direct skorch ValidSplit wrapper that preserves the exact relative membership."""
+
+    def __init__(self, *, fraction: float, random_state: int) -> None:
+        self.fraction = float(fraction)
+        self.random_state = int(random_state)
+        self.train_relative_indices: tuple[int, ...] = ()
+        self.validation_relative_indices: tuple[int, ...] = ()
+
+    def __call__(self, dataset: Any, y: Any = None, groups: Any = None) -> tuple[Any, Any]:
+        try:
+            from skorch.dataset import ValidSplit
+        except ImportError as exc:  # pragma: no cover - braindecode pulls skorch
+            raise ImportError("Braindecode validation authority requires skorch") from exc
+
+        splitter = ValidSplit(
+            self.fraction,
+            stratified=False,
+            random_state=self.random_state,
+        )
+        train_dataset, validation_dataset = splitter(dataset, y=y, groups=groups)
+        train_indices = getattr(train_dataset, "indices", None)
+        validation_indices = getattr(validation_dataset, "indices", None)
+        if train_indices is None or validation_indices is None:
+            raise RuntimeError(
+                "skorch ValidSplit did not expose relative train/validation indices"
+            )
+        train = tuple(int(value) for value in np.asarray(train_indices).tolist())
+        validation = tuple(
+            int(value) for value in np.asarray(validation_indices).tolist()
+        )
+        if not train or not validation:
+            raise RuntimeError("Braindecode validation split must keep non-empty partitions")
+        if set(train).intersection(validation):
+            raise RuntimeError("Braindecode train and validation partitions overlap")
+        expected = set(range(len(dataset)))
+        if set(train).union(validation) != expected:
+            raise RuntimeError(
+                "Braindecode train/validation membership does not partition the fit set"
+            )
+        self.train_relative_indices = train
+        self.validation_relative_indices = validation
+        return train_dataset, validation_dataset
+
+
+def _relative_indices_sha256(role: str, values: tuple[int, ...]) -> str:
+    payload = json.dumps(
+        {
+            "schema": "neuros.external_fit_relative_indices.v1",
+            "role": role,
+            "indices": list(values),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 class _UpstreamBraindecodeDecoder:
     def __init__(
         self,
@@ -336,25 +395,38 @@ class _UpstreamBraindecodeDecoder:
         model_name: str,
         sample_rate_hz: float | None,
         model_options: Mapping[str, Any],
+        optimizer_name: str,
         learning_rate: float,
         weight_decay: float,
         n_epochs: int,
         batch_size: int,
         device: str,
         random_state: int,
+        validation_fraction: float | None,
+        validation_seed: int | None,
+        early_stopping_patience: int | None,
+        early_stopping_threshold: float,
+        restore_best: bool,
     ) -> None:
         self.model_name = model_name
         self.sample_rate_hz = sample_rate_hz
         self.model_options = dict(model_options)
+        self.optimizer_name = optimizer_name
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.device = device
         self.random_state = random_state
+        self.validation_fraction = validation_fraction
+        self.validation_seed = validation_seed
+        self.early_stopping_patience = early_stopping_patience
+        self.early_stopping_threshold = early_stopping_threshold
+        self.restore_best = restore_best
         self._classifier: Any | None = None
         self._module: Any | None = None
         self._classes: tuple[str, ...] = ()
+        self._training_metadata: dict[str, Any] = {}
 
     def _require_classifier(self) -> Any:
         if self._classifier is None:
@@ -363,9 +435,12 @@ class _UpstreamBraindecodeDecoder:
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         try:
+            import random
             import torch
             from braindecode import EEGClassifier
             import braindecode.models as models
+            from skorch.callbacks import EarlyStopping
+            from skorch.utils import noop
         except ImportError as exc:  # pragma: no cover - optional integration lane
             raise ImportError("upstream Braindecode NSQ reference requires braindecode") from exc
 
@@ -385,11 +460,6 @@ class _UpstreamBraindecodeDecoder:
 
         model_type = getattr(models, self.model_name, None)
         if model_type is None:
-            # A pinned Braindecode installation that does not expose a requested
-            # upstream architecture is a capability absence, not a failed model
-            # run. NSQ maps ImportError to an explicit `unavailable` result row
-            # so missing architectures remain visible without being confused
-            # with numerical/training failures.
             raise ImportError(
                 f"installed Braindecode does not expose model {self.model_name!r}"
             )
@@ -404,29 +474,107 @@ class _UpstreamBraindecodeDecoder:
             if "sfreq" in signature.parameters:
                 kwargs["sfreq"] = self.sample_rate_hz
 
+        random.seed(self.random_state)
         np.random.seed(self.random_state)
         torch.manual_seed(self.random_state)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.random_state)
+        if hasattr(torch.backends, "cudnn"):
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+
+        optimizer_type = {
+            "Adam": torch.optim.Adam,
+            "AdamW": torch.optim.AdamW,
+        }[self.optimizer_name]
+
+        train_split: Any = None
+        callbacks: list[Any] = []
+        recording_split: _RecordingValidSplit | None = None
+        if self.validation_fraction is not None:
+            assert self.validation_seed is not None
+            assert self.early_stopping_patience is not None
+            recording_split = _RecordingValidSplit(
+                fraction=self.validation_fraction,
+                random_state=self.validation_seed,
+            )
+            train_split = recording_split
+            callbacks.append(
+                (
+                    "nsq_early_stopping",
+                    EarlyStopping(
+                        monitor="valid_loss",
+                        patience=self.early_stopping_patience,
+                        threshold=self.early_stopping_threshold,
+                        threshold_mode="rel",
+                        lower_is_better=True,
+                        sink=noop,
+                        load_best=self.restore_best,
+                    ),
+                )
+            )
 
         module = model_type(**kwargs)
         classifier = EEGClassifier(
             module,
             criterion=torch.nn.CrossEntropyLoss,
-            optimizer=torch.optim.AdamW,
+            optimizer=optimizer_type,
             optimizer__lr=self.learning_rate,
             optimizer__weight_decay=self.weight_decay,
             batch_size=self.batch_size,
             max_epochs=self.n_epochs,
-            train_split=None,
+            train_split=train_split,
+            callbacks=callbacks,
             device=self.device,
             classes=np.arange(len(classes)),
             verbose=0,
         )
         classifier.fit(array, encoded)
+
+        metadata: dict[str, Any] = {
+            "fit_samples": int(len(array)),
+            "model_seed": self.random_state,
+            "cudnn_deterministic": True,
+            "cudnn_benchmark": False,
+            "epochs_completed": int(len(classifier.history)),
+        }
+        if recording_split is not None:
+            train_relative = recording_split.train_relative_indices
+            validation_relative = recording_split.validation_relative_indices
+            history = list(classifier.history)
+            valid_losses = [float(row["valid_loss"]) for row in history]
+            best_offset = int(np.argmin(np.asarray(valid_losses, dtype=np.float64)))
+            metadata.update(
+                {
+                    "validation_policy": "skorch.ValidSplit",
+                    "validation_fraction": self.validation_fraction,
+                    "validation_stratified": False,
+                    "validation_seed": self.validation_seed,
+                    "validation_relative_indices": list(validation_relative),
+                    "validation_relative_indices_sha256": _relative_indices_sha256(
+                        "validation", validation_relative
+                    ),
+                    "train_relative_indices_sha256": _relative_indices_sha256(
+                        "train", train_relative
+                    ),
+                    "training_samples_after_validation_split": len(train_relative),
+                    "validation_samples": len(validation_relative),
+                    "state_selection_monitor": "valid_loss",
+                    "state_selection_rule": "minimum_observed_validation_loss",
+                    "restore_best": self.restore_best,
+                    "best_observed_epoch": int(history[best_offset]["epoch"]),
+                    "best_observed_valid_loss": valid_losses[best_offset],
+                    "stopped_epoch": int(history[-1]["epoch"]),
+                    "early_stopping_patience": self.early_stopping_patience,
+                    "early_stopping_threshold": self.early_stopping_threshold,
+                    "final_assessment_used_for_state_selection": False,
+                }
+            )
+
         self._module = module
         self._classifier = classifier
         self._classes = classes
+        self._training_metadata = metadata
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         encoded = np.asarray(
@@ -456,44 +604,87 @@ class _UpstreamBraindecodeDecoder:
             metadata={
                 "state_scope": "upstream_model_state_dict_including_registered_buffers",
                 "optimizer_state_included": False,
+                **self._training_metadata,
             },
         )
 
 
 @dataclass(frozen=True, slots=True)
 class UpstreamBraindecodeFactory:
-    """Direct upstream Braindecode model + EEGClassifier NSQ factory."""
+    """Direct upstream Braindecode model + EEGClassifier NSQ factory.
+
+    The generic adapter remains useful for integration probes, but when validation
+    and early stopping are configured all selection happens strictly inside the
+    NSQ-authorized fit set. Final-assessment observations are never exposed to
+    this object by the NSQ referee.
+    """
 
     model_name: str = "EEGNet"
     sample_rate_hz: float | None = None
     model_options: Mapping[str, Any] = field(default_factory=dict)
+    optimizer_name: str = "AdamW"
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     n_epochs: int = 1
     batch_size: int = 32
     device: str = "cpu"
     random_state: int = 0
+    validation_fraction: float | None = None
+    validation_seed: int | None = None
+    early_stopping_patience: int | None = None
+    early_stopping_threshold: float = 0.0
+    restore_best: bool = False
     source_reference: str = "Braindecode upstream model + EEGClassifier"
-    schema_version: int = 1
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
-        if isinstance(self.schema_version, bool) or self.schema_version != 1:
-            raise ValueError("UpstreamBraindecodeFactory schema_version must be 1")
+        if isinstance(self.schema_version, bool) or self.schema_version != 2:
+            raise ValueError("UpstreamBraindecodeFactory schema_version must be 2")
         if not isinstance(self.model_name, str) or not self.model_name.strip():
             raise ValueError("model_name must be non-empty")
+        if self.optimizer_name not in {"Adam", "AdamW"}:
+            raise ValueError("optimizer_name must be 'Adam' or 'AdamW'")
         if self.sample_rate_hz is not None:
             rate = float(self.sample_rate_hz)
             if not np.isfinite(rate) or rate <= 0:
                 raise ValueError("sample_rate_hz must be finite and positive")
             object.__setattr__(self, "sample_rate_hz", rate)
-        if self.learning_rate <= 0:
-            raise ValueError("learning_rate must be positive")
-        if self.weight_decay < 0:
-            raise ValueError("weight_decay must be non-negative")
+        learning_rate = float(self.learning_rate)
+        weight_decay = float(self.weight_decay)
+        if not np.isfinite(learning_rate) or learning_rate <= 0:
+            raise ValueError("learning_rate must be finite and positive")
+        if not np.isfinite(weight_decay) or weight_decay < 0:
+            raise ValueError("weight_decay must be finite and non-negative")
         if self.n_epochs <= 0 or self.batch_size <= 0:
             raise ValueError("n_epochs and batch_size must be positive")
         if isinstance(self.random_state, bool) or not isinstance(self.random_state, int):
             raise ValueError("random_state must be an integer without coercion")
+        if self.validation_fraction is None:
+            if self.validation_seed is not None or self.early_stopping_patience is not None:
+                raise ValueError(
+                    "validation_seed/patience require validation_fraction"
+                )
+            if self.restore_best:
+                raise ValueError("restore_best requires validation_fraction")
+        else:
+            fraction = float(self.validation_fraction)
+            if not np.isfinite(fraction) or not 0.0 < fraction < 1.0:
+                raise ValueError("validation_fraction must lie strictly between zero and one")
+            if isinstance(self.validation_seed, bool) or not isinstance(self.validation_seed, int):
+                raise ValueError("validation_seed must be an integer when validation is enabled")
+            if (
+                isinstance(self.early_stopping_patience, bool)
+                or not isinstance(self.early_stopping_patience, int)
+                or self.early_stopping_patience <= 0
+            ):
+                raise ValueError("early_stopping_patience must be a positive integer")
+            object.__setattr__(self, "validation_fraction", fraction)
+        threshold = float(self.early_stopping_threshold)
+        if not np.isfinite(threshold) or threshold < 0:
+            raise ValueError("early_stopping_threshold must be finite and non-negative")
+        object.__setattr__(self, "learning_rate", learning_rate)
+        object.__setattr__(self, "weight_decay", weight_decay)
+        object.__setattr__(self, "early_stopping_threshold", threshold)
         object.__setattr__(self, "model_name", self.model_name.strip())
         object.__setattr__(self, "model_options", _frozen_json_mapping(self.model_options))
 
@@ -501,11 +692,22 @@ class UpstreamBraindecodeFactory:
     def method_spec(self) -> ExternalDecoderMethodSpec:
         braindecode_version = _package_version("braindecode")
         torch_version = _package_version("torch")
+        skorch_version = _package_version("skorch")
+        sklearn_version = _package_version("scikit-learn")
+        validation = None
+        if self.validation_fraction is not None:
+            validation = {
+                "implementation": "skorch.dataset.ValidSplit",
+                "fraction": self.validation_fraction,
+                "stratified": False,
+                "seed": self.validation_seed,
+            }
         return ExternalDecoderMethodSpec(
             method_id=f"braindecode-{self.model_name.lower()}",
             implementation=f"braindecode.models.{self.model_name}+braindecode.EEGClassifier",
             implementation_version=(
-                f"braindecode={braindecode_version};torch={torch_version}"
+                f"braindecode={braindecode_version};torch={torch_version};"
+                f"skorch={skorch_version};scikit-learn={sklearn_version}"
             ),
             input_axes=("sample", "channel", "time"),
             probability_semantics="uncalibrated_softmax",
@@ -516,15 +718,27 @@ class UpstreamBraindecodeFactory:
                 "sample_rate_hz": self.sample_rate_hz,
                 "model_options": dict(self.model_options),
                 "criterion": "torch.nn.CrossEntropyLoss",
-                "optimizer": "torch.optim.AdamW",
+                "optimizer": f"torch.optim.{self.optimizer_name}",
                 "learning_rate": self.learning_rate,
                 "weight_decay": self.weight_decay,
-                "n_epochs": self.n_epochs,
+                "n_epochs_ceiling": self.n_epochs,
                 "batch_size": self.batch_size,
                 "device": self.device,
-                "random_state": self.random_state,
-                "train_split": None,
+                "model_seed": self.random_state,
+                "train_split": validation,
+                "state_selection": (
+                    None
+                    if validation is None
+                    else {
+                        "monitor": "valid_loss",
+                        "patience": self.early_stopping_patience,
+                        "threshold": self.early_stopping_threshold,
+                        "threshold_mode": "rel",
+                        "restore_best": self.restore_best,
+                    }
+                ),
                 "hidden_preprocessing": False,
+                "final_assessment_used_for_state_selection": False,
                 "neuros_model_wrapper_used": False,
             },
         )
@@ -534,12 +748,18 @@ class UpstreamBraindecodeFactory:
             model_name=self.model_name,
             sample_rate_hz=self.sample_rate_hz,
             model_options=self.model_options,
+            optimizer_name=self.optimizer_name,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,
             n_epochs=self.n_epochs,
             batch_size=self.batch_size,
             device=self.device,
             random_state=self.random_state,
+            validation_fraction=self.validation_fraction,
+            validation_seed=self.validation_seed,
+            early_stopping_patience=self.early_stopping_patience,
+            early_stopping_threshold=self.early_stopping_threshold,
+            restore_best=self.restore_best,
         )
 
 
