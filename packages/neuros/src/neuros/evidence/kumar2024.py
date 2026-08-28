@@ -384,6 +384,7 @@ def build_dataset_lineage(
     config: Kumar2024StudyConfig,
     preprocessing_authority: Mapping[str, Any],
     versions: Mapping[str, str | None],
+    raw_materialization_sha256: str | None = None,
 ):
     """Construct honest partial lineage for the actual requested study corpus."""
 
@@ -455,8 +456,18 @@ def build_dataset_lineage(
             "requested_subjects": list(config.subjects),
             "expected_session_order": list(KUMAR2024_EXPECTED_SESSIONS),
             "not_a_reproduction_of_original_online_intervention": True,
+            "raw_materialization_sha256": raw_materialization_sha256,
+            "raw_materialization_scope": (
+                None
+                if raw_materialization_sha256 is None
+                else "exact consumed bar-feedback GDF files under MOABB loader authority"
+            ),
             "content_sha256_reason": (
-                "exact downloaded raw corpus bytes have not been hashed under a canonical rule"
+                "exact consumed raw bytes are bound by raw_materialization_sha256, but "
+                "DatasetLineage.content_sha256 remains unset because that composed "
+                "consumed-file authority is not a canonical upstream archive digest"
+                if raw_materialization_sha256 is not None
+                else "exact downloaded raw corpus bytes have not been hashed under a canonical rule"
             ),
         },
     )
@@ -1008,7 +1019,15 @@ def _render_report(
 def _prepare_output(output: Path, *, overwrite: bool) -> Path:
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    managed = [output / name for name in (*_BUNDLE_FILES, "artifact_hashes.json")]
+    managed = [
+        output / name
+        for name in (
+            *_BUNDLE_FILES,
+            "materialization.json",
+            "observation_roles.json",
+            "artifact_hashes.json",
+        )
+    ]
     existing = [path for path in managed if path.exists()]
     if existing and not overwrite:
         raise FileExistsError(
@@ -1036,6 +1055,10 @@ def verify_bundle(output: str | Path) -> dict[str, Any]:
     root = Path(output).resolve()
     manifest_path = root / "artifact_hashes.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") == 2:
+        from neuros.evidence.kumar2024_materialized_study import verify_bundle_v2
+
+        return verify_bundle_v2(root, payload=payload)
     if payload.get("schema_version") != 1 or not isinstance(payload.get("files"), dict):
         raise ValueError("invalid Kumar2024 artifact hash manifest")
     actual: dict[str, str] = {}
@@ -1059,7 +1082,7 @@ def verify_bundle(output: str | Path) -> dict[str, Any]:
     }
 
 
-def run_study(
+def _run_study_v1(
     output: str | Path,
     *,
     config: Kumar2024StudyConfig | None = None,
@@ -1282,6 +1305,25 @@ def run_study(
         "verified": verified["verified"],
         "output": str(output_path),
     }
+
+
+def run_study(
+    output: str | Path,
+    *,
+    config: Kumar2024StudyConfig | None = None,
+    preprocessing: Kumar2024PreprocessingSpec | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Execute the materialization-aware generation-v2 Kumar2024 bundle."""
+
+    from neuros.evidence.kumar2024_materialized_study import run_materialized_study
+
+    return run_materialized_study(
+        output,
+        config=config,
+        preprocessing=preprocessing,
+        overwrite=overwrite,
+    )
 
 
 def _parse_ints(value: str) -> tuple[int, ...]:

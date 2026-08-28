@@ -7,6 +7,10 @@ on:
     paths:
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialization.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py"
       - "packages/neuros/src/neuros/evidence/kumar2024.py"
       - ".github/workflows/nsq-kumar2024-study.yml"
 
@@ -55,9 +59,21 @@ jobs:
           manifest = json.loads((root / "study_manifest.json").read_text())
           authorities = json.loads((root / "case_authorities.json").read_text())["authorities"]
           analysis = json.loads((root / "analysis.json").read_text())
+          materialization = json.loads((root / "materialization.json").read_text())
+          observation_roles = json.loads((root / "observation_roles.json").read_text())
+          artifact_hashes = json.loads((root / "artifact_hashes.json").read_text())
           rows = list(csv.DictReader((root / "results.csv").open()))
 
+          assert artifact_hashes["schema_version"] == 2
+          assert manifest["schema_version"] == 2
+          assert manifest["bundle_generation"] == 2
           assert manifest["git_revision"] == os.environ["GITHUB_SHA"]
+          assert len(manifest["study_materialization_sha256"]) == 64
+          assert manifest["study_materialization_sha256"] == materialization["study_materialization_sha256"]
+          assert manifest["raw_materialization_sha256"] == materialization["authority"]["raw_materialization_sha256"]
+          assert len(materialization["authority"]["processed_shards"]) == 2
+          assert observation_roles["study_materialization_sha256"] == manifest["study_materialization_sha256"]
+          assert observation_roles["entries"]
           assert manifest["config"]["methods"] == ["mne-csp-lda", "pyriemann-rg-lr"]
           assert len(authorities) == 10
           assert {item["seed"] for item in authorities} == {2026}

@@ -5,6 +5,8 @@ on:
     paths:
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
       - "packages/neuros/src/neuros/evidence/**"
       - "packages/neuros/pyproject.toml"
@@ -18,6 +20,8 @@ on:
     paths:
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
       - "packages/neuros/src/neuros/evidence/**"
       - "packages/neuros/pyproject.toml"
@@ -61,13 +65,21 @@ jobs:
         run: |
           pytest -q \
             tests/test_moabb_epoch_evidence.py \
+            tests/test_study_materialization_authority.py \
+            tests/test_moabb_materialization_authority.py \
+            tests/test_kumar2024_materialization_roles.py \
+            tests/test_kumar2024_bundle_v2.py \
             tests/test_kumar2024_nsq_study.py \
             tests/test_neural_system_qualification_runner.py
       - name: Compile evidence surface
         run: |
           python -m compileall -q \
             packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py \
-            packages/neuros/src/neuros/evidence/kumar2024.py
+            packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py \
+            packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py \
+            packages/neuros/src/neuros/evidence/kumar2024.py \
+            packages/neuros/src/neuros/evidence/kumar2024_materialization.py \
+            packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py
 
   upstream-moabb-contract:
     name: Current MOABB processed-epoch contract
