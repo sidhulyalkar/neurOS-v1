@@ -1,0 +1,71 @@
+name: NSQ Kumar2024 real-data study
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nsq-kumar2024-study.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsq-kumar2024-study-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  csp-pilot:
+    name: Exact-main Kumar2024 CSP pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install real-data evidence stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence]"
+          python -m pip install -e packages/orion
+          python -m pip install -e packages/neuros
+      - name: Execute exact-main CSP pilot
+        run: |
+          OUT="${RUNNER_TEMP}/nsq-kumar2024-csp-pilot"
+          neuros-nsq-kumar2024 \
+            --profile pilot \
+            --methods mne-csp-lda \
+            --output "${OUT}"
+          neuros-nsq-kumar2024 --verify-only --output "${OUT}"
+          OUT="${OUT}" python - <<'PY'
+          import csv
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["OUT"])
+          manifest = json.loads((root / "study_manifest.json").read_text())
+          authorities = json.loads((root / "case_authorities.json").read_text())["authorities"]
+          rows = list(csv.DictReader((root / "results.csv").open()))
+          assert manifest["git_revision"] == os.environ["GITHUB_SHA"]
+          assert len(authorities) == 10
+          assert {item["seed"] for item in authorities} == {2026}
+          assert {item["case_metadata"]["split_seed"] for item in authorities} == {2026}
+          assert all(item["case_id"].endswith("/split-2026") for item in authorities)
+          assert len(rows) == 50
+          assert {int(row["calibration_per_class"]) for row in rows} == {0, 1, 2, 5, 10}
+          assert {row["status"] for row in rows} == {"success"}
+          assert {row["method_id"] for row in rows} == {"mne-csp-lda"}
+          PY
+      - name: Upload immutable pilot bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsq-kumar2024-csp-pilot-${{ github.sha }}
+          path: ${{ runner.temp }}/nsq-kumar2024-csp-pilot
+          if-no-files-found: error
+          retention-days: 90

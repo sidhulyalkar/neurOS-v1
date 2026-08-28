@@ -228,7 +228,12 @@ class _UpstreamBraindecodeDecoder:
 
         model_type = getattr(models, self.model_name, None)
         if model_type is None:
-            raise RuntimeError(
+            # A pinned Braindecode installation that does not expose a requested
+            # upstream architecture is a capability absence, not a failed model
+            # run. NSQ maps ImportError to an explicit `unavailable` result row
+            # so missing architectures remain visible without being confused
+            # with numerical/training failures.
+            raise ImportError(
                 f"installed Braindecode does not expose model {self.model_name!r}"
             )
         kwargs: dict[str, Any] = {

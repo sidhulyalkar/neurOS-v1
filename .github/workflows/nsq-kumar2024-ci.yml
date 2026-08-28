@@ -1,0 +1,101 @@
+name: NSQ Kumar2024 v1
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros/src/neuros/evidence/**"
+      - "packages/neuros/pyproject.toml"
+      - "tests/test_moabb_epoch_evidence.py"
+      - "tests/test_kumar2024_nsq_study.py"
+      - "tests/test_neural_system_qualification_baselines.py"
+      - "docs/NSQ_KUMAR2024_V1.md"
+      - ".github/workflows/nsq-kumar2024-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros/src/neuros/evidence/**"
+      - "packages/neuros/pyproject.toml"
+      - "tests/test_moabb_epoch_evidence.py"
+      - "tests/test_kumar2024_nsq_study.py"
+      - "tests/test_neural_system_qualification_baselines.py"
+      - "docs/NSQ_KUMAR2024_V1.md"
+      - ".github/workflows/nsq-kumar2024-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsq-kumar2024-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authority-contracts:
+    name: Kumar2024 authority / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install cross-plane authority stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation
+          python -m pip install -e packages/orion
+          python -m pip install -e packages/neuros pytest pytest-asyncio
+      - name: Run Kumar2024 authority and bundle tests
+        run: |
+          pytest -q \
+            tests/test_moabb_epoch_evidence.py \
+            tests/test_kumar2024_nsq_study.py \
+            tests/test_neural_system_qualification_runner.py
+      - name: Compile evidence surface
+        run: |
+          python -m compileall -q \
+            packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py \
+            packages/neuros/src/neuros/evidence/kumar2024.py
+
+  upstream-moabb-contract:
+    name: Current MOABB processed-epoch contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MOABB evidence profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence]"
+      - name: Verify upstream API without downloading participant data
+        run: |
+          python - <<'PY'
+          import inspect
+          import importlib.metadata
+          from moabb.datasets import Kumar2024
+          from moabb.paradigms import LeftRightImagery
+
+          dataset = Kumar2024()
+          paradigm = LeftRightImagery(fmin=8.0, fmax=30.0, resample=None)
+          signature = inspect.signature(paradigm.get_data)
+          assert "return_epochs" in signature.parameters
+          assert list(dataset.subject_list) == list(range(1, 19))
+          assert dataset.n_sessions == 6
+          print("moabb", importlib.metadata.version("moabb"))
+          print("return_epochs", signature.parameters["return_epochs"].default)
+          PY

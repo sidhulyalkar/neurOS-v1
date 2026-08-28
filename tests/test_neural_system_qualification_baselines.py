@@ -166,3 +166,30 @@ def test_upstream_braindecode_executes_through_same_nsq_referee():
     assert row.external_learned_state_sha256 != row.qualification_model_state_sha256
     assert row.score is not None
     assert row.score.availability["brier_score"] == "available"
+
+
+def test_missing_upstream_braindecode_architecture_is_preserved_as_unavailable():
+    pytest.importorskip("braindecode")
+    pytest.importorskip("torch")
+    data = _eeg_data()
+    authority = _authority(data)
+    factory = UpstreamBraindecodeFactory(
+        model_name="DefinitelyMissingNSQArchitecture",
+        sample_rate_hz=128.0,
+        n_epochs=1,
+        batch_size=8,
+        random_state=3,
+    )
+    result = run_external_qualification_case(
+        data,
+        authority,
+        _protocol(data, authority, budgets=(0, 1)),
+        factory,
+        execution_context=_context(),
+    )
+
+    assert len(result.rows) == 2
+    assert all(row.status == "unavailable" for row in result.rows)
+    assert all(row.failure_kind == "ImportError" for row in result.rows)
+    assert all("does not expose model" in (row.failure_reason or "") for row in result.rows)
+    assert all(row.score is None for row in result.rows)
