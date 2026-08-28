@@ -1,0 +1,99 @@
+name: One-shot add Riemannian NSQ baseline v2
+
+on:
+  push:
+    branches:
+      - feat/nsq-kumar2024-baseline-freeze
+    paths:
+      - .github/workflows/_tmp-add-riemann-nsq-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add frozen upstream Riemannian comparator
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one target, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          baselines = Path("packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py")
+          anchor = '''    def create(self) -> _MNECSPLDADecoder:\n        return _MNECSPLDADecoder(n_components=self.n_components)\n\n\nclass _UpstreamBraindecodeDecoder:\n'''
+          insertion = '''    def create(self) -> _MNECSPLDADecoder:\n        return _MNECSPLDADecoder(n_components=self.n_components)\n\n\nclass _RiemannianTangentLogRegDecoder:\n    def __init__(\n        self,\n        *,\n        covariance_estimator: str,\n        tangent_metric: str,\n        logistic_c: float,\n        max_iter: int,\n    ) -> None:\n        self.covariance_estimator = covariance_estimator\n        self.tangent_metric = tangent_metric\n        self.logistic_c = logistic_c\n        self.max_iter = max_iter\n        self._pipeline: Any | None = None\n\n    def _require_pipeline(self) -> Any:\n        if self._pipeline is None:\n            raise RuntimeError("pyRiemann RG+LR decoder has not been fitted")\n        return self._pipeline\n\n    def fit(self, X: np.ndarray, y: np.ndarray) -> None:\n        try:\n            from pyriemann.estimation import Covariances\n            from pyriemann.tangentspace import TangentSpace\n            from sklearn.linear_model import LogisticRegression\n            from sklearn.pipeline import make_pipeline\n        except ImportError as exc:  # pragma: no cover - optional integration lane\n            raise ImportError(\n                "pyRiemann RG+LR requires pyriemann and scikit-learn"\n            ) from exc\n\n        array = np.asarray(X)\n        labels = np.asarray(y).astype(str)\n        if array.ndim != 3:\n            raise ValueError("pyRiemann RG+LR expects X=(sample, channel, time)")\n        if labels.ndim != 1 or len(labels) != len(array):\n            raise ValueError("pyRiemann RG+LR labels must align with X")\n        if not np.isfinite(array).all():\n            raise ValueError("pyRiemann RG+LR refuses non-finite neural input")\n        if len(np.unique(labels)) < 2:\n            raise ValueError("pyRiemann RG+LR requires at least two classes")\n\n        # Standard MOABB-style source-only Riemannian baseline. tsupdate=False\n        # makes the tangent reference a fitted training state rather than a\n        # transductive function of final-assessment batch composition.\n        pipeline = make_pipeline(\n            Covariances(estimator=self.covariance_estimator),\n            TangentSpace(metric=self.tangent_metric, tsupdate=False),\n            LogisticRegression(\n                solver="lbfgs",\n                penalty="l2",\n                C=self.logistic_c,\n                max_iter=self.max_iter,\n            ),\n        )\n        pipeline.fit(array, labels)\n        self._pipeline = pipeline\n\n    def predict(self, X: np.ndarray) -> np.ndarray:\n        return np.asarray(self._require_pipeline().predict(np.asarray(X))).astype(str)\n\n    def predict_proba(self, X: np.ndarray) -> np.ndarray:\n        return np.asarray(\n            self._require_pipeline().predict_proba(np.asarray(X)),\n            dtype=np.float64,\n        )\n\n    def probability_class_labels(self) -> tuple[str, ...]:\n        estimator = self._require_pipeline().steps[-1][1]\n        return tuple(str(value) for value in estimator.classes_)\n\n    def learned_state(self) -> ExternalLearnedState:\n        self._require_pipeline()\n        return ExternalLearnedState(\n            state_identity_kind="opaque_unverified",\n            metadata={\n                "reason": "pyriemann_sklearn_state_serializer_not_qualified",\n                "covariance_estimator": self.covariance_estimator,\n                "tangent_metric": self.tangent_metric,\n                "tangent_space_update": False,\n                "logistic_c": self.logistic_c,\n                "max_iter": self.max_iter,\n            },\n        )\n\n\n@dataclass(frozen=True, slots=True)\nclass RiemannianTangentLogRegFactory:\n    """Upstream pyRiemann covariance/tangent-space + sklearn LR baseline."""\n\n    covariance_estimator: str = "scm"\n    tangent_metric: str = "riemann"\n    logistic_c: float = 1.0\n    max_iter: int = 1000\n    source_reference: str = (\n        "pyRiemann Covariances + TangentSpace + scikit-learn LogisticRegression"\n    )\n    schema_version: int = 1\n\n    def __post_init__(self) -> None:\n        if isinstance(self.schema_version, bool) or self.schema_version != 1:\n            raise ValueError("RiemannianTangentLogRegFactory schema_version must be 1")\n        if not isinstance(self.covariance_estimator, str) or not self.covariance_estimator.strip():\n            raise ValueError("covariance_estimator must be non-empty")\n        if not isinstance(self.tangent_metric, str) or not self.tangent_metric.strip():\n            raise ValueError("tangent_metric must be non-empty")\n        c_value = float(self.logistic_c)\n        if not np.isfinite(c_value) or c_value <= 0:\n            raise ValueError("logistic_c must be finite and positive")\n        if isinstance(self.max_iter, bool) or not isinstance(self.max_iter, int):\n            raise ValueError("max_iter must be an integer without coercion")\n        if self.max_iter <= 0:\n            raise ValueError("max_iter must be positive")\n        object.__setattr__(self, "covariance_estimator", self.covariance_estimator.strip())\n        object.__setattr__(self, "tangent_metric", self.tangent_metric.strip())\n        object.__setattr__(self, "logistic_c", c_value)\n\n    @property\n    def method_spec(self) -> ExternalDecoderMethodSpec:\n        pyriemann_version = _package_version("pyriemann")\n        sklearn_version = _package_version("scikit-learn")\n        return ExternalDecoderMethodSpec(\n            method_id="pyriemann-rg-lr",\n            implementation=(\n                "pyriemann.estimation.Covariances+"\n                "pyriemann.tangentspace.TangentSpace+"\n                "sklearn.linear_model.LogisticRegression"\n            ),\n            implementation_version=(\n                f"pyriemann={pyriemann_version};scikit-learn={sklearn_version}"\n            ),\n            input_axes=("sample", "channel", "time"),\n            probability_semantics="uncalibrated_probability",\n            target_adaptation_mode="none",\n            source_reference=self.source_reference,\n            metadata={\n                "covariance_estimator": self.covariance_estimator,\n                "tangent_metric": self.tangent_metric,\n                "tangent_space_update": False,\n                "logistic_solver": "lbfgs",\n                "logistic_penalty": "l2",\n                "logistic_c": self.logistic_c,\n                "logistic_max_iter": self.max_iter,\n                "hidden_preprocessing": False,\n                "transductive_evaluation_batch_update": False,\n            },\n        )\n\n    def create(self) -> _RiemannianTangentLogRegDecoder:\n        return _RiemannianTangentLogRegDecoder(\n            covariance_estimator=self.covariance_estimator,\n            tangent_metric=self.tangent_metric,\n            logistic_c=self.logistic_c,\n            max_iter=self.max_iter,\n        )\n\n\nclass _UpstreamBraindecodeDecoder:\n'''
+          replace_once(baselines, anchor, insertion)
+          replace_once(
+              baselines,
+              '''__all__ = [\n    "MNECSPLDAFactory",\n    "UpstreamBraindecodeFactory",\n]\n''',
+              '''__all__ = [\n    "MNECSPLDAFactory",\n    "RiemannianTangentLogRegFactory",\n    "UpstreamBraindecodeFactory",\n]\n''',
+          )
+
+          foundation = Path("packages/neuros-foundation/pyproject.toml")
+          replace_once(
+              foundation,
+              'evidence = ["moabb>=1.5.0,<2"]\n',
+              'evidence = ["moabb>=1.5.0,<2", "pyriemann>=0.10,<0.13"]\n',
+          )
+          replace_once(
+              foundation,
+              '    "moabb>=1.5.0,<2",\n    "allensdk>=2.15.0",\n',
+              '    "moabb>=1.5.0,<2",\n    "pyriemann>=0.10,<0.13",\n    "allensdk>=2.15.0",\n',
+          )
+
+          study = Path("packages/neuros/src/neuros/evidence/kumar2024.py")
+          replace_once(
+              study,
+              '''KUMAR2024_DEFAULT_METHODS = (\n    "mne-csp-lda",\n    "braindecode-eegnet",\n    "braindecode-eegconformer",\n)\n''',
+              '''KUMAR2024_DEFAULT_METHODS = (\n    "mne-csp-lda",\n    "pyriemann-rg-lr",\n    "braindecode-eegnet",\n    "braindecode-eegconformer",\n)\n''',
+          )
+          replace_once(
+              study,
+              '        "scikit-learn",\n        "braindecode",\n',
+              '        "scikit-learn",\n        "pyriemann",\n        "braindecode",\n',
+          )
+          replace_once(
+              study,
+              '''    from neuros.foundation_models.qualification_baselines import (\n        MNECSPLDAFactory,\n        UpstreamBraindecodeFactory,\n    )\n\n    factories: list[Any] = []\n    if "mne-csp-lda" in config.methods:\n        factories.append(MNECSPLDAFactory(n_components=config.csp_components))\n''',
+              '''    from neuros.foundation_models.qualification_baselines import (\n        MNECSPLDAFactory,\n        RiemannianTangentLogRegFactory,\n        UpstreamBraindecodeFactory,\n    )\n\n    factories: list[Any] = []\n    if "mne-csp-lda" in config.methods:\n        factories.append(MNECSPLDAFactory(n_components=config.csp_components))\n    if "pyriemann-rg-lr" in config.methods:\n        factories.append(RiemannianTangentLogRegFactory())\n''',
+          )
+
+          tests = Path("tests/test_neural_system_qualification_baselines.py")
+          replace_once(
+              tests,
+              '''from neuros.foundation_models.qualification_baselines import (\n    MNECSPLDAFactory,\n    UpstreamBraindecodeFactory,\n)\n''',
+              '''from neuros.foundation_models.qualification_baselines import (\n    MNECSPLDAFactory,\n    RiemannianTangentLogRegFactory,\n    UpstreamBraindecodeFactory,\n)\n''',
+          )
+          insertion_test = '''\n\ndef test_pyriemann_rg_lr_participates_without_transductive_test_update():\n    pytest.importorskip("pyriemann")\n    pytest.importorskip("sklearn")\n    data = _eeg_data()\n    authority = _authority(data)\n    factory = RiemannianTangentLogRegFactory()\n    spec = factory.method_spec\n\n    assert spec.method_id == "pyriemann-rg-lr"\n    assert spec.metadata["covariance_estimator"] == "scm"\n    assert spec.metadata["tangent_metric"] == "riemann"\n    assert spec.metadata["tangent_space_update"] is False\n    assert spec.metadata["transductive_evaluation_batch_update"] is False\n\n    result = run_external_qualification_case(\n        data,\n        authority,\n        _protocol(data, authority, budgets=(0, 1)),\n        factory,\n        execution_context=_context(),\n    )\n    assert all(row.status == "success" for row in result.rows)\n    assert all(row.probability_available for row in result.rows)\n    assert all(row.score is not None for row in result.rows)\n    assert all(row.learned_state_addressable is False for row in result.rows)\n    assert all(row.external_learned_state_sha256 is None for row in result.rows)\n    assert all(row.qualification_model_state_sha256 is not None for row in result.rows)\n\n'''
+          anchor_test = '\n\ndef test_braindecode_factory_is_direct_upstream_not_neuros_model_wrapper():\n'
+          text = tests.read_text(encoding="utf-8")
+          if text.count(anchor_test) != 1:
+              raise SystemExit("baseline test insertion anchor not found exactly once")
+          tests.write_text(text.replace(anchor_test, insertion_test + anchor_test, 1), encoding="utf-8")
+
+          docs = Path("docs/NSQ_KUMAR2024_V1.md")
+          replace_once(
+              docs,
+              '''The NSQ execution surface supports:\n\n1. direct MNE CSP + scikit-learn LDA;\n2. direct upstream Braindecode EEGNet;\n3. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.\n\nOnly **MNE CSP + LDA is currently part of the canonical pilot default**. The Braindecode adapters are explicit capability/integration surfaces, not yet qualified efficacy baselines. A deep baseline may enter the promoted comparison only after its fixed unit conversion, train-authorized standardization, validation/state-selection policy, optimization schedule, and neural-model seed authority are frozen and content-addressed. Until then it must be requested explicitly with `--methods`.\n''',
+              '''The NSQ execution surface supports:\n\n1. direct MNE CSP + scikit-learn LDA;\n2. direct pyRiemann covariance + tangent-space + scikit-learn logistic regression;\n3. direct upstream Braindecode EEGNet;\n4. direct upstream Braindecode EEGConformer when supported by the pinned Braindecode installation and processed input geometry.\n\nThe Riemannian comparator is frozen as sample covariance (`scm`) -> `TangentSpace(metric="riemann", tsupdate=False)` -> L2 `LogisticRegression(solver="lbfgs", C=1.0, max_iter=1000)`. `tsupdate=False` is part of the evidence contract so evaluation-batch composition cannot alter the tangent reference.\n\nOnly **MNE CSP + LDA is currently part of the canonical pilot default**. The Braindecode adapters are explicit capability/integration surfaces, not yet qualified efficacy baselines. A deep baseline may enter the promoted comparison only after its fixed unit conversion, train-authorized standardization, validation/state-selection policy, optimization schedule, and neural-model seed authority are frozen and content-addressed. Until then it must be requested explicitly with `--methods`.\n''',
+          )
+          PY
+      - name: Validate and commit source changes
+        run: |
+          python -m compileall -q packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py packages/neuros/src/neuros/evidence/kumar2024.py
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py packages/neuros-foundation/pyproject.toml packages/neuros/src/neuros/evidence/kumar2024.py tests/test_neural_system_qualification_baselines.py docs/NSQ_KUMAR2024_V1.md
+          git commit -m "Add frozen Riemannian NSQ baseline"
+          git push origin HEAD:${GITHUB_REF_NAME}
