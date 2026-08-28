@@ -17,7 +17,7 @@ A benchmark row such as `method -> score` hides scientific authority that matter
 - which data fitted preprocessing or normalization state;
 - how many labeled and unlabeled target observations adaptation consumed;
 - whether the checkpoint assessed is the checkpoint later reported/deployed;
-- whether a probability is calibrated or merely a softmax score;
+- whether a probability is calibrated, uncalibrated, or unavailable;
 - whether failed/OOM/nonconvergent cases disappeared from the aggregate;
 - whether repeated participant-session observations were treated as independent people.
 
@@ -50,75 +50,35 @@ NSQ deliberately separates four objects that are easy to blur in conventional be
 
 The protocol identifies the scientific question independently of any model.
 
-Its SHA-256 binds:
-
-- protocol ID and lifecycle (`draft`, `frozen`, `retired`);
-- human-readable dataset/task identity;
-- full dataset-lineage SHA-256;
-- independent repeated-measures unit and hierarchy;
-- calibration budget ladder;
-- human-readable primary/secondary metric names;
-- full immutable **metric-scorecard SHA-256**;
-- declared robustness axes;
-- untouched final-assessment role;
-- deterministic metadata.
+Its SHA-256 binds protocol lifecycle, dataset/task identity, full dataset-lineage SHA-256, repeated-measures hierarchy, calibration budget ladder, human-readable metric names, full immutable metric-scorecard SHA-256, robustness axes, untouched final-assessment role, and deterministic metadata.
 
 Metric names are display metadata, not sufficient scientific identity. The metric-scorecard SHA is expected to bind the exact metric definitions, averaging/class semantics, implementation/version, aggregation unit, failure policy, and inference rules defined by Scientific Authority or an equivalent immutable scorecard.
 
-A draft protocol may exist before that scorecard is finalized. A protocol cannot become `frozen` without `metric_scorecard_sha256`.
-
-Adding a new model does not change the protocol SHA.
+A draft protocol may exist before that scorecard is finalized. A protocol cannot become `frozen` without `metric_scorecard_sha256`. Adding a new model does not change the protocol SHA.
 
 ### 2. `ExternalDecoderMethodSpec`
 
-The method spec identifies an algorithm/configuration supplied outside neurOS.
+The method spec identifies an algorithm/configuration supplied outside neurOS. It binds method ID, implementation/package identity and version, input-axis convention, probability semantics, unlabeled-target adaptation capability, uncertainty semantics, optional full model-lineage SHA-256, citation/source reference, and deterministic method metadata.
 
-It binds:
-
-- method ID;
-- implementation/package identity and version;
-- input-axis convention;
-- probability semantics;
-- whether the method may consume an explicit unlabeled-target adaptation channel;
-- uncertainty semantics;
-- optional full **model-lineage SHA-256**;
-- citation/source reference;
-- deterministic method metadata.
-
-It intentionally **does not contain learned-state hashes**. A method is still the same method when it is freshly trained at a different calibration budget.
+It intentionally **does not contain learned-state hashes**. A method remains the same method when freshly trained at a different calibration budget.
 
 `model_lineage_sha256=None` means lineage is **unknown**, not disjoint. This permits an external pretrained/foundation method to enter a comparison while preventing it from earning a clean pretraining-disjoint claim until its lineage is supplied and independently audited against the evaluation dataset lineage.
 
-The method spec also contains no dynamically executed import path. The researcher constructs the implementation in trusted code.
+The method spec contains no dynamically executed import path. The researcher constructs the implementation in trusted code.
 
 ### 3. `QualificationRunContract`
 
-A run contract binds one method to one frozen case and one exact target-information budget.
-
-Its SHA-256 includes:
-
-- protocol SHA-256;
-- method-spec SHA-256;
-- case-authority SHA-256;
-- labeled target examples consumed;
-- unlabeled target examples consumed;
-- unlabeled target seconds consumed;
-- preprocessing authority SHA-256s;
-- calibration authority SHA-256s.
+A run contract binds one method to one frozen case and one exact target-information budget. Its SHA-256 includes protocol SHA, method-spec SHA, case-authority SHA, labeled target examples, unlabeled target examples/seconds, preprocessing authorities, calibration authorities, and deterministic run metadata.
 
 A run is `zero_shot` only if **all** labeled and unlabeled target-information budgets are zero.
 
-A nonzero unlabeled-target budget is not merely metadata. It requires the method to declare `target_adaptation_mode="unlabeled"` and the fitted decoder to expose the separate `adapt_unlabeled(X)` authority surface. This prevents an experiment from claiming controlled unsupervised adaptation when the benchmark cannot identify where target information entered the method.
+A nonzero unlabeled-target budget is not merely metadata. It requires the method to declare `target_adaptation_mode="unlabeled"` and the fitted decoder to expose the separate `adapt_unlabeled(X)` authority surface.
 
 ### 4. `QualificationModelState`
 
 The learned state is bound *after fitting and any authorized adaptation* to the method and run that produced it.
 
-An external adapter reports `ExternalLearnedState` using one of:
-
-- `tensor_sha256`;
-- `checkpoint_sha256`;
-- `opaque_unverified`.
+An external adapter reports `ExternalLearnedState` as `tensor_sha256`, `checkpoint_sha256`, or `opaque_unverified`.
 
 `opaque_unverified` is allowed for scientific comparison. neurOS must not manufacture a durable state identity by serializing an arbitrary Python object with pickle merely to make the evidence look stronger.
 
@@ -128,17 +88,34 @@ If the method claims `calibrated_probability`, the fitted state must additionall
 
 ## External participation does not require neurOS training code
 
-The trusted-code participation surface is structural:
+Every submitted classifier exposes the minimum task-utility surface:
 
 ```python
 class ExternalQualificationDecoder(Protocol):
     def fit(self, X, y) -> None: ...
-    def predict_proba(self, X): ...
+    def predict(self, X): ...
     def learned_state(self) -> ExternalLearnedState: ...
+```
 
+Probabilities are an **optional capability**, not a universal assumption:
+
+```python
+class ExternalProbabilityDecoder(Protocol):
+    def predict_proba(self, X): ...
+```
+
+This distinction is necessary for real ecosystem interoperability. A label-only SVM or lab-specific decoder can participate in balanced-accuracy/accuracy comparisons while probability-dependent metrics are explicitly unavailable. neurOS must not synthesize or normalize a probability vector merely to fill a benchmark column.
+
+Unlabeled target adaptation is another separate capability:
+
+```python
 class ExternalUnlabeledTargetAdapter(Protocol):
     def adapt_unlabeled(self, X) -> None: ...
+```
 
+The trusted-code factory remains deliberately small:
+
+```python
 class ExternalQualificationFactory(Protocol):
     @property
     def method_spec(self) -> ExternalDecoderMethodSpec: ...
@@ -146,8 +123,6 @@ class ExternalQualificationFactory(Protocol):
 ```
 
 The **factory** is important. The benchmark runner must request a fresh decoder for every calibration budget rather than reusing a model that has already seen a larger target budget.
-
-The unlabeled adaptation surface is equally important. `fit(X, y)` and `adapt_unlabeled(X)` are separate channels because they consume scientifically different information. A method may implement only the first. If it declares unlabeled adaptation, the runner validates that the second surface actually exists before exposing any unlabeled target observations.
 
 The intended control boundary is:
 
@@ -162,7 +137,8 @@ frozen neurOS authority
         |
         +-> learned_state() ------------> run-bound state identity
         |
-        +-> untouched X_final ----------> external predict_proba()
+        +-> untouched X_final ----------> external predict()
+        |                                  optional predict_proba()
         |
         +-> semantic validation --------> failure-preserving result
 ```
@@ -171,35 +147,37 @@ The untouched final-assessment observations are never routed through `fit()` or 
 
 neurOS does not rewrite the submitted optimizer, architecture, augmentation policy, representation learner, or training loop. Its authority comes from controlling which observations cross the external-model boundary and recording what those observations were permitted to mean.
 
-## Probability semantics
+## Prediction and probability semantics
 
-NSQ does not collapse all classifier output into a generic `confidence` field.
+Task labels are mandatory. `validate_prediction_output()` requires one prediction per assessment sample, rejects object-dtype/invalid numeric output, and can reject labels outside the declared task classes without coercing the external method.
 
-Supported v1 probability semantics are:
+Probability semantics are separately declared as:
 
-- `uncalibrated_softmax`;
-- `calibrated_probability`;
-- `unavailable`.
+- `uncalibrated_probability`: a model-native probability estimate with no calibration claim, suitable for methods such as logistic regression;
+- `uncalibrated_softmax`: specifically a softmax-derived probability vector with no calibration claim;
+- `calibrated_probability`: a probability backed by a run-specific calibration-state SHA-256;
+- `unavailable`: the method does not expose qualified probability output.
 
-`validate_probability_output()` requires an exact `[sample, class]` floating array, finite values, values in `[0, 1]`, and rows that already sum to one. neurOS does not silently renormalize malformed outputs because that would change the submitted method.
+If probability semantics are not `unavailable`, the decoder must implement `predict_proba(X)`. `validate_probability_output()` requires exact `[sample, class]` shape, floating dtype, finite values in `[0, 1]`, and rows that already sum to one. neurOS does not silently renormalize malformed output because that would change the submitted method.
 
-A method declaring `unavailable` cannot have arbitrary scores silently treated as probabilities. A method declaring `calibrated_probability` must bind the calibration state for every fitted run.
+Probability-dependent metrics should be explicitly unavailable for a method that declares `probability_semantics="unavailable"`, while valid task-utility metrics remain eligible. Missing capability is preserved as evidence rather than silently excluding the method.
 
 ## What the executable runner must enforce
 
 The next implementation slice must:
 
 1. restore a full `LongitudinalCaseAuthority` before exposing any arrays;
-2. verify the dataset-lineage, metric-scorecard, run protocol/case/method, and model-lineage SHA chain;
+2. verify the dataset-lineage, metric-scorecard, protocol/case/method, and model-lineage SHA chain;
 3. independently audit pretraining overlap rather than treating known lineage as disjoint lineage;
 4. call `factory.create()` separately for every calibration budget;
 5. expose only source + authorized labeled target observations to `fit()`;
-6. expose unlabeled target observations only through `adapt_unlabeled()` and only when both the method declaration and run budget authorize them;
+6. expose unlabeled target observations only through `adapt_unlabeled()` and only when both method declaration and run budget authorize them;
 7. keep final-assessment rows unavailable to preprocessing, calibration, adaptation, and model selection;
 8. bind the learned state after all authorized fit/adaptation to that exact run contract;
-9. validate output semantics without repairing the submitted prediction;
-10. preserve failed, skipped, OOM, unavailable, and nonconvergent cases;
-11. emit full SHA-256 identities rather than short fingerprints as scientific joins.
+9. validate labels and optional probabilities without repairing submitted output;
+10. mark probability metrics unavailable, rather than the whole case failed, when probability output is legitimately unavailable;
+11. preserve failed, skipped, OOM, unavailable, and nonconvergent cases;
+12. emit full SHA-256 identities rather than short fingerprints as scientific joins.
 
 ## Baseline philosophy
 
