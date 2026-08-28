@@ -21,24 +21,29 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('packages/neuros/src/neuros/evidence/kumar2024.py')
           text = path.read_text(encoding='utf-8')
-          old = '''    case_seed = _stable_seed(
-              config.split_seed,
-              KUMAR2024_DATASET_ID,
-              subject,
-              target_session,
+          pattern = re.compile(
+              r"    case_seed = _stable_seed\(\n"
+              r"\s+config\.split_seed,\n"
+              r"\s+KUMAR2024_DATASET_ID,\n"
+              r"\s+subject,\n"
+              r"\s+target_session,\n"
+              r"\s+\)\n"
           )
-          '''
-          new = '''    # The preregistered split seed is shared literally across every case.
-              # Subject/session identity is already bound by the case authority and must
-              # not be mixed into the split RNG seed.
-              case_seed = config.split_seed
-          '''
-          if old not in text:
-              raise SystemExit('expected Kumar2024 case-seed block not found; refusing broad rewrite')
-          text = text.replace(old, new, 1)
+          replacement = (
+              "    # The preregistered split seed is shared literally across every case.\n"
+              "    # Subject/session identity is already bound by the case authority and must\n"
+              "    # not be mixed into the split RNG seed.\n"
+              "    case_seed = config.split_seed\n"
+          )
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(
+                  f'expected exactly one Kumar2024 case-seed block, found {count}; refusing broad rewrite'
+              )
           path.write_text(text, encoding='utf-8')
           PY
       - name: Commit corrected authority
