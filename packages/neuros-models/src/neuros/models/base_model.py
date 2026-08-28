@@ -15,7 +15,7 @@ from neuros.models.analysis import InterpretabilityManifest
 class BaseModel(ABC):
     """Abstract base class for trainable neurOS decoders.
 
-    The runtime contract remains deliberately small.  Optional methods expose
+    The runtime contract remains deliberately small. Optional methods expose
     logits, embeddings, and a model-analysis surface without forcing every
     classical estimator to pretend it has mechanistic internals.
     """
@@ -131,6 +131,7 @@ class BaseModel(ABC):
                 "architecture": manifest.architecture,
                 "backend": manifest.backend,
                 "analysis_manifest": manifest.fingerprint(),
+                "analysis_manifest_sha256": manifest.sha256(),
                 "mechint_ready": manifest.mechint_ready,
             },
         )

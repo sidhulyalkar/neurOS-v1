@@ -1,0 +1,98 @@
+name: Model Artifact v1
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-models/**"
+      - ".github/workflows/model-artifact-ci.yml"
+      - "docs/MODEL_ARTIFACT_V1.md"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-models/**"
+      - ".github/workflows/model-artifact-ci.yml"
+      - "docs/MODEL_ARTIFACT_V1.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-artifact-v1-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  artifact-contracts:
+    name: Artifact contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install safe artifact profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e "packages/neuros-models[artifact]" pytest pytest-asyncio
+      - name: Exercise Model Artifact v1 adversarial contracts
+        run: |
+          pytest -q \
+            packages/neuros-models/tests/test_model_artifact_v1.py \
+            packages/neuros-models/tests/test_model_artifact_store.py \
+            packages/neuros-models/tests/test_model_artifact_security.py
+      - name: Prove promoted loader has no pickle execution path
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          for filename in ("artifact.py", "artifact_v1.py"):
+              source = Path("packages/neuros-models/src/neuros/models", filename).read_text()
+              assert "import pickle" not in source
+              assert "pickle.load(" not in source
+              assert "pickle.loads(" not in source
+          PY
+      - name: Compile artifact surface
+        run: |
+          python -m compileall -q \
+            packages/neuros-models/src/neuros/models/artifact.py \
+            packages/neuros-models/src/neuros/models/artifact_v1.py \
+            packages/neuros-models/src/neuros/models/artifact_store.py \
+            packages/neuros-models/src/neuros/models/analysis.py
+
+  installed-wheel-artifact:
+    name: Installed-wheel artifact round trip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Build exact local wheels
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          mkdir -p "${RUNNER_TEMP}/wheels"
+          python -m build --wheel --outdir "${RUNNER_TEMP}/wheels" packages/neuros-core
+          python -m build --wheel --outdir "${RUNNER_TEMP}/wheels" packages/neuros-models
+      - name: Install wheels into a clean environment
+        run: |
+          ENV="${RUNNER_TEMP}/artifact-wheel-env"
+          python -m venv "${ENV}"
+          PY="${ENV}/bin/python"
+          "${PY}" -m pip install --upgrade pip
+          CORE_WHEEL="$(find "${RUNNER_TEMP}/wheels" -name 'neuros_core-*.whl' -print -quit)"
+          MODELS_WHEEL="$(find "${RUNNER_TEMP}/wheels" -name 'neuros_models-*.whl' -print -quit)"
+          test -n "${CORE_WHEEL}"
+          test -n "${MODELS_WHEEL}"
+          "${PY}" -m pip install "${CORE_WHEEL}" "${MODELS_WHEEL}" torch safetensors pytest pytest-asyncio
+          "${PY}" -m pip check
+          "${PY}" -m pytest -q \
+            packages/neuros-models/tests/test_model_artifact_v1.py \
+            packages/neuros-models/tests/test_model_artifact_store.py \
+            packages/neuros-models/tests/test_model_artifact_security.py

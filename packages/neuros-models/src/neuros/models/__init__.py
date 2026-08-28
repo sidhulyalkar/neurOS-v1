@@ -7,6 +7,16 @@ from neuros.models.analysis import (
     MechanisticallyInspectable,
     validate_manifest_paths,
 )
+from neuros.models.artifact import (
+    ArtifactBackedDecoder,
+    ModelArtifactManifest,
+    ModelInputContract,
+    ModelOutputContract,
+    export_model_artifact,
+    load_model_artifact,
+    verify_model_artifact,
+)
+from neuros.models.artifact_store import ModelArtifactStore
 from neuros.models.attention_fusion_model import AttentionFusionModel
 from neuros.models.base_model import BaseModel
 from neuros.models.braindecode_adapter import BraindecodeDecoder
@@ -28,6 +38,7 @@ from neuros.models.transformer_model import TemporalTransformerModel, Transforme
 __all__ = [
     "AnalysisCapability",
     "AnalysisSurface",
+    "ArtifactBackedDecoder",
     "AttentionFusionModel",
     "BaseModel",
     "BraindecodeDecoder",
@@ -42,6 +53,10 @@ __all__ = [
     "KNNModel",
     "LSTMModel",
     "MechanisticallyInspectable",
+    "ModelArtifactManifest",
+    "ModelArtifactStore",
+    "ModelInputContract",
+    "ModelOutputContract",
     "ModelMetadata",
     "ModelRegistry",
     "RandomForestModel",
@@ -49,7 +64,10 @@ __all__ = [
     "SimpleClassifier",
     "TemporalTransformerModel",
     "TransformerModel",
+    "export_model_artifact",
     "get_decoder_card",
     "list_decoder_cards",
+    "load_model_artifact",
     "validate_manifest_paths",
+    "verify_model_artifact",
 ]

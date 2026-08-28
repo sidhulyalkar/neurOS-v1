@@ -145,7 +145,6 @@ class TorchDecoderModel(BaseModel):
         if not self.is_trained:
             raise RuntimeError("Model has not been trained. Call train() first.")
 
-
     def infer(self, X: np.ndarray) -> DecoderOutput:
         """Run one representation pass and return logits/probabilities/embedding together."""
 
@@ -183,6 +182,7 @@ class TorchDecoderModel(BaseModel):
                 "architecture": manifest.architecture,
                 "backend": manifest.backend,
                 "analysis_manifest": manifest.fingerprint(),
+                "analysis_manifest_sha256": manifest.sha256(),
                 "mechint_ready": manifest.mechint_ready,
             },
         )
