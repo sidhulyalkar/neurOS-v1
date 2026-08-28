@@ -6,6 +6,7 @@ on:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
       - "tests/test_neural_system_qualification_v1.py"
       - "tests/test_neural_system_qualification_adaptation.py"
+      - "tests/test_neural_system_qualification_predictions.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
   push:
@@ -14,6 +15,7 @@ on:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
       - "tests/test_neural_system_qualification_v1.py"
       - "tests/test_neural_system_qualification_adaptation.py"
+      - "tests/test_neural_system_qualification_predictions.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
 
@@ -48,7 +50,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_neural_system_qualification_v1.py \
-            tests/test_neural_system_qualification_adaptation.py
+            tests/test_neural_system_qualification_adaptation.py \
+            tests/test_neural_system_qualification_predictions.py
       - name: Prove deterministic protocol identity
         run: |
           python - <<'PY'
