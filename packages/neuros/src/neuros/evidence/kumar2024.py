@@ -1386,9 +1386,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             else args.braindecode_epochs
         ),
         braindecode_batch_size=base.braindecode_batch_size,
+        braindecode_optimizer=base.braindecode_optimizer,
         braindecode_learning_rate=base.braindecode_learning_rate,
         braindecode_weight_decay=base.braindecode_weight_decay,
-        braindecode_random_state=base.braindecode_random_state,
+        braindecode_validation_fraction=base.braindecode_validation_fraction,
+        braindecode_validation_seed=base.braindecode_validation_seed,
+        braindecode_early_stopping_patience=(
+            base.braindecode_early_stopping_patience
+        ),
+        braindecode_model_seed=base.braindecode_model_seed,
         device=base.device if args.device is None else args.device,
         analysis_bootstrap_replicates=base.analysis_bootstrap_replicates,
         analysis_seed=base.analysis_seed,
