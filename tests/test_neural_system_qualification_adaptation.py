@@ -41,6 +41,9 @@ class PlainDecoder:
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         del X, y
 
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return np.zeros(len(X), dtype=np.int64)
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         return np.full((len(X), 2), 0.5, dtype=np.float32)
 
