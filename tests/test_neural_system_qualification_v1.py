@@ -70,17 +70,33 @@ def test_protocol_identity_is_full_deterministic_and_metadata_order_independent(
         first.metadata["site"] = "mutated"  # type: ignore[index]
 
 
-def test_protocol_binds_dataset_lineage_and_explicit_lifecycle():
+def test_protocol_binds_dataset_lineage_metric_authority_and_lifecycle():
     first = _protocol(dataset_lineage_sha256=SHA_D)
     second = _protocol(dataset_lineage_sha256=SHA_C)
     assert first.sha256 != second.sha256
     assert first.protocol_status == "draft"
-    frozen = _protocol(protocol_status="frozen")
+    assert first.metric_scorecard_sha256 is None
+
+    with pytest.raises(ValueError, match="frozen qualification protocol requires"):
+        _protocol(protocol_status="frozen")
+    frozen = _protocol(protocol_status="frozen", metric_scorecard_sha256=SHA_C)
     assert frozen.sha256 != first.sha256
+    assert frozen.metric_scorecard_sha256 == SHA_C
+
     with pytest.raises(ValueError, match="64-character"):
         _protocol(dataset_lineage_sha256="short")
+    with pytest.raises(ValueError, match="64-character"):
+        _protocol(metric_scorecard_sha256="short")
     with pytest.raises(ValueError, match="draft, frozen, or retired"):
         _protocol(protocol_status="published")
+
+
+def test_metric_scorecard_identity_changes_protocol_even_when_display_names_do_not():
+    first = _protocol(metric_scorecard_sha256=SHA_A)
+    second = _protocol(metric_scorecard_sha256=SHA_B)
+    assert first.primary_metric == second.primary_metric == "balanced_accuracy"
+    assert first.secondary_metrics == second.secondary_metrics
+    assert first.sha256 != second.sha256
 
 
 def test_protocol_requires_participant_first_hierarchy_and_zero_budget():
@@ -106,6 +122,17 @@ def test_method_identity_does_not_contain_learned_checkpoint_state():
     assert len(method.sha256) == 64
     assert "state_sha256" not in method.to_dict()
     assert "calibration_state_sha256" not in method.to_dict()
+
+
+def test_method_model_lineage_is_explicitly_known_or_unknown():
+    unknown = _method(model_lineage_sha256=None)
+    known = _method(model_lineage_sha256=SHA_C)
+    assert unknown.lineage_known is False
+    assert known.lineage_known is True
+    assert known.model_lineage_sha256 == SHA_C
+    assert unknown.sha256 != known.sha256
+    with pytest.raises(ValueError, match="64-character"):
+        _method(model_lineage_sha256="unknown")
 
 
 def test_learned_state_separates_scientific_comparison_from_content_addressability():
