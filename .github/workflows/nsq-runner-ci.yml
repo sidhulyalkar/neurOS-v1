@@ -1,0 +1,99 @@
+name: NSQ Runner v1
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "tests/test_neural_system_qualification_runner.py"
+      - "tests/test_neural_system_qualification_baselines.py"
+      - "docs/NSQ_RUNNER_V1.md"
+      - ".github/workflows/nsq-runner-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "tests/test_neural_system_qualification_runner.py"
+      - "tests/test_neural_system_qualification_baselines.py"
+      - "docs/NSQ_RUNNER_V1.md"
+      - ".github/workflows/nsq-runner-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsq-runner-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runner-contracts:
+    name: Runner contracts / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install runner core
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation pytest pytest-asyncio
+      - name: Exercise NSQ runner authority
+        run: |
+          pytest -q tests/test_neural_system_qualification_runner.py
+      - name: Compile runner surface
+        run: |
+          python -m compileall -q \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py
+
+  mne-csp-lda:
+    name: External MNE CSP + sklearn LDA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MNE reference profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[eeg]" pytest pytest-asyncio
+      - name: Prove MNE CSP + LDA through NSQ
+        run: |
+          pytest -q \
+            tests/test_neural_system_qualification_baselines.py::test_mne_csp_lda_participates_as_external_probability_method
+
+  upstream-braindecode:
+    name: Direct upstream Braindecode
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install upstream Braindecode profile
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[braindecode-evidence]" pytest pytest-asyncio
+      - name: Prove direct Braindecode factory and execution
+        run: |
+          pytest -q \
+            tests/test_neural_system_qualification_baselines.py::test_braindecode_factory_is_direct_upstream_not_neuros_model_wrapper \
+            tests/test_neural_system_qualification_baselines.py::test_upstream_braindecode_executes_through_same_nsq_referee
