@@ -1,0 +1,93 @@
+name: External model / method submission
+description: Bring an existing decoder, representation, or training stack to Neural System Qualification
+title: "[method] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You should not need to rewrite your model in neurOS. NSQ is designed to wrap an external method with frozen data, calibration, final-assessment, metric, failure, and provenance authority while leaving your training implementation yours.
+  - type: input
+    id: method
+    attributes:
+      label: Method name
+      placeholder: EEGNet, custom sklearn pipeline, lab model, foundation representation, ...
+    validations:
+      required: true
+  - type: input
+    id: implementation
+    attributes:
+      label: Implementation source and exact version
+      description: Package/repository plus release or commit. If private, describe the versioning scheme without exposing credentials.
+    validations:
+      required: true
+  - type: dropdown
+    id: model_type
+    attributes:
+      label: Participation type
+      options:
+        - Task decoder with fit/predict
+        - Probability-capable task decoder
+        - Frozen representation plus external readout
+        - Pretrained/foundation model
+        - Adaptive method consuming labeled target data
+        - Adaptive method requiring unlabeled target data
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input contract
+      description: Axes, units, channels, sample rate/window semantics, preprocessing assumptions, and any fitted preprocessing state.
+    validations:
+      required: true
+  - type: textarea
+    id: training
+    attributes:
+      label: Training and state-selection behavior
+      description: What observations can affect fitting, validation, early stopping, checkpoint selection, calibration, thresholds, or preprocessing state?
+    validations:
+      required: true
+  - type: dropdown
+    id: probabilities
+    attributes:
+      label: Probability semantics
+      options:
+        - No probability output
+        - Uncalibrated probabilities
+        - Uncalibrated softmax scores treated as probability-shaped output
+        - Calibrated probabilities with separately identified calibration state
+    validations:
+      required: true
+  - type: textarea
+    id: learned_state
+    attributes:
+      label: Learned-state identity
+      description: Explain whether exact tensors/checkpoints can be hashed without unsafe serialization. Opaque state is allowed, but must remain explicitly unverified.
+    validations:
+      required: true
+  - type: textarea
+    id: lineage
+    attributes:
+      label: Pretraining / dataset lineage
+      description: Required for pretrained methods. Unknown lineage should be stated as unknown rather than inferred.
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Qualification target
+      description: Which frozen public study or evidence question should this method enter, and why is it a scientifically useful comparator?
+    validations:
+      required: true
+  - type: checkboxes
+    id: agreement
+    attributes:
+      label: Fair-comparison contract
+      options:
+        - label: A fresh model instance may be created for each authorized calibration frontier point.
+          required: true
+        - label: Final-assessment observations will not be used for fitting, preprocessing, adaptation, state selection, threshold selection, or hyperparameter tuning.
+          required: true
+        - label: Failed, unavailable, OOM, skipped, or nonconverged attempts may remain visible in the evidence artifact.
+          required: true
+        - label: I understand that passing software/NSQ contracts does not itself establish biological mechanism, hardware validity, safety, or clinical benefit.
+          required: true

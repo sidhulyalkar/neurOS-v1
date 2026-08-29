@@ -1,0 +1,82 @@
+name: Ecosystem integration proposal
+description: Propose a thin neurOS boundary around an existing neuroscience or BCI ecosystem
+title: "[integration] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        neurOS prefers integration over reimplementation. A strong proposal names what the upstream project already owns and the specific qualification, replay, provenance, or deployment authority neurOS would add.
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream project or standard
+      placeholder: MNE, MOABB, Braindecode, BrainFlow, LSL, NWB, BIDS, SpikeInterface, ...
+    validations:
+      required: true
+  - type: input
+    id: upstream_version
+    attributes:
+      label: Upstream version or revision
+      description: Give an exact package version, release, or commit when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: existing_owner
+    attributes:
+      label: What does the upstream ecosystem already solve?
+      description: Describe the maintained upstream responsibility we should not duplicate.
+    validations:
+      required: true
+  - type: textarea
+    id: missing_boundary
+    attributes:
+      label: What concrete boundary is missing?
+      description: Focus on reproducibility, qualification, replay, lineage, transfer, adaptation authority, hardware evidence, or another neurOS-specific seam.
+    validations:
+      required: true
+  - type: dropdown
+    id: authority
+    attributes:
+      label: neurOS authority strengthened
+      options:
+        - Runtime / timing / transport
+        - Recording / exact replay
+        - Scientific data authority
+        - Neural System Qualification
+        - Model artifact / deployment identity
+        - ORION representation / adaptation authority
+        - Hardware qualification
+        - Falsification / robustness evidence
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: falsification
+    attributes:
+      label: External falsification target
+      description: Name the public dataset, model, device, upstream test, or interoperability case that could prove this integration wrong or unnecessary.
+    validations:
+      required: true
+  - type: textarea
+    id: maintenance
+    attributes:
+      label: Maintenance cost
+      description: New dependencies, APIs, CI lanes, hardware requirements, credentials, or compatibility commitments.
+    validations:
+      required: true
+  - type: textarea
+    id: removal
+    attributes:
+      label: When should this be upstreamed, rejected, or removed?
+      description: State the condition under which neurOS should not maintain this boundary.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope firewall
+      options:
+        - label: I checked whether a thin adapter or upstream contribution is sufficient before proposing a new neurOS subsystem.
+          required: true
+        - label: This proposal does not rely on package count or architectural novelty as evidence of value.
+          required: true
