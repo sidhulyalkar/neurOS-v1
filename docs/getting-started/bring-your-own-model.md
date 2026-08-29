@@ -4,6 +4,19 @@ You do **not** need neurOS to train your model.
 
 That is the point of Neural System Qualification (NSQ): your code owns the architecture, optimizer, features, representation, and fitting procedure; neurOS owns the evidence boundary around the comparison.
 
+## Generate an executable starter
+
+```bash
+neuros init my-method --template nsq-method
+cd my-method
+python demo.py
+pytest -q
+```
+
+The generated project is a normal Python project containing an sklearn decoder, an explicit method factory, deterministic fitted-state hashing, and a synthetic longitudinal NSQ case. The demo goes through the **production NSQ referee**, not a toy parallel implementation.
+
+Its synthetic scores are intentionally non-interpretable. The useful result is the contract evidence: a fresh fitted state at every authorized calibration budget, one fixed final-assessment identity, explicit probability semantics, content-addressed learned state, and a failure-preserving case result.
+
 The smallest useful mental model is:
 
 ```text
