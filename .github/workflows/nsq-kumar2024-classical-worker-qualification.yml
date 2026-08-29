@@ -1,0 +1,363 @@
+name: NSQ Kumar2024 classical worker qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      binding_run_id:
+        description: "Successful exact-main promoted-binding workflow run ID"
+        required: true
+        type: string
+      binding_artifact_id:
+        description: "Immutable promoted-binding artifact ID from that run"
+        required: true
+        type: string
+      shard_spec_sha256:
+        description: "One archived classical shard_spec_sha256 from the binding"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PROMOTED_CONSTRAINTS: requirements/nsq-kumar2024-promoted-py311.constraints.txt
+
+jobs:
+  qualify-one-classical-shard:
+    name: One classical shard / non-interpretive systems qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Require successful exact-main binding run and artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BINDING_RUN_ID: ${{ inputs.binding_run_id }}
+          BINDING_ARTIFACT_ID: ${{ inputs.binding_artifact_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          run_id = os.environ["BINDING_RUN_ID"]
+          artifact_id = os.environ["BINDING_ARTIFACT_ID"]
+          if not run_id.isdigit():
+              raise SystemExit("binding_run_id must be a decimal GitHub Actions run id")
+          if not artifact_id.isdigit():
+              raise SystemExit("binding_artifact_id must be a decimal GitHub Actions artifact id")
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          run_request = urllib.request.Request(
+              f"https://api.github.com/repos/${{ github.repository }}/actions/runs/{run_id}",
+              headers=headers,
+          )
+          with urllib.request.urlopen(run_request) as response:
+              payload = json.load(response)
+          expected = {
+              "event": "push",
+              "head_branch": "main",
+              "status": "completed",
+              "conclusion": "success",
+              "path": ".github/workflows/nsq-kumar2024-promoted-binding.yml",
+          }
+          drift = {
+              key: {"expected": value, "observed": payload.get(key)}
+              for key, value in expected.items()
+              if payload.get(key) != value
+          }
+          head_sha = str(payload.get("head_sha", ""))
+          if len(head_sha) != 40 or any(ch not in "0123456789abcdef" for ch in head_sha):
+              drift["head_sha"] = {"expected": "40-char lowercase git SHA", "observed": head_sha}
+          if drift:
+              raise SystemExit(f"binding run is not final exact-main authority: {drift}")
+
+          artifact_request = urllib.request.Request(
+              f"https://api.github.com/repos/${{ github.repository }}/actions/artifacts/{artifact_id}",
+              headers=headers,
+          )
+          with urllib.request.urlopen(artifact_request) as response:
+              artifact = json.load(response)
+          workflow_run = artifact.get("workflow_run") or {}
+          artifact_drift = {}
+          if bool(artifact.get("expired")):
+              artifact_drift["expired"] = True
+          if int(workflow_run.get("id", -1)) != int(run_id):
+              artifact_drift["workflow_run_id"] = {
+                  "expected": int(run_id),
+                  "observed": workflow_run.get("id"),
+              }
+          expected_name = f"nsq-kumar2024-promoted-binding-{head_sha}"
+          if artifact.get("name") != expected_name:
+              artifact_drift["name"] = {
+                  "expected": expected_name,
+                  "observed": artifact.get("name"),
+              }
+          if artifact_drift:
+              raise SystemExit(
+                  f"artifact is not the immutable binding output of the authorized run: {artifact_drift}"
+              )
+          print(
+              json.dumps(
+                  {
+                      "verified": True,
+                      "head_sha": head_sha,
+                      "artifact_id": int(artifact_id),
+                      "artifact_digest": artifact.get("digest"),
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Download immutable promoted binding artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          artifact-ids: ${{ inputs.binding_artifact_id }}
+          path: ${{ runner.temp }}/promoted-binding
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.binding_run_id }}
+
+      - name: Read binding-owned source revision
+        id: binding
+        env:
+          BINDING_ROOT: ${{ runner.temp }}/promoted-binding
+          BINDING_RUN_ID: ${{ inputs.binding_run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          root = Path(os.environ["BINDING_ROOT"])
+          manifest_path = root / "binding_manifest.json"
+          hashes_path = root / "artifact_hashes.json"
+          if not manifest_path.is_file() or not hashes_path.is_file():
+              raise SystemExit("downloaded artifact is not a promoted binding bundle")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          hashes = json.loads(hashes_path.read_text(encoding="utf-8"))
+          revision = str(manifest.get("source_revision", ""))
+          bundle_sha = str(hashes.get("bundle_sha256", ""))
+          if len(revision) != 40 or any(ch not in "0123456789abcdef" for ch in revision):
+              raise SystemExit("binding source_revision is not an exact Git SHA")
+          if len(bundle_sha) != 64 or any(ch not in "0123456789abcdef" for ch in bundle_sha):
+              raise SystemExit("binding bundle SHA-256 is malformed")
+          if os.environ["WORKFLOW_SHA"] != revision:
+              raise SystemExit(
+                  "qualification workflow revision differs from binding source_revision; "
+                  "regenerate exact-main binding before worker qualification"
+              )
+
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/${{ github.repository }}/actions/runs/{os.environ['BINDING_RUN_ID']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request) as response:
+              run = json.load(response)
+          if str(run.get("head_sha")) != revision:
+              raise SystemExit(
+                  "binding artifact source_revision differs from the successful main run head"
+              )
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write(f"source_revision={revision}\n")
+              stream.write(f"binding_bundle_sha256={bundle_sha}\n")
+          print(json.dumps({"source_revision": revision, "bundle_sha256": bundle_sha}, sort_keys=True))
+          PY
+
+      - name: Checkout binding-owned source revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.binding.outputs.source_revision }}
+          persist-credentials: false
+
+      - name: Require clean tracked source tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.binding.outputs.source_revision }}"
+          test -f .github/workflows/nsq-kumar2024-classical-worker-qualification.yml
+          git diff --quiet HEAD --
+          git diff --cached --quiet HEAD --
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11.16"
+          cache: pip
+          cache-dependency-path: ${{ env.PROMOTED_CONSTRAINTS }}
+
+      - name: Install pinned promoted worker environment
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check \
+            -c "${PROMOTED_CONSTRAINTS}" \
+            "pip==26.2.1" "setuptools==79.0.1" "wheel==0.48.0"
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-core
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-drivers
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-models
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e "packages/neuros-foundation[evidence,braindecode-evidence]"
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/orion
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros
+          python scripts/evidence/validate_promoted_environment.py \
+            --constraints "${PROMOTED_CONSTRAINTS}"
+
+      - name: Verify binding bundle under exact worker environment
+        env:
+          BINDING_ROOT: ${{ runner.temp }}/promoted-binding
+        run: |
+          set -euo pipefail
+          python -P -s -m neuros.evidence.kumar2024_promoted_binding \
+            --verify-only \
+            --output "${BINDING_ROOT}"
+
+      - name: Require exactly one archived classical shard
+        id: shard
+        env:
+          BINDING_ROOT: ${{ runner.temp }}/promoted-binding
+          SHARD_SPEC_SHA256: ${{ inputs.shard_spec_sha256 }}
+        run: |
+          set -euo pipefail
+          python -P -s - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          requested = os.environ["SHARD_SPEC_SHA256"].strip().lower()
+          if len(requested) != 64 or any(ch not in "0123456789abcdef" for ch in requested):
+              raise SystemExit("shard_spec_sha256 must be a lowercase SHA-256 digest")
+          execution = json.loads(
+              (Path(os.environ["BINDING_ROOT"]) / "execution_plan.json").read_text(encoding="utf-8")
+          )
+          matches = [
+              shard
+              for shard in execution["template"]["shards"]
+              if shard.get("shard_spec_sha256") == requested
+          ]
+          if len(matches) != 1:
+              raise SystemExit("requested shard must occur exactly once in the promoted binding")
+          shard = matches[0]
+          method = str(shard.get("method_id"))
+          if method not in {"mne-csp-lda", "pyriemann-rg-lr"}:
+              raise SystemExit(
+                  "systems qualification is classical-only; neural/model-training shards are forbidden"
+              )
+          if tuple(shard.get("budgets_per_class", ())) != (0, 1, 2, 5, 10):
+              raise SystemExit("qualification shard does not contain the complete atomic budget frontier")
+          output = Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as stream:
+              stream.write(f"method_id={method}\n")
+              stream.write(f"shard_id={shard['shard_id']}\n")
+          print(
+              json.dumps(
+                  {
+                      "verified": True,
+                      "method_id": method,
+                      "shard_id": shard["shard_id"],
+                      "budgets_per_class": shard["budgets_per_class"],
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Execute one non-headline classical worker shard
+        env:
+          BINDING_ROOT: ${{ runner.temp }}/promoted-binding
+          WORKER_ROOT: ${{ runner.temp }}/classical-worker-qualification/worker
+          SHARD_SPEC_SHA256: ${{ inputs.shard_spec_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${WORKER_ROOT}")"
+          python -P -s -m neuros.evidence.kumar2024_promoted_worker \
+            --binding "${BINDING_ROOT}" \
+            --shard-spec-sha256 "${SHARD_SPEC_SHA256}" \
+            --output "${WORKER_ROOT}" \
+            | tee "${RUNNER_TEMP}/classical-worker-qualification/worker_run.json"
+          python -P -s -m neuros.evidence.kumar2024_promoted_worker \
+            --verify-only \
+            --binding "${BINDING_ROOT}" \
+            --shard-spec-sha256 "${SHARD_SPEC_SHA256}" \
+            --output "${WORKER_ROOT}"
+
+      - name: Seal systems-qualification claim boundary
+        env:
+          QUALIFICATION_ROOT: ${{ runner.temp }}/classical-worker-qualification
+          SHARD_SPEC_SHA256: ${{ inputs.shard_spec_sha256 }}
+          METHOD_ID: ${{ steps.shard.outputs.method_id }}
+          SHARD_ID: ${{ steps.shard.outputs.shard_id }}
+          SOURCE_REVISION: ${{ steps.binding.outputs.source_revision }}
+          BINDING_BUNDLE_SHA256: ${{ steps.binding.outputs.binding_bundle_sha256 }}
+          BINDING_RUN_ID: ${{ inputs.binding_run_id }}
+          BINDING_ARTIFACT_ID: ${{ inputs.binding_artifact_id }}
+        run: |
+          set -euo pipefail
+          python -P -s - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["QUALIFICATION_ROOT"])
+          worker = root / "worker"
+          worker_hashes = json.loads((worker / "artifact_hashes.json").read_text(encoding="utf-8"))
+          worker_manifest = json.loads((worker / "worker_manifest.json").read_text(encoding="utf-8"))
+          payload = {
+              "schema_version": 1,
+              "artifact_kind": "promoted_classical_worker_systems_qualification",
+              "source_revision": os.environ["SOURCE_REVISION"],
+              "binding_run_id": int(os.environ["BINDING_RUN_ID"]),
+              "binding_artifact_id": int(os.environ["BINDING_ARTIFACT_ID"]),
+              "binding_bundle_sha256": os.environ["BINDING_BUNDLE_SHA256"],
+              "shard_spec_sha256": os.environ["SHARD_SPEC_SHA256"],
+              "shard_id": os.environ["SHARD_ID"],
+              "method_id": os.environ["METHOD_ID"],
+              "worker_bundle_sha256": worker_hashes["bundle_sha256"],
+              "worker_shard_result_sha256": worker_manifest["shard_result_sha256"],
+              "numerical_result_interpretable": False,
+              "global_analysis_performed": False,
+              "external_floor_claim_generated": False,
+              "orion_comparison_permitted": False,
+              "claim_boundary": (
+                  "systems qualification of one classical artifact-consuming worker path only; "
+                  "all numerical scores are non-interpretable and cannot support efficacy, "
+                  "method-ranking, external-floor, or ORION claims"
+              ),
+          }
+          encoded = json.dumps(
+              {"schema": "neuros.promoted_classical_worker_systems_qualification.v1", "payload": payload},
+              sort_keys=True,
+              separators=(",", ":"),
+              allow_nan=False,
+          ).encode("utf-8")
+          payload["qualification_sha256"] = hashlib.sha256(encoded).hexdigest()
+          (root / "qualification_manifest.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          print(json.dumps(payload, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload sealed systems qualification evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nsq-kumar2024-classical-worker-qualification-${{ inputs.shard_spec_sha256 }}
+          path: ${{ runner.temp }}/classical-worker-qualification
+          if-no-files-found: error
+          retention-days: 90

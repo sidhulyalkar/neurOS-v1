@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
+      - "scripts/evidence/validate_promoted_environment.py"
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
@@ -18,10 +19,12 @@ on:
       - "packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py"
       - "packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py"
       - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
+      - ".github/workflows/nsq-kumar2024-classical-worker-qualification.yml"
   push:
     branches: [main]
     paths:
       - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
+      - "scripts/evidence/validate_promoted_environment.py"
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
@@ -35,6 +38,7 @@ on:
       - "packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py"
       - "packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py"
       - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
+      - ".github/workflows/nsq-kumar2024-classical-worker-qualification.yml"
 
 permissions:
   contents: read
@@ -58,6 +62,12 @@ jobs:
         with:
           ref: ${{ env.BINDING_SOURCE_SHA }}
           persist-credentials: false
+      - name: Require clean tracked source tree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${BINDING_SOURCE_SHA}"
+          git diff --quiet HEAD --
+          git diff --cached --quiet HEAD --
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11.16"
@@ -65,6 +75,7 @@ jobs:
           cache-dependency-path: ${{ env.PROMOTED_CONSTRAINTS }}
       - name: Install pinned promoted evidence stack
         run: |
+          set -euo pipefail
           python -m pip install --disable-pip-version-check \
             -c "${PROMOTED_CONSTRAINTS}" \
             "pip==26.2.1" "setuptools==79.0.1" "wheel==0.48.0"
@@ -82,74 +93,8 @@ jobs:
             -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros
       - name: Assert pinned external dependency frontier
         run: |
-          python - <<'PY'
-          import importlib.metadata
-          import re
-          from pathlib import Path
-
-          normalize = lambda value: re.sub(r"[-_.]+", "-", value).lower()
-          expected = {}
-          for raw in Path("requirements/nsq-kumar2024-promoted-py311.constraints.txt").read_text().splitlines():
-              line = raw.strip()
-              if not line or line.startswith("#"):
-                  continue
-              name, version = line.split("==", 1)
-              expected[normalize(name)] = version
-
-          local = {
-              "neuros",
-              "neuros-core",
-              "neuros-drivers",
-              "neuros-foundation",
-              "neuros-models",
-              "neuros-orion",
-          }
-          observed = {}
-          for distribution in importlib.metadata.distributions():
-              raw_name = distribution.metadata.get("Name")
-              if raw_name is None:
-                  continue
-              name = normalize(raw_name)
-              version = str(distribution.version)
-              previous = observed.get(name)
-              if previous is not None and previous != version:
-                  raise SystemExit(
-                      f"conflicting installed versions for {name}: {previous} versus {version}"
-                  )
-              observed[name] = version
-
-          external = {name: version for name, version in observed.items() if name not in local}
-          unexpected = sorted(set(external) - set(expected))
-          mismatched = {
-              name: {"expected": expected[name], "observed": external[name]}
-              for name in sorted(set(external) & set(expected))
-              if external[name] != expected[name]
-          }
-          required = {
-              "braindecode",
-              "mne",
-              "moabb",
-              "numpy",
-              "pip",
-              "pyriemann",
-              "scikit-learn",
-              "scipy",
-              "setuptools",
-              "torch",
-              "wheel",
-          }
-          missing_required = sorted(required - set(external))
-          if unexpected or mismatched or missing_required:
-              raise SystemExit(
-                  "promoted external dependency frontier differs: "
-                  f"unexpected={unexpected}, mismatched={mismatched}, "
-                  f"missing_required={missing_required}"
-              )
-          print(
-              f"validated {len(external)} installed external distributions against "
-              f"{len(expected)} exact constraints"
-          )
-          PY
+          python scripts/evidence/validate_promoted_environment.py \
+            --constraints "${PROMOTED_CONSTRAINTS}"
       - name: Build exact-revision no-model promoted binding
         run: |
           OUT="${RUNNER_TEMP}/nsq-kumar2024-promoted-binding"
