@@ -2,9 +2,26 @@ name: NSQ Kumar2024 promoted binding authority
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
+      - "packages/neuros-foundation/pyproject.toml"
+      - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialization.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_comparison.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py"
+      - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
   push:
     branches: [main]
     paths:
+      - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
@@ -22,31 +39,118 @@ on:
 permissions:
   contents: read
 
+env:
+  PROMOTED_CONSTRAINTS: requirements/nsq-kumar2024-promoted-py311.constraints.txt
+
 concurrency:
-  group: nsq-kumar2024-promoted-binding-${{ github.sha }}
+  group: nsq-kumar2024-promoted-binding-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
   bind-promoted-study:
-    name: Exact-main 18-subject no-model binding
-    runs-on: ubuntu-latest
+    name: Exact-revision 18-subject no-model binding
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
+    env:
+      BINDING_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          python-version: "3.11"
+          ref: ${{ env.BINDING_SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11.16"
           cache: pip
-      - name: Install exact promoted evidence stack
+          cache-dependency-path: ${{ env.PROMOTED_CONSTRAINTS }}
+      - name: Install pinned promoted evidence stack
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e packages/neuros-core
-          python -m pip install -e packages/neuros-drivers
-          python -m pip install -e packages/neuros-models
-          python -m pip install -e "packages/neuros-foundation[evidence,braindecode-evidence]"
-          python -m pip install -e packages/orion
-          python -m pip install -e packages/neuros
-      - name: Build exact-main no-model promoted binding
+          python -m pip install --disable-pip-version-check \
+            -c "${PROMOTED_CONSTRAINTS}" \
+            "pip==26.2.1" "setuptools==79.0.1" "wheel==0.48.0"
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-core
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-drivers
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros-models
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e "packages/neuros-foundation[evidence,braindecode-evidence]"
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/orion
+          python -m pip install --disable-pip-version-check --no-build-isolation \
+            -c "${PROMOTED_CONSTRAINTS}" -e packages/neuros
+      - name: Assert pinned external dependency frontier
+        run: |
+          python - <<'PY'
+          import importlib.metadata
+          import re
+          from pathlib import Path
+
+          normalize = lambda value: re.sub(r"[-_.]+", "-", value).lower()
+          expected = {}
+          for raw in Path("requirements/nsq-kumar2024-promoted-py311.constraints.txt").read_text().splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                  continue
+              name, version = line.split("==", 1)
+              expected[normalize(name)] = version
+
+          local = {
+              "neuros",
+              "neuros-core",
+              "neuros-drivers",
+              "neuros-foundation",
+              "neuros-models",
+              "neuros-orion",
+          }
+          observed = {}
+          for distribution in importlib.metadata.distributions():
+              raw_name = distribution.metadata.get("Name")
+              if raw_name is None:
+                  continue
+              name = normalize(raw_name)
+              version = str(distribution.version)
+              previous = observed.get(name)
+              if previous is not None and previous != version:
+                  raise SystemExit(
+                      f"conflicting installed versions for {name}: {previous} versus {version}"
+                  )
+              observed[name] = version
+
+          external = {name: version for name, version in observed.items() if name not in local}
+          unexpected = sorted(set(external) - set(expected))
+          mismatched = {
+              name: {"expected": expected[name], "observed": external[name]}
+              for name in sorted(set(external) & set(expected))
+              if external[name] != expected[name]
+          }
+          required = {
+              "braindecode",
+              "mne",
+              "moabb",
+              "numpy",
+              "pip",
+              "pyriemann",
+              "scikit-learn",
+              "scipy",
+              "setuptools",
+              "torch",
+              "wheel",
+          }
+          missing_required = sorted(required - set(external))
+          if unexpected or mismatched or missing_required:
+              raise SystemExit(
+                  "promoted external dependency frontier differs: "
+                  f"unexpected={unexpected}, mismatched={mismatched}, "
+                  f"missing_required={missing_required}"
+              )
+          print(
+              f"validated {len(external)} installed external distributions against "
+              f"{len(expected)} exact constraints"
+          )
+          PY
+      - name: Build exact-revision no-model promoted binding
         run: |
           OUT="${RUNNER_TEMP}/nsq-kumar2024-promoted-binding"
           python -m neuros.evidence.kumar2024_promoted_binding --output "${OUT}"
@@ -70,9 +174,10 @@ jobs:
           execution = json.loads((root / "execution_plan.json").read_text())
           hashes = json.loads((root / "artifact_hashes.json").read_text())
 
+          source_sha = os.environ["BINDING_SOURCE_SHA"]
           assert hashes["schema_version"] == 1
           assert manifest["schema_version"] == 1
-          assert manifest["source_revision"] == os.environ["GITHUB_SHA"]
+          assert manifest["source_revision"] == source_sha
           assert manifest["model_execution_performed"] is False
           assert manifest["final_assessment_predictions_generated"] is False
           assert manifest["final_assessment_metrics_generated"] is False
@@ -88,7 +193,7 @@ jobs:
           assert materialization["authority"]["environment_sha256"] == manifest["environment_authority_sha256"]
           assert materialization["authority"]["raw_materialization_sha256"] == manifest["raw_materialization_sha256"]
           assert environment_lock["environment_authority_sha256"] == manifest["environment_authority_sha256"]
-          assert environment_lock["source_revision"] == os.environ["GITHUB_SHA"]
+          assert environment_lock["source_revision"] == source_sha
 
           assert len(cases) == 270
           assert {item["case_metadata"]["subject"] for item in cases} == set(range(1, 19))
@@ -111,9 +216,9 @@ jobs:
               assert not (root / forbidden).exists(), forbidden
           PY
       - name: Upload immutable promoted binding bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: nsq-kumar2024-promoted-binding-${{ github.sha }}
+          name: nsq-kumar2024-promoted-binding-${{ env.BINDING_SOURCE_SHA }}
           path: ${{ runner.temp }}/nsq-kumar2024-promoted-binding
           if-no-files-found: error
           retention-days: 90
