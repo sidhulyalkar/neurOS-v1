@@ -14,6 +14,7 @@ on:
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
+      - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_neural_system_qualification_baselines.py"
       - "docs/NSQ_KUMAR2024_V1.md"
       - ".github/workflows/nsq-kumar2024-ci.yml"
@@ -31,6 +32,7 @@ on:
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
+      - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_neural_system_qualification_baselines.py"
       - "docs/NSQ_KUMAR2024_V1.md"
       - ".github/workflows/nsq-kumar2024-ci.yml"
@@ -76,6 +78,7 @@ jobs:
             tests/test_kumar2024_nsq_study.py \
             tests/test_kumar2024_comparison_authority.py \
             tests/test_kumar2024_promoted_execution_authority.py \
+            tests/test_kumar2024_promoted_binding_authority.py \
             tests/test_neural_system_qualification_runner.py
       - name: Compile evidence surface
         run: |
@@ -87,7 +90,8 @@ jobs:
             packages/neuros/src/neuros/evidence/kumar2024_materialization.py \
             packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py \
             packages/neuros/src/neuros/evidence/kumar2024_comparison.py \
-            packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py \
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py
 
   upstream-moabb-contract:
     name: Current MOABB processed-epoch contract

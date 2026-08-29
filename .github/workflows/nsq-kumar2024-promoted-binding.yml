@@ -1,0 +1,118 @@
+name: NSQ Kumar2024 promoted binding authority
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-foundation/pyproject.toml"
+      - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_baselines.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialization.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_comparison.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py"
+      - "packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py"
+      - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsq-kumar2024-promoted-binding-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  bind-promoted-study:
+    name: Exact-main 18-subject no-model binding
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install exact promoted evidence stack
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e "packages/neuros-foundation[evidence,braindecode-evidence]"
+          python -m pip install -e packages/orion
+          python -m pip install -e packages/neuros
+      - name: Build exact-main no-model promoted binding
+        run: |
+          OUT="${RUNNER_TEMP}/nsq-kumar2024-promoted-binding"
+          python -m neuros.evidence.kumar2024_promoted_binding --output "${OUT}"
+          python -m neuros.evidence.kumar2024_promoted_binding \
+            --verify-only \
+            --output "${OUT}"
+      - name: Assert promoted binding claim boundary and cardinality
+        run: |
+          OUT="${RUNNER_TEMP}/nsq-kumar2024-promoted-binding"
+          OUT="${OUT}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["OUT"])
+          manifest = json.loads((root / "binding_manifest.json").read_text())
+          materialization = json.loads((root / "materialization.json").read_text())
+          environment_lock = json.loads((root / "environment_lock.json").read_text())
+          cases = json.loads((root / "case_authorities.json").read_text())["authorities"]
+          methods = json.loads((root / "method_specs.json").read_text())["method_specs"]
+          execution = json.loads((root / "execution_plan.json").read_text())
+          hashes = json.loads((root / "artifact_hashes.json").read_text())
+
+          assert hashes["schema_version"] == 1
+          assert manifest["schema_version"] == 1
+          assert manifest["source_revision"] == os.environ["GITHUB_SHA"]
+          assert manifest["model_execution_performed"] is False
+          assert manifest["final_assessment_predictions_generated"] is False
+          assert manifest["final_assessment_metrics_generated"] is False
+          assert manifest["counts"] == {
+              "participants": 18,
+              "case_authorities": 270,
+              "method_realizations": 5,
+              "execution_shards": 1350,
+              "planned_fit_attempts": 6750,
+          }
+          assert len(materialization["authority"]["processed_shards"]) == 18
+          assert materialization["study_materialization_sha256"] == manifest["study_materialization_sha256"]
+          assert materialization["authority"]["environment_sha256"] == manifest["environment_authority_sha256"]
+          assert materialization["authority"]["raw_materialization_sha256"] == manifest["raw_materialization_sha256"]
+          assert environment_lock["environment_authority_sha256"] == manifest["environment_authority_sha256"]
+          assert environment_lock["source_revision"] == os.environ["GITHUB_SHA"]
+
+          assert len(cases) == 270
+          assert {item["case_metadata"]["subject"] for item in cases} == set(range(1, 19))
+          assert {item["case_metadata"]["held_out_session"] for item in cases} == {"1", "2", "3", "4", "5"}
+          assert {item["case_metadata"]["split_seed"] for item in cases} == {2026, 3407, 9109}
+
+          expected_methods = {
+              "mne-csp-lda/deterministic",
+              "pyriemann-rg-lr/deterministic",
+              "braindecode-eegnet/model-seed-31415",
+              "braindecode-eegnet/model-seed-384165836",
+              "braindecode-eegnet/model-seed-3991196546",
+          }
+          assert {item["realization_key"] for item in methods} == expected_methods
+          assert execution["execution_plan_sha256"] == manifest["execution_plan_sha256"]
+          assert len(execution["template"]["shards"]) == 1350
+          assert execution["template"]["expected_fit_attempts"] == 6750
+
+          for forbidden in ("results.csv", "case_results.json", "analysis.json", "observation_roles.json"):
+              assert not (root / forbidden).exists(), forbidden
+          PY
+      - name: Upload immutable promoted binding bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsq-kumar2024-promoted-binding-${{ github.sha }}
+          path: ${{ runner.temp }}/nsq-kumar2024-promoted-binding
+          if-no-files-found: error
+          retention-days: 90
