@@ -4,19 +4,33 @@ on:
   pull_request:
     paths:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py"
+      - "packages/neuros/src/neuros/cli/entrypoint.py"
+      - "packages/neuros/src/neuros/cli/project_commands.py"
+      - "packages/neuros/pyproject.toml"
+      - "tests/test_cli_v3.py"
       - "tests/test_neural_system_qualification_v1.py"
       - "tests/test_neural_system_qualification_adaptation.py"
       - "tests/test_neural_system_qualification_predictions.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
+      - "docs/NSQ_RUNNER_V1.md"
+      - "docs/getting-started/bring-your-own-model.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
   push:
     branches: [main]
     paths:
       - "packages/neuros-foundation/src/neuros/foundation_models/qualification.py"
+      - "packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py"
+      - "packages/neuros/src/neuros/cli/entrypoint.py"
+      - "packages/neuros/src/neuros/cli/project_commands.py"
+      - "packages/neuros/pyproject.toml"
+      - "tests/test_cli_v3.py"
       - "tests/test_neural_system_qualification_v1.py"
       - "tests/test_neural_system_qualification_adaptation.py"
       - "tests/test_neural_system_qualification_predictions.py"
       - "docs/NEURAL_SYSTEM_QUALIFICATION_V1.md"
+      - "docs/NSQ_RUNNER_V1.md"
+      - "docs/getting-started/bring-your-own-model.md"
       - ".github/workflows/neural-system-qualification-ci.yml"
 
 permissions:
@@ -35,8 +49,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -87,4 +101,72 @@ jobs:
       - name: Compile qualification surface
         run: |
           python -m compileall -q \
-            packages/neuros-foundation/src/neuros/foundation_models/qualification.py
+            packages/neuros-foundation/src/neuros/foundation_models/qualification.py \
+            packages/neuros-foundation/src/neuros/foundation_models/qualification_runner.py
+
+  external-method-starter:
+    name: Generated external method / production NSQ referee
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install public SDK plus qualification authority
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation
+          python -m pip install -e packages/neuros
+          python -m pip install scikit-learn pytest
+      - name: Generate external method starter
+        run: |
+          set -euo pipefail
+          ROOT="${RUNNER_TEMP}/external-nsq-method"
+          neuros init "${ROOT}" --template nsq-method --json \
+            > "${RUNNER_TEMP}/external-method-init.json"
+          test -s "${ROOT}/method.py"
+          test -s "${ROOT}/demo.py"
+          test -s "${ROOT}/test_method.py"
+          test -s "${ROOT}/pyproject.toml"
+      - name: Execute generated method through production NSQ referee
+        run: |
+          set -euo pipefail
+          ROOT="${RUNNER_TEMP}/external-nsq-method"
+          cd "${ROOT}"
+          python demo.py > "${RUNNER_TEMP}/external-method-demo.json"
+          pytest -q
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "external-method-demo.json").read_text()
+          )
+          assert payload["artifact_kind"] == "synthetic_external_method_nsq_referee_demo"
+          assert payload["claim_boundary"]["adapter_contract_exercised"] is True
+          assert payload["claim_boundary"]["observation_authority_exercised"] is True
+          assert payload["claim_boundary"]["calibration_frontier_exercised"] is True
+          assert payload["claim_boundary"]["learned_state_identity_exercised"] is True
+          assert payload["claim_boundary"]["numerical_result_interpretable"] is False
+          rows = payload["rows"]
+          assert len(rows) >= 2
+          assert all(row["status"] == "success" for row in rows)
+          assert all(row["learned_state_addressable"] is True for row in rows)
+          assert len({row["run_contract_sha256"] for row in rows}) == len(rows)
+          assert len({row["evaluation_indices_sha256"] for row in rows}) == 1
+          PY
+      - name: Upload synthetic adapter-contract evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: external-nsq-method-starter-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/external-method-init.json
+            ${{ runner.temp }}/external-method-demo.json
+          if-no-files-found: error
+          retention-days: 30

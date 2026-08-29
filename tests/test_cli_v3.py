@@ -69,6 +69,34 @@ def test_init_project_creates_a_production_validated_starter(tmp_path: Path):
     assert "neuros qualify neuros.yaml" in (root / "README.md").read_text(encoding="utf-8")
 
 
+def test_init_project_creates_external_nsq_method_starter(tmp_path: Path):
+    root = tmp_path / "method"
+    result = init_project(root, template="nsq-method")
+
+    assert result["template"] == "nsq-method"
+    assert result["config"] is None
+    assert set(result["created"]) == {
+        ".gitignore",
+        "README.md",
+        "demo.py",
+        "method.py",
+        "pyproject.toml",
+        "test_method.py",
+    }
+    assert result["next_commands"] == ["python demo.py", "pytest -q"]
+    assert "numerical scores cannot support" in result["evidence_boundary"]
+
+    method = (root / "method.py").read_text(encoding="utf-8")
+    demo = (root / "demo.py").read_text(encoding="utf-8")
+    test = (root / "test_method.py").read_text(encoding="utf-8")
+    assert "ExternalDecoderMethodSpec" in method
+    assert 'state_identity_kind="tensor_sha256"' in method
+    assert "unsafe_pickle_used" in method
+    assert "run_external_qualification_case" in demo
+    assert '"numerical_result_interpretable": False' in demo
+    assert "evaluation_indices_sha256" in test
+
+
 def test_init_project_refuses_to_replace_managed_files_without_force(tmp_path: Path):
     root = tmp_path / "starter"
     init_project(root)
@@ -96,3 +124,14 @@ def test_init_entrypoint_emits_machine_readable_project_manifest(tmp_path: Path,
     assert payload["project_root"] == str(root.resolve())
     assert payload["config"] == str((root / "neuros.yaml").resolve())
     assert payload["next_commands"][0] == "neuros doctor"
+
+
+def test_init_entrypoint_supports_nsq_method_template(tmp_path: Path, capsys):
+    root = tmp_path / "method"
+    code = _run_init([str(root), "--template", "nsq-method", "--json"])
+    assert code == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["template"] == "nsq-method"
+    assert payload["config"] is None
+    assert payload["next_commands"] == ["python demo.py", "pytest -q"]
