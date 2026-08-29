@@ -1,3 +1,7 @@
 * text=auto eol=lf
 *.{cmd,[cC][mM][dD]} text eol=crlf
 *.{bat,[bB][aA][tT]} text eol=crlf
+
+# Research notebooks are supporting documentation/experiments, not the primary
+# implementation language of the neurOS platform.
+*.ipynb linguist-documentation

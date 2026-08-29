@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Support and usage questions
+    url: https://github.com/sidhulyalkar/neurOS-v1/blob/main/SUPPORT.md
+    about: Check supported workflows, diagnostics, and where to ask usage questions before opening a defect.
+  - name: Security policy
+    url: https://github.com/sidhulyalkar/neurOS-v1/blob/main/SECURITY.md
+    about: Do not report security-sensitive information in a public issue.

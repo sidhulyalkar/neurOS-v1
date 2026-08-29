@@ -1,10 +1,12 @@
 # First 10 Minutes
 
-This path is designed to answer one question quickly: **does the neurOS execution and evidence stack work correctly on this machine before I connect real hardware or train a model?**
+The fastest way to understand neurOS is to make it produce an evidence artifact.
 
-It deliberately uses the mock source and a training-free decoder so installation, runtime, recording, replay, and provenance failures cannot hide behind model fitting.
+The starter path deliberately uses a deterministic mock neural stream and a training-free decoder. That keeps installation, runtime, recording, replay, and provenance failures visible instead of hiding them behind a model-training job.
 
-## 1. Create an isolated environment
+## 1. Install the current developer preview
+
+Until coordinated public package publishing is enabled and qualified, the repository checkout is the authoritative installation path:
 
 ```bash
 git clone https://github.com/sidhulyalkar/neurOS-v1.git
@@ -14,127 +16,121 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python scripts/bootstrap.py --profile bci --test-tools
 ```
 
-The repository is currently the authoritative development install until coordinated public package publishing is enabled and qualified.
+A public release should eventually reduce this to a normal package install. Do not treat the monorepo bootstrap as the final onboarding design.
 
-## 2. Inspect what is actually installed
-
-```bash
-neuros doctor --json
-neuros plugins --json
-neuros devices --json
-neuros compatibility --json
-```
-
-`compatibility` is an evidence registry, not a package-detection banner. A planned integration has no qualification tier. An experimental integration states exactly which upstream surface has executable evidence.
-
-Useful focused checks include:
+## 2. Create a clean project
 
 ```bash
-neuros compatibility mne --json
-neuros compatibility braindecode --json
-neuros compatibility snap --json
-neuros compatibility ngclearn --json
+neuros init my-neuros-project
+cd my-neuros-project
 ```
 
-## 3. Validate and run a complete graph
+The generated project contains only:
+
+```text
+my-neuros-project/
+  neuros.yaml
+  README.md
+  .gitignore
+```
+
+It is intentionally not a framework generator. The point is to create the smallest configuration that exercises the maintained runtime and evidence boundary.
+
+`neuros init` will not overwrite its managed starter files unless `--force` is supplied, and even then it preserves unrelated user files.
+
+## 3. Inspect the environment
 
 ```bash
-neuros validate configs/examples/mock_bci.yaml --json
-neuros run configs/examples/mock_bci.yaml --duration 2 --json
+neuros doctor
+neuros plugins
+neuros devices
+neuros compatibility
 ```
 
-This exercises the same `SignalFrame -> RuntimeGraph -> DecoderOutput` path used by maintained live/replay execution. Runtime edges have bounded queues and explicit overload policy rather than unmeasured buffering.
+`compatibility` is an evidence registry, not a marketing banner. An integration is allowed to be experimental or planned; the command should tell you what has actually been exercised.
 
-## 4. Prove that input can be replayed
+## 4. Validate and execute the runtime
 
 ```bash
-SESSION=/tmp/neuros-first-session
-
-neuros record configs/examples/mock_bci.yaml \
-  --output "${SESSION}" \
-  --session-id first-10-minutes \
-  --duration 2 \
-  --json
-
-neuros inspect "${SESSION}" --verify --json
-
-neuros replay "${SESSION}" \
-  --config configs/examples/mock_bci.yaml \
-  --json
+neuros validate neuros.yaml
+neuros run neuros.yaml --duration 2
 ```
 
-The canonical archive preserves stream/sequence identity, timing domains, quality metadata, configuration/provenance, runtime information, and frame integrity hashes. NWB/Zarr are interoperability exports rather than replacements for exact neurOS replay semantics.
+This uses the same config resolution, plugin registry, bounded runtime graph, and decoder-output path used by maintained live and replay execution.
 
-## 5. Produce a reproducible qualification bundle
+## 5. Seal a reproducible software qualification
 
 ```bash
-QUAL=/tmp/neuros-qualification
+neuros qualify neuros.yaml \
+  --output evidence/qualification \
+  --duration 1
 
-neuros qualify configs/examples/mock_bci.yaml \
-  --output "${QUAL}" \
-  --duration 1.0
-
-neuros reproduce "${QUAL}"
+neuros reproduce evidence/qualification
 ```
 
-The resulting bundle seals configuration, environment, compatibility, runtime, device/clock/model metadata, decoder output evidence, session data, file hashes, and a root artifact identity.
+The qualification bundle binds the exact software path that ran, its configuration and environment identity, runtime evidence, recording integrity, decoder output evidence, file hashes, and a root artifact identity.
 
-This proves a **runtime record/replay software qualification boundary**. It does not turn a mock source into physical hardware evidence.
+This establishes a **software/runtime evidence boundary only**. The mock source does not become real EEG. A software qualification is not hardware validation, decoder efficacy, closed-loop safety, or clinical evidence.
 
-## 6. Know the claim boundary
+## 6. Record and replay explicitly
 
-The public evidence ladder is:
+When exact session replay is the thing you care about:
+
+```bash
+neuros record neuros.yaml \
+  --output sessions/example \
+  --session-id example \
+  --duration 2
+
+neuros inspect sessions/example --verify
+neuros replay sessions/example --config neuros.yaml
+```
+
+The canonical archive preserves sequence and timing identity, stream descriptors, quality metadata, configuration/provenance, runtime information, and per-frame integrity. NWB and Zarr remain interoperability exports rather than replacements for exact neurOS replay semantics.
+
+## 7. Choose the lane that matches your actual problem
+
+### I already have a model
+
+Do not rewrite it in neurOS. Bring it through the external model/plugin and Neural System Qualification boundary so it can be evaluated under the same observation roles, preprocessing authority, calibration budget, score semantics, and failure preservation as competing methods.
+
+Start with [Neural System Qualification](../NEURAL_SYSTEM_QUALIFICATION_V1.md) and [Plugin Authoring](../PLUGIN_AUTHORING.md).
+
+### I already have MNE/MOABB/Braindecode code
+
+Keep using those projects for the work they already do well. neurOS should add execution, replay, provenance, qualification, and claim authority around them rather than replace their preprocessing, dataset, or model ecosystems.
+
+See [Ecosystem Compatibility](../COMPATIBILITY.md).
+
+### I want to compare neural representations or reduce calibration
+
+That is where ORION belongs. ORION is the intelligence plane for tokenization, representations, transfer, personalization, and governed adaptation. It should compete under the same external qualification authority rather than receive privileged benchmark access.
+
+See [ORION Adaptation Authority](../ADAPTATION_AUTHORITY.md).
+
+### I want to use physical EEG hardware
+
+Start with a maintained BrainFlow, LSL, or device boundary. Do not describe a path as hardware-qualified until a named device, firmware, transport, host, timing, packet-loss, and replay configuration has physical evidence bound to a verified qualification artifact.
+
+See [Hardware Qualification](../HARDWARE_QUALIFICATION.md).
+
+## 8. Understand the evidence ladder
 
 ```text
 software contract
       -> integration
-      -> replay / scientific synthetic
+      -> deterministic replay / scientific synthetic
       -> real dataset
-      -> hardware
+      -> physical hardware
       -> closed loop
-      -> clinical
+      -> clinical evidence
 ```
 
-See [Scientific Claims](../SCIENTIFIC_CLAIMS.md) before interpreting a benchmark or compatibility label. The important discipline is simple: stronger language requires stronger evidence.
+A result does not silently jump tiers because it looks convincing. See [Scientific Claims](../SCIENTIFIC_CLAIMS.md).
 
-## 7. Choose the next path
+## If something fails
 
-### Existing MNE data
-
-Install the optional bridge and convert an existing `Raw` object without hidden resampling or channel reordering:
-
-```bash
-pip install -e "packages/neuros[interop-mne]"
-```
-
-See [Ecosystem Compatibility](../COMPATIBILITY.md).
-
-### Model benchmarking
-
-Use the neural-window/Braindecode and longitudinal EEG evidence paths when the question is decoder or representation performance. Keep subject/session/device evaluation authority explicit rather than randomizing trials across the deployment unit you intend to generalize to.
-
-### NeuroAI / representation research
-
-See [NeuroAI Ecosystem](../NEUROAI_ECOSYSTEM.md) for SNAP-derived spectral evidence and the optional ngc-learn bridge. Their current evidence tiers are intentionally narrower than their broader research ecosystems.
-
-### ORION
-
-```bash
-python scripts/bootstrap.py --profile orion --test-tools
-python scripts/orion/run_tokenizer_benchmark.py \
-  configs/orion/tokenization_smoke.yaml \
-  --output /tmp/orion-tokenization
-```
-
-Synthetic tokenization evidence is a falsification surface, not proof of superior real-human transfer. ORION promotion requires leakage-controlled, deployment-unit-disjoint evidence.
-
-### Physical hardware
-
-Start from a maintained driver/BrainFlow/LSL boundary, but do not describe it as hardware-qualified until a named device + firmware + transport + host configuration has physical evidence bound to a verified qualification bundle.
-
-## A useful issue report
-
-If any step above fails, capture:
+Include the following in an issue:
 
 ```bash
 neuros doctor --json
@@ -142,6 +138,6 @@ neuros compatibility --json
 python --version
 ```
 
-and include the exact Git commit, operating system, failing command, and smallest reproducible configuration. Do not attach credentials or identifiable participant data to a public issue.
+Also include the exact Git commit, operating system, command, and smallest reproducible `neuros.yaml`. Never attach credentials or identifiable participant data to a public issue.
 
-The full contributor/development path is documented in [Installation](installation.md) and the repository `SUPPORT.md`.
+For the stricter installed-wheel qualification path, see [Developer Preview Journey](developer-preview.md).

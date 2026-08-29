@@ -43,8 +43,8 @@ jobs:
     name: Installed-wheel external-user journey
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -82,6 +82,22 @@ jobs:
           done
           "${PIP}" install "${CORE}" "${DRIVERS}" "${MODELS}" "${SDK}" "${ARENA}" "${PLUGIN}"
           "${PIP}" check
+      - name: Qualify generated starter project from installed wheel
+        run: |
+          set -euo pipefail
+          CLI="${RUNNER_TEMP}/developer-preview-env/bin/neuros"
+          STARTER="${RUNNER_TEMP}/neuros-starter"
+          "${CLI}" init "${STARTER}" --json > "${RUNNER_TEMP}/starter-init.json"
+          test -s "${STARTER}/neuros.yaml"
+          test -s "${STARTER}/README.md"
+          "${CLI}" validate "${STARTER}/neuros.yaml" --json > "${RUNNER_TEMP}/starter-validate.json"
+          "${CLI}" run "${STARTER}/neuros.yaml" --duration 0.1 --json > "${RUNNER_TEMP}/starter-run.json"
+          "${CLI}" qualify "${STARTER}/neuros.yaml" \
+            --output "${STARTER}/evidence/qualification" \
+            --duration 0.1 \
+            --json > "${RUNNER_TEMP}/starter-qualify.json"
+          "${CLI}" reproduce "${STARTER}/evidence/qualification" \
+            --json > "${RUNNER_TEMP}/starter-reproduce.json"
       - name: Run the complete installed-wheel journey
         run: |
           set -euo pipefail
@@ -108,9 +124,11 @@ jobs:
           PY
       - name: Upload developer-preview evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: neurOS-developer-preview-${{ github.sha }}
-          path: ${{ runner.temp }}/developer-preview-report
+          path: |
+            ${{ runner.temp }}/developer-preview-report
+            ${{ runner.temp }}/starter-*.json
           if-no-files-found: warn
           retention-days: 30

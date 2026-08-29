@@ -70,7 +70,7 @@ dev = [
 ]
 
 [project.scripts]
-neuros = "neuros.cli:main"
+neuros = "neuros.cli.entrypoint:main"
 neuros-nsq-kumar2024 = "neuros.evidence.kumar2024:main"
 
 [project.urls]
