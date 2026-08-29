@@ -1,0 +1,79 @@
+name: Reproducible bug report
+description: Report a neurOS runtime, packaging, replay, CLI, or evidence-contract defect
+title: "[bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping harden neurOS. Please reduce the failure to the smallest public configuration you can. Do not attach credentials, private keys, or identifiable participant data.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - CLI / project setup
+        - Runtime / configuration
+        - Recording / replay
+        - Plugin / ecosystem integration
+        - Qualification / evidence artifact
+        - ORION
+        - Packaging / installation
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Exact neurOS revision or release
+      description: Prefer the full 40-character Git commit or an exact release tag.
+      placeholder: 0123456789abcdef0123456789abcdef01234567
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Smallest failing command or API call
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Minimal configuration or code
+      description: Remove participant data, credentials, and unrelated configuration.
+      render: yaml
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include the complete error message or traceback when possible.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `neuros doctor --json`
+      description: Paste the machine-readable diagnostic output when the CLI can start.
+      render: json
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Relevant compatibility information
+      description: For integration bugs, include `neuros compatibility --json` or the focused integration entry.
+      render: json
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Data and claim safety
+      options:
+        - label: I removed credentials and identifiable participant data from this report.
+          required: true
+        - label: I have not interpreted a software-contract failure as evidence about biological, hardware, safety, or clinical performance.
+          required: true
