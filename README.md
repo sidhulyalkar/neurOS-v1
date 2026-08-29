@@ -1,85 +1,20 @@
 # neurOS
 
-**neurOS is an open execution and qualification layer for neural systems.**
+**The open qualification and reproducible execution layer for neural AI and BCI systems.**
 
-Most neural-interface projects can train a model. Far fewer can answer, precisely and reproducibly:
+Your model can train. Can you prove exactly **what data it saw, what calibration it consumed, what state was evaluated, what failed, and what claim the result actually supports?**
 
-- which neural observations were allowed to influence training, calibration, adaptation, or model selection;
-- whether the deployed subject/session/device was genuinely unseen under the declared data and pretraining lineage;
-- whether preprocessing or adaptation touched the final assessment set;
-- whether a model artifact is exactly the state that was qualified;
-- whether an improvement survives calibration cost, session shift, montage changes, artifacts, latency, and failure cases;
-- what part of a claim is supported by software, real data, physical hardware, closed-loop evidence, or clinical work.
+neurOS turns those questions into executable contracts and content-addressed evidence.
 
-neurOS is being built to make those questions executable rather than rhetorical.
+Bring MNE, MOABB, Braindecode, BrainFlow/LSL, a lab model, or your own Python implementation. neurOS is not trying to replace those ecosystems. It adds the missing layer around them: **runtime identity, exact replay, observation-role authority, leakage-controlled qualification, model-state provenance, calibration accounting, failure preservation, and evidence grading.**
 
-**ORION** is the complementary neural-intelligence layer. It explores tokenization, learned representations, transfer, personalization, and governed adaptation under the same evidence authority.
+**ORION** is the optional neural-intelligence plane on top: tokenization, representations, transfer, personalization, and governed adaptation tested under the same authority rather than a privileged benchmark path.
 
-> **Current status:** active research and engineering platform. Passing CI establishes specific software contracts only. It does not imply biological correctness, model superiority, hardware qualification, online BCI efficacy, safety certification, or clinical benefit.
+> **Status:** active research and engineering developer preview. Current CI proves named software contracts, not biological correctness, model superiority, physical hardware validity, online BCI efficacy, safety certification, or clinical benefit. The first frozen full real-data NSQ comparison is still being qualified.
 
-## The platform
+## Get useful evidence in minutes
 
-The public architecture is intentionally smaller than the monorepo:
-
-| Surface | Responsibility |
-| --- | --- |
-| **neurOS** | acquisition/runtime contracts, clocks, configuration, recording/replay, interoperability, deployment semantics |
-| **ORION** | neural tokenization, representations, transfer, personalization, governed adaptation |
-| **Evidence / NSQ** | frozen protocols, observation-role authority, scoring, model participation, artifacts, falsification, claim qualification |
-| **Studio** | future inspection of runtime, evidence, representations, adaptation, quality, and provenance without creating a second runtime |
-
-`neuros-arena` belongs to Evidence. It is a deterministic systems wind tunnel for finding failures across display, neural-world, device, transport, decoder, and application boundaries. Synthetic conformance is not human physiological validation.
-
-```text
-hardware / LSL / public data / replay
-                 |
-                 v
-               neurOS
- SignalFrame -> RuntimeGraph -> recording / replay / quality
-                 |
-          +------+------+
-          |             |
-          v             v
-        ORION       external methods
- representation    MNE / Braindecode /
- + adaptation      external plugins
-          \             /
-           +-----+-----+
-                 v
-                NSQ
- protocol + observation authority + scoring + artifact identity
-                 |
-                 v
-        reproducible evidence
-                 |
-                 v
-               Studio
-```
-
-## What is solid today
-
-The repository has moved beyond a prototype architecture in several important ways:
-
-- immutable canonical signal/frame and descriptor contracts;
-- config-first native runtime graphs with bounded queue policy and latency/quality telemetry;
-- deterministic recording, integrity verification, and replay;
-- causal chunk-invariant streaming DSP;
-- clean workspace wheel ownership and installed-wheel developer-preview testing;
-- out-of-tree plugin authoring through Python entry points;
-- Scientific Authority v2 for lineage, leakage, preprocessing, information roles, metrics, repeated measures, and failure preservation;
-- Model Artifact v1 for content-addressed model promotion, reconstruction, rollback, and provenance;
-- Neural System Qualification v1 plus an executable external-method runner;
-- direct proving paths for canonical MNE/scikit-learn and upstream Braindecode participation;
-- ORION adaptation/state-selection/final-assessment authority;
-- deterministic Arena falsification and counterexample tooling.
-
-The most important missing result is also clear: **the first frozen real-data NSQ study has not yet been completed.** ORION therefore does not currently claim a calibration or representation advantage.
-
-See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for the strict maturity map.
-
-## Quick start
-
-This is a multi-distribution Python workspace. For the standard BCI development profile:
+Until coordinated public package publishing is qualified, install from the repository:
 
 ```bash
 git clone https://github.com/sidhulyalkar/neurOS-v1.git
@@ -89,201 +24,211 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python scripts/bootstrap.py --profile bci --test-tools
 ```
 
-Exercise the installed platform:
+Create a clean starter project:
 
 ```bash
-neuros doctor --json
-neuros plugins --json
-neuros devices --json
-neuros compatibility --json
-neuros validate configs/examples/mock_bci.yaml --json
-neuros run configs/examples/mock_bci.yaml --duration 2 --json
+neuros init my-neuros-project
+cd my-neuros-project
+
+neuros doctor
+neuros validate neuros.yaml
+neuros run neuros.yaml --duration 2
+neuros qualify neuros.yaml --output evidence/qualification --duration 1
+neuros reproduce evidence/qualification
 ```
 
-The checked-in smoke configuration is deliberately training-free. Installation checks should not hide model fitting behind the CLI.
+The starter uses a deterministic mock stream so installation, runtime, replay, and provenance failures cannot hide behind model fitting. Its qualification bundle is **software/runtime evidence only**.
 
-## Record, replay, qualify
+See [First 10 Minutes](docs/getting-started/first-10-minutes.md).
 
-A live or deterministic source can be recorded through the canonical neurOS archive and replayed through the same runtime graph:
+## Bring your own model
 
-```bash
-neuros record configs/examples/mock_bci.yaml \
-  --output /tmp/session \
-  --session-id demo \
-  --duration 10
+You do not subclass a neurOS neural network or adopt a neurOS training loop.
 
-neuros inspect /tmp/session --verify --json
+An external model participates through a deliberately small contract:
 
-neuros replay /tmp/session \
-  --config configs/examples/mock_bci.yaml \
-  --json
+```text
+ExternalDecoderMethodSpec
+        |
+factory.create() -> fresh decoder
+        |
+        +-- fit(authorized X, y)
+        +-- predict(untouched X_final)
+        +-- optional predict_proba(X_final)
+        +-- learned_state()
+        |
+        v
+       NSQ
+ observation roles + calibration budget + score semantics
+ + provenance + failures + immutable result identity
 ```
 
-The archive preserves sequence/timing/quality metadata, stream descriptors, configuration identity, Git/package provenance, runtime metrics, and per-frame integrity. NWB and Zarr are interoperability exports rather than substitutes for exact neurOS replay semantics.
+That means an sklearn pipeline, upstream Braindecode model, private lab decoder, or pretrained representation can be evaluated by the same referee without moving its training implementation into this repository.
 
-Software qualification bundles can also be sealed and independently verified:
+Start with [Bring Your Own Model](docs/getting-started/bring-your-own-model.md) and [NSQ Runner v1](docs/NSQ_RUNNER_V1.md).
 
-```bash
-neuros qualify configs/examples/mock_bci.yaml \
-  --output /tmp/qualification \
-  --duration 1.0
+## The missing ecosystem layer
 
-neuros reproduce /tmp/qualification
-```
+| Existing ecosystem | What it already does well | What neurOS adds |
+| --- | --- | --- |
+| **MNE-Python** | neurophysiology preprocessing, analysis, visualization | exact execution/replay and claim-bound provenance around the pipeline |
+| **MOABB / EEG data ecosystems** | public EEG datasets and benchmark plumbing | frozen observation roles, calibration authority, failure-preserving system qualification |
+| **Braindecode / model libraries** | maintained neural architectures and training tools | external participation under identical data, calibration, state-selection, and scoring authority |
+| **BrainFlow / LSL / device stacks** | acquisition and transport | descriptor/timing provenance, replay, measured hardware qualification, evidence boundaries |
+| **NWB / BIDS / Zarr** | interoperable data organization/storage | runtime-to-artifact identity and exact execution provenance rather than a competing file format |
+| **Your lab code** | the model or experiment you actually care about | a reproducible qualification envelope without forcing a framework rewrite |
 
-A synthetic qualification bundle cannot self-award a physical hardware claim.
+The intended value proposition is simple:
+
+> **Use neurOS when the hard problem is no longer “can I run a model?” but “can another researcher audit exactly what this neural-system claim means and reproduce the evidence boundary?”**
 
 ## Neural System Qualification
 
-NSQ is becoming the peer-facing wedge of the project.
+NSQ is the peer-facing wedge of neurOS.
 
-An external method may own its architecture, optimizer, and training implementation. neurOS owns the scientific boundary around it:
+A frozen qualification binds:
 
 ```text
-frozen dataset lineage
-      |
-frozen observation roles
-      |
-external method factory
-      |
-exact learned-state binding
-      |
-trusted scorecard semantics
-      |
-preserved success / failure rows
-      |
-immutable qualification result
+upstream dataset / revision
+        |
+processed-data authority
+        |
+source / calibration / adaptation / final observation roles
+        |
+external method identity
+        |
+fresh model execution at each authorized budget
+        |
+learned-state identity
+        |
+frozen score semantics
+        |
+success + failure rows
+        |
+content-addressed evidence artifact
 ```
 
-The next flagship study is tracked in [issue #82](https://github.com/sidhulyalkar/neurOS-v1/issues/82): a longitudinal motor-imagery comparison on MOABB Kumar2024 using MNE CSP+LDA and direct upstream Braindecode baselines under identical prospective calibration authority.
+The flagship question is not just “which decoder has the highest pooled accuracy?”
 
-The key question is not merely “which model has the highest accuracy?” It is:
+> **How much held-out neural utility does a method achieve as a function of user-specific calibration cost, under exactly the same prospective authority?**
 
-> **How much held-out neural utility does each method achieve as a function of per-user calibration cost?**
-
-ORION should compete only after that external baseline floor is frozen.
-
-See [`docs/NEURAL_SYSTEM_QUALIFICATION_V1.md`](docs/NEURAL_SYSTEM_QUALIFICATION_V1.md) and [`docs/NSQ_RUNNER_V1.md`](docs/NSQ_RUNNER_V1.md).
+The current promoted Kumar2024 work is deliberately freezing external classical and Braindecode baselines before ORION is allowed into a superiority comparison. See [issue #82](https://github.com/sidhulyalkar/neurOS-v1/issues/82).
 
 ## ORION
 
-ORION starts where provenance-rich neural data becomes a machine-native representation:
+ORION is the intelligence plane, not a shortcut around qualification:
 
 ```text
-SignalFrame(s)
-    |
-    v
+neural observations
+      |
 NeuroTokenizer
-    |
-    v
+      |
 NeuroTokenBatch
-    |
-    v
+      |
 NeuralEncoder
-    |
-    v
+      |
 RepresentationBatch
-    |
-    v
+      |
 AdaptiveDecoder
-    |
-    v
+      |
 DecoderOutput
 ```
 
-Current tokenization research includes exact events, binned counts, relative-ISI WAIT/SPIKE representations, burst/pause/rebound tokens, synchrony packets, vector-quantized motifs, and population assemblies.
-
-```bash
-python scripts/orion/run_tokenizer_benchmark.py \
-  configs/orion/tokenization_smoke.yaml \
-  --output /tmp/orion-tokenization
-```
-
-Synthetic motif recovery is a falsification tool, not evidence that a tokenizer is better on real human neural data.
-
-The long-term ORION hypothesis is explicit and testable:
+Its long-term hypothesis is falsifiable:
 
 > Preserve or improve held-out neural utility while materially reducing user-specific calibration, without sacrificing robustness, latency, provenance, uncertainty calibration, or representation stability.
 
-Real longitudinal evidence decides whether that hypothesis survives.
+Current tokenization and adaptation contracts are research surfaces. Real deployment-disjoint evidence decides whether the hypothesis survives.
 
-## Interoperate instead of reimplement
+## What is solid today
 
-neurOS should not become a replacement for mature neuroscience ecosystems. It should make their boundaries more reproducible and their claims more auditable.
+The strongest maintained capabilities include:
 
-Current evidence-backed integration lanes include BrainFlow, Lab Streaming Layer, MNE-Python, NWB/Zarr, MOABB, Braindecode, SNAP, and a narrow ngc-learn boundary.
+- canonical signal/frame and stream-descriptor contracts;
+- config-first runtime graphs with bounded queues and latency/quality telemetry;
+- deterministic recording, integrity verification, and replay;
+- installed-wheel developer-preview qualification;
+- out-of-tree plugin discovery through Python entry points;
+- Scientific Authority for lineage, information roles, leakage, metrics, repeated measures, and failures;
+- content-addressed Model Artifact promotion/reconstruction boundaries;
+- Neural System Qualification with external model participation;
+- upstream MNE/scikit-learn, pyRiemann, and Braindecode proving paths;
+- governed ORION adaptation/state-selection/final-assessment contracts;
+- deterministic systems falsification through Arena.
 
-Examples:
+See [Project Status](docs/PROJECT_STATUS.md) for the strict maturity map.
 
-- BrainFlow / LSL for acquisition and transport rather than a giant proprietary driver catalog;
-- MNE for neurophysiology analysis/preprocessing rather than a competing preprocessing universe;
-- MOABB for public EEG access and benchmark data rather than a duplicate dataset registry;
-- Braindecode for maintained neural architectures rather than copied model implementations;
-- NWB/Zarr for interoperable export while neurOS preserves exact runtime replay semantics.
+## Record, replay, qualify
 
-See [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) and [`docs/NEUROAI_ECOSYSTEM.md`](docs/NEUROAI_ECOSYSTEM.md).
+```bash
+neuros record neuros.yaml \
+  --output sessions/example \
+  --session-id demo \
+  --duration 10
 
-## Internal workspace map
-
-The repository still contains multiple implementation distributions. They are not twelve equal product identities.
-
-```text
-packages/
-  neuros-core/          runtime/data/replay/plugin contracts
-  neuros/               public SDK + CLI composition
-  neuros-drivers/       hardware, simulated, dataset and LSL sources
-  orion/                ORION representation/adaptation contracts
-  neuros-foundation/    external models/data + current NSQ/evidence implementation
-  neuros-models/        supporting task decoders
-  neuros-sourceweigher/ source/domain reliability research
-  neuros-mechint/       intervention/faithfulness evidence research
-  neuros-arena/         deterministic systems falsification
-  neuros-neurofm/       experimental native foundation-model R&D
-  neuros-ui/            experimental Studio substrate
-  neuros-cloud/         experimental distributed/provider integrations
+neuros inspect sessions/example --verify
+neuros replay sessions/example --config neuros.yaml
 ```
 
-The root workspace is a packaging inventory, not proof that every member has equal maturity. Experimental packages should remain visibly experimental until they earn promotion.
+The canonical archive preserves sequence/timing/quality metadata, descriptors, configuration identity, package/Git provenance, runtime evidence, and integrity hashes. NWB and Zarr remain interoperability exports rather than substitutes for exact neurOS replay semantics.
 
-## Scientific evidence hierarchy
-
-A strong result names the evidence level it actually supports:
+## Evidence levels are not interchangeable
 
 ```text
 software contract
       -> integration
-      -> deterministic replay
-      -> scientific synthetic
+      -> deterministic replay / scientific synthetic
       -> real dataset
       -> physical hardware
       -> closed loop
       -> clinical evidence
 ```
 
-A result in one tier does not silently promote another. Representation similarity is not task utility. Attribution is not mechanism. Synthetic conformance is not human performance. Hardware qualification is not closed-loop qualification. Closed-loop evidence is not clinical certification.
+A result cannot self-promote to a stronger tier because it looks persuasive. Representation similarity is not task utility. Attribution is not mechanism. Hardware interoperability is not hardware qualification. Closed-loop evidence is not clinical certification.
 
-See [`docs/SCIENTIFIC_CLAIMS.md`](docs/SCIENTIFIC_CLAIMS.md).
+See [Scientific Claims](docs/SCIENTIFIC_CLAIMS.md).
 
-## What happens next
+## Public architecture
 
-The current execution order is intentionally narrow:
+The monorepo contains multiple distributions, but the public mental model should stay small:
 
-1. finish the first frozen real-data NSQ study (#82);
-2. run ORION and competitive foundation/transfer methods against that exact authority;
-3. add adaptive NSQ observation-role authority for unlabeled target adaptation (#81);
-4. qualify one named physical EEG system end to end;
-5. recruit independent users to reproduce the public qualification workflow;
-6. resume the parked Arena v2 stack only against concrete real-data/hardware falsification targets (#83);
-7. build Studio and stronger closed-loop safety only after the evidence plane earns the need.
+| Surface | Responsibility |
+| --- | --- |
+| **neurOS** | runtime, clocks, configuration, recording/replay, interoperability, qualification composition |
+| **ORION** | neural tokenization, representation, transfer, personalization, governed adaptation |
+| **Evidence / NSQ** | frozen scientific authority, external participation, scoring, artifacts, falsification, claim boundaries |
+| **Studio** | future evidence/runtime inspection surface that must not create a second authority |
 
-See [`ROADMAP.md`](ROADMAP.md).
+Internal packages are implementation boundaries, not twelve separate products. Experimental packages should remain visibly experimental until they earn promotion.
 
 ## Contributing
 
-New subsystems should pass a build-vs-integrate test before becoming maintained code: identify the established ecosystem owner, explain why a thin adapter or upstream contribution is insufficient, state the unique neurOS authority being added, define an external falsification target, quantify maintenance cost, and name the condition under which the work should be removed or upstreamed.
+The project needs external models, datasets, integrations, falsification cases, and independent reproduction more than it needs another internal subsystem.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`GOVERNANCE.md`](GOVERNANCE.md).
+Use the GitHub issue forms for:
+
+- reproducible defects;
+- ecosystem integration proposals;
+- external model/method participation.
+
+New maintained subsystems must answer a build-vs-integrate test: who already owns the adjacent capability, why a thin adapter/upstream contribution is insufficient, what unique neurOS authority is added, how it can be externally falsified, what it costs to maintain, and when it should be removed.
+
+See [Contributing](CONTRIBUTING.md), [Governance](GOVERNANCE.md), and the [Roadmap](ROADMAP.md).
+
+## Near-term release gates
+
+Before calling neurOS a broadly usable public release, the project should earn all of the following:
+
+1. a clean package install path that does not require understanding the monorepo;
+2. a tagged developer-preview release with built wheels and reproducible artifacts;
+3. a frozen public NSQ benchmark slice reproducible in one command;
+4. at least one external model submitted without editing neurOS internals;
+5. independent reproduction by researchers outside the implementation loop;
+6. a stable protected `main` check surface;
+7. public documentation/discussion channels that are maintained like product infrastructure.
+
+Stars are not the primary target. **Independent researchers relying on neurOS because it makes their claims harder to accidentally overstate is the target.** Popularity should follow utility and trust.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT. See [LICENSE](LICENSE).
