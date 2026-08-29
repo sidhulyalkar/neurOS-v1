@@ -1,6 +1,6 @@
 name: Ecosystem integration proposal
 description: Propose a thin neurOS boundary around an existing neuroscience or BCI ecosystem
- title: "[integration] "
+title: "[integration] "
 body:
   - type: markdown
     attributes:
