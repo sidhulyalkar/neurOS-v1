@@ -63,6 +63,7 @@ nav:
   - Home: index.md
   - Getting Started:
       - First 10 Minutes: getting-started/first-10-minutes.md
+      - Bring Your Own Model: getting-started/bring-your-own-model.md
       - Developer Preview Journey: getting-started/developer-preview.md
       - Installation: getting-started/installation.md
   - Platform:
@@ -78,6 +79,8 @@ nav:
       - Architecture: ARCHITECTURE.md
       - Project Status: PROJECT_STATUS.md
   - Scientific Trust:
+      - Neural System Qualification: NEURAL_SYSTEM_QUALIFICATION_V1.md
+      - NSQ Runner: NSQ_RUNNER_V1.md
       - Scientific Claims: SCIENTIFIC_CLAIMS.md
       - Scientific Validation Policy: SCIENTIFIC_VALIDATION_POLICY.md
       - Release Policy: RELEASE_POLICY.md
