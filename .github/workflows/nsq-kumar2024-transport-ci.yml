@@ -1,0 +1,66 @@
+name: NSQ Kumar2024 transport authority
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/src/neuros/evidence/*kumar2024_promoted_fleet*.py"
+      - "tests/test_kumar2024_promoted_fleet_authority.py"
+      - "tests/test_kumar2024_promoted_transport_authority.py"
+      - ".github/workflows/nsq-kumar2024-transport-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros/src/neuros/evidence/*kumar2024_promoted_fleet*.py"
+      - "tests/test_kumar2024_promoted_fleet_authority.py"
+      - "tests/test_kumar2024_promoted_transport_authority.py"
+      - ".github/workflows/nsq-kumar2024-transport-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nsq-kumar2024-transport-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  transport-contracts:
+    name: Atomic claim and invocation contracts
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install FleetAuthority test stack
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e packages/neuros-core
+          python -m pip install --disable-pip-version-check -e packages/neuros-drivers
+          python -m pip install --disable-pip-version-check -e packages/neuros-models
+          python -m pip install --disable-pip-version-check -e packages/neuros-foundation
+          python -m pip install --disable-pip-version-check -e packages/orion
+          python -m pip install --disable-pip-version-check -e packages/neuros pytest pytest-asyncio
+      - name: Run adversarial FleetAuthority and transport tests
+        run: |
+          set -euo pipefail
+          pytest -q \
+            tests/test_kumar2024_promoted_fleet_authority.py \
+            tests/test_kumar2024_promoted_transport_authority.py
+      - name: Compile trusted transport surface
+        run: |
+          set -euo pipefail
+          python -m compileall -q \
+            packages/neuros/src/neuros/evidence/_kumar2024_promoted_fleet_common.py \
+            packages/neuros/src/neuros/evidence/_kumar2024_promoted_fleet_records.py \
+            packages/neuros/src/neuros/evidence/_kumar2024_promoted_fleet_ledger.py \
+            packages/neuros/src/neuros/evidence/_kumar2024_promoted_fleet_assembly.py \
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_fleet.py \
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_fleet_transport.py
