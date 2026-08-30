@@ -20,7 +20,10 @@ score, or permits ORION comparison.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
 from .kumar2024_comparison import Kumar2024ComparisonPlan
@@ -44,6 +47,7 @@ _CLAIM_BOUNDARY = {
     "external_floor_claim_generated": False,
     "orion_comparison_permitted": False,
 }
+_FAILURE_CODE_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 
 
 def _claim_boundary() -> dict[str, bool]:
@@ -54,6 +58,16 @@ def _strict_text(name: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty string")
     return value.strip()
+
+
+def _failure_code(value: Any) -> str:
+    code = _strict_text("infrastructure_failure_code", value)
+    if _FAILURE_CODE_RE.fullmatch(code) is None:
+        raise ValueError(
+            "infrastructure_failure_code must be a stable lowercase machine code "
+            "using only a-z, 0-9, '.', '_', or '-'"
+        )
+    return code
 
 
 def _detail_sha256(value: str) -> str:
@@ -341,9 +355,7 @@ class PromotedFleetAttemptRecord:
             object.__setattr__(self, "worker_bundle_sha256", worker_sha)
             object.__setattr__(self, "shard_result_sha256", result_sha)
         else:
-            code = _strict_text(
-                "infrastructure_failure_code", self.infrastructure_failure_code
-            )
+            code = _failure_code(self.infrastructure_failure_code)
             if self.worker_bundle_sha256 is not None or self.shard_result_sha256 is not None:
                 raise ValueError(
                     "infrastructure failure cannot claim worker/result artifact identity"
@@ -700,11 +712,14 @@ def record_worker_artifact(
     execution_plan: PromotedExecutionPlan,
     comparison_plan: Kumar2024ComparisonPlan,
 ) -> PromotedFleetLedger:
-    """Accept one valid worker artifact and permanently close its shard.
+    """Accept one already-verified worker artifact and permanently close its shard.
 
     Scientific row status is deliberately ignored for retry policy.  Existing
     promoted-result validation still verifies the complete frontier and every
-    bound authority before the artifact is accepted.
+    bound authority before the artifact is accepted. Persisted worker bundles
+    should normally enter through :func:`record_verified_worker_bundle`, which
+    cryptographically verifies the complete bundle before calling this lower-
+    level ingestion primitive.
     """
 
     if not isinstance(ledger, PromotedFleetLedger):
@@ -730,6 +745,50 @@ def record_worker_artifact(
             worker_bundle_sha256=worker_bundle_sha256,
             shard_result_sha256=shard_result.sha256,
         )
+    )
+
+
+def record_verified_worker_bundle(
+    ledger: PromotedFleetLedger,
+    lease: PromotedShardLease,
+    *,
+    worker_root: str | Path,
+    binding_root: str | Path,
+    execution_plan: PromotedExecutionPlan,
+    comparison_plan: Kumar2024ComparisonPlan,
+) -> PromotedFleetLedger:
+    """Verify a persisted worker bundle before accepting it into the fleet ledger."""
+
+    from .kumar2024_promoted_worker import (
+        _shard_result_from_payload,
+        verify_promoted_worker_bundle,
+    )
+
+    root = Path(worker_root).resolve()
+    verification = verify_promoted_worker_bundle(root, binding_root=binding_root)
+    if verification.get("verified") is not True:
+        raise ValueError("worker bundle verifier did not return a verified receipt")
+    if verification.get("binding_bundle_sha256") != ledger.authority.binding_bundle_sha256:
+        raise ValueError("worker bundle belongs to a different fleet binding bundle")
+    if verification.get("execution_plan_sha256") != ledger.authority.execution_plan_sha256:
+        raise ValueError("worker bundle belongs to a different fleet execution plan")
+    if verification.get("shard_spec_sha256") != lease.shard_spec_sha256:
+        raise ValueError("worker bundle verifier receipt names a different lease shard")
+
+    raw = json.loads((root / "shard_result.json").read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ValueError("worker shard_result.json must contain a JSON object")
+    shard_result = _shard_result_from_payload(raw)
+    if verification.get("shard_result_sha256") != shard_result.sha256:
+        raise ValueError("worker verifier receipt and shard-result payload differ")
+
+    return record_worker_artifact(
+        ledger,
+        lease,
+        worker_bundle_sha256=verification["worker_bundle_sha256"],
+        shard_result=shard_result,
+        execution_plan=execution_plan,
+        comparison_plan=comparison_plan,
     )
 
 
@@ -893,5 +952,6 @@ __all__ = [
     "assemble_promoted_fleet",
     "build_promoted_fleet_authority",
     "record_infrastructure_failure",
+    "record_verified_worker_bundle",
     "record_worker_artifact",
 ]
