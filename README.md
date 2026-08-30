@@ -205,6 +205,8 @@ Internal packages are implementation boundaries, not twelve separate products. E
 
 The project needs external models, datasets, integrations, falsification cases, and independent reproduction more than it needs another internal subsystem.
 
+New here? Start with the [clean-environment First 10 Minutes reproduction](https://github.com/sidhulyalkar/neurOS-v1/issues/114) or the [small external scikit-learn NSQ adapter](https://github.com/sidhulyalkar/neurOS-v1/issues/115). Both are bounded `good first issue` tasks that do not require understanding the repository's development history.
+
 Use the GitHub issue forms for:
 
 - reproducible defects;
