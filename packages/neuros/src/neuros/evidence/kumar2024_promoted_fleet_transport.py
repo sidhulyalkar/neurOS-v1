@@ -348,7 +348,7 @@ def _require_exact_next_lease(
         raise TypeError("lease must be PromotedShardLease")
     expected = ledger.next_lease(lease.shard_spec_sha256)
     if expected != lease:
-        raise ValueError("transport claim requires the exact next FleetAuthority lease")
+        raise ValueError("transport authorization requires the exact next FleetAuthority lease")
 
 
 def acquire_attempt_claim(
@@ -387,19 +387,22 @@ def acquire_attempt_claim(
 
 def begin_attempt_invocation(
     store: AtomicCreateStore,
+    ledger: PromotedFleetLedger,
     claim: PromotedTransportClaim,
     *,
     owner_token: bytes,
 ) -> InvocationDecision:
-    """Persist the write-once pre-launch marker.
+    """Persist the write-once pre-launch marker for the still-current lease.
 
-    Only a newly created marker grants launch permission. An existing identical
-    marker forbids a second launch, including replay by the original owner.
+    The ledger is revalidated immediately before marker creation. Only a newly
+    created marker grants launch permission. An existing identical marker forbids
+    a second launch, including replay by the original owner.
     """
 
     _require_store(store)
     if not isinstance(claim, PromotedTransportClaim):
         raise TypeError("claim must be PromotedTransportClaim")
+    _require_exact_next_lease(ledger, claim.lease)
     owner_sha = _owner_token_sha256(owner_token)
     if owner_sha != claim.owner_token_sha256:
         raise TransportClaimConflict("owner token does not control this transport claim")
