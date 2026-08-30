@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from _kumar2024_fleet_test_helpers import _fleet, _small_plan
-from neuros.evidence.kumar2024_promoted_transport import (
+from neuros.evidence.kumar2024_promoted_fleet_transport import (
     LocalAtomicCreateStore,
     PromotedTransportClaim,
     TransportClaimConflict,
@@ -27,10 +27,8 @@ def test_claim_acquisition_is_write_once_and_claim_alone_never_launches(tmp_path
     store = LocalAtomicCreateStore(tmp_path)
     lease = _lease()
     owner = b"a" * 32
-
     first = acquire_attempt_claim(store, lease, owner_token=owner)
     second = acquire_attempt_claim(store, lease, owner_token=owner)
-
     assert first.created is True
     assert first.newly_acquired is True
     assert first.launch_permitted is False
@@ -43,7 +41,6 @@ def test_different_transport_owner_cannot_take_existing_lease(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
     lease = _lease()
     acquire_attempt_claim(store, lease, owner_token=b"a" * 32)
-
     with pytest.raises(TransportClaimConflict, match="already owned"):
         acquire_attempt_claim(store, lease, owner_token=b"b" * 32)
 
@@ -61,10 +58,8 @@ def test_concurrent_transport_owners_produce_exactly_one_winner(tmp_path):
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         outcomes = list(pool.map(attempt, range(8)))
-
     assert outcomes.count(True) == 1
     assert outcomes.count(False) == 7
-
     persisted = LocalAtomicCreateStore(tmp_path).read(transport_claim_key(lease))
     assert persisted is not None
     payload = json.loads(persisted)
@@ -77,10 +72,8 @@ def test_owner_secret_is_never_persisted(tmp_path):
     lease = _lease()
     owner = b"this-owner-token-is-secret-32bytes!!"
     assert len(owner) >= 32
-
     decision = acquire_attempt_claim(store, lease, owner_token=owner)
     persisted = store.read(transport_claim_key(lease))
-
     assert persisted is not None
     assert owner not in persisted
     assert decision.claim.owner_token_sha256.encode("ascii") in persisted
@@ -91,10 +84,8 @@ def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
     lease = _lease()
     owner = b"a" * 32
     claim = acquire_attempt_claim(store, lease, owner_token=owner).claim
-
     first = begin_attempt_invocation(store, claim, owner_token=owner)
     replay = begin_attempt_invocation(store, claim, owner_token=owner)
-
     assert first.created is True
     assert first.launch_permitted is True
     assert replay.created is False
@@ -108,10 +99,8 @@ def test_wrong_owner_cannot_create_invocation_marker(tmp_path):
     lease = _lease()
     owner = b"a" * 32
     claim = acquire_attempt_claim(store, lease, owner_token=owner).claim
-
     with pytest.raises(TransportClaimConflict, match="does not control"):
         begin_attempt_invocation(store, claim, owner_token=b"b" * 32)
-
     assert store.read(transport_invocation_key(claim)) is None
 
 
@@ -119,12 +108,8 @@ def test_claim_serialization_rejects_misleading_derived_fields(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
     lease = _lease()
     claim = acquire_attempt_claim(store, lease, owner_token=b"a" * 32).claim
-    payload = {
-        **claim.to_dict(),
-        "transport_claim_sha256": claim.sha256,
-    }
+    payload = {**claim.to_dict(), "transport_claim_sha256": claim.sha256}
     payload["claim_semantics"] = "scheduler may retry based on accuracy"
-
     with pytest.raises(ValueError, match="differs from canonical value"):
         PromotedTransportClaim.from_dict(payload)
 
@@ -140,7 +125,6 @@ def test_transport_keys_are_scientific_lease_derived_not_scheduler_named(tmp_pat
     store = LocalAtomicCreateStore(tmp_path)
     lease = _lease()
     claim = acquire_attempt_claim(store, lease, owner_token=b"a" * 32).claim
-
     claim_key = transport_claim_key(lease).lower()
     invocation_key = transport_invocation_key(claim).lower()
     for text in (claim_key, invocation_key):
