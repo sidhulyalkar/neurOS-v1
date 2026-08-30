@@ -4,18 +4,21 @@ FleetAuthority defines which immutable shard attempt may run. This module owns a
 narrower transport invariant required before an external scheduler may launch it:
 
     exactly one transport owner may acquire the ledger-authorized next attempt,
-    and exactly one durable invocation marker may grant permission to start it.
+    and exactly one durably readable invocation marker may grant permission to
+    start it.
 
 A production backend must implement ``create_if_absent`` with a genuinely atomic
-conditional-create primitive. ``LocalAtomicCreateStore`` is a POSIX reference for
-qualification and local/shared-filesystem integrations only. It publishes a
-fully-written immutable inode with an atomic hard link so readers never observe
-a partially written claim at the final key.
+conditional-create primitive and read-your-write semantics for committed bytes.
+``LocalAtomicCreateStore`` is a POSIX reference for qualification and local/shared
+filesystem integrations only. It publishes a fully-written immutable inode with
+an atomic hard link so readers never observe a partially written claim at the
+final key.
 
-The invocation marker is written *before* process launch. If scheduler ownership
-is lost after that marker exists, replay does not grant a second launch. Recovery
-therefore fails closed until a later trusted-outcome layer proves that retry
-cannot duplicate scientific execution.
+The invocation marker is written *before* process launch. Fresh creation alone is
+not enough: the exact canonical marker bytes must be readable before launch is
+permitted. If scheduler ownership is lost after that marker exists, replay does
+not grant a second launch. Recovery therefore fails closed until a later trusted-
+outcome layer proves that retry cannot duplicate scientific execution.
 
 Nothing here runs a model, reads neural data, scores a result, or permits ORION
 comparison.
@@ -95,8 +98,8 @@ class PromotedTransportClaim:
             "owner_token_sha256": self.owner_token_sha256,
             "claim_semantics": (
                 "claim acquisition requires the exact next lease from a canonical "
-                "FleetAuthority ledger; only the owner whose secret token hashes to "
-                "owner_token_sha256 may attempt to create the invocation marker"
+                "FleetAuthority ledger and exact durable readback; only the owner "
+                "whose secret token hashes to owner_token_sha256 may attempt invocation"
             ),
         }
 
@@ -128,7 +131,7 @@ class PromotedTransportClaim:
 
 @dataclass(frozen=True, slots=True)
 class PromotedInvocationMarker:
-    """Write-once marker whose fresh creation is the sole launch permission."""
+    """Write-once marker whose fresh durable creation is sole launch permission."""
 
     transport_claim_sha256: str
     lease_sha256: str
@@ -152,8 +155,8 @@ class PromotedInvocationMarker:
             "lease_sha256": self.lease_sha256,
             "owner_token_sha256": self.owner_token_sha256,
             "launch_semantics": (
-                "only a newly-created invocation marker grants permission to launch; "
-                "an existing identical marker is replay evidence and grants no launch"
+                "only a newly-created invocation marker whose exact bytes are durably "
+                "readable grants permission to launch; replay grants no launch"
             ),
         }
 
@@ -214,7 +217,7 @@ class AtomicCreateStore(Protocol):
         ...
 
     def read(self, key: str) -> bytes | None:
-        """Return exact persisted bytes, or None when key is absent."""
+        """Return exact committed bytes, or None when the key is absent."""
         ...
 
 
@@ -338,6 +341,25 @@ def _require_store(store: AtomicCreateStore) -> None:
         raise TypeError("store must implement AtomicCreateStore")
 
 
+def _require_exact_bytes(
+    store: AtomicCreateStore,
+    key: str,
+    expected: bytes,
+    *,
+    object_name: str,
+) -> bytes:
+    observed = store.read(key)
+    if observed is None:
+        raise TransportClaimStateError(
+            f"{object_name} was reported committed but cannot be read"
+        )
+    if observed != expected:
+        raise TransportClaimConflict(
+            f"persisted {object_name} bytes differ from canonical committed bytes"
+        )
+    return observed
+
+
 def _require_exact_next_lease(
     ledger: PromotedFleetLedger,
     lease: PromotedShardLease,
@@ -358,7 +380,7 @@ def acquire_attempt_claim(
     *,
     owner_token: bytes,
 ) -> TransportClaimDecision:
-    """Atomically acquire the ledger-authorized next lease for one owner."""
+    """Atomically acquire and read back the ledger-authorized next lease."""
 
     _require_store(store)
     _require_exact_next_lease(ledger, lease)
@@ -369,19 +391,21 @@ def acquire_attempt_claim(
     key = transport_claim_key(lease)
     encoded = _serialize_claim(claim)
     if store.create_if_absent(key, encoded):
+        _require_exact_bytes(store, key, encoded, object_name="transport claim")
         return TransportClaimDecision(claim=claim, created=True)
-    persisted = store.read(key)
-    if persisted is None:
-        raise TransportClaimStateError(
-            "atomic store reported an existing claim but it cannot be read"
-        )
+    persisted = _require_exact_bytes(
+        store,
+        key,
+        encoded,
+        object_name="transport claim",
+    )
     observed = _deserialize_claim(persisted)
     if observed.lease != lease:
         raise TransportClaimConflict("existing claim names a different immutable lease")
     if observed.owner_token_sha256 != claim.owner_token_sha256:
         raise TransportClaimConflict("immutable lease is already owned by another transport")
-    if observed.sha256 != claim.sha256 or persisted != encoded:
-        raise TransportClaimConflict("existing transport claim bytes differ from canonical replay")
+    if observed.sha256 != claim.sha256:
+        raise TransportClaimConflict("existing transport claim identity differs from canonical replay")
     return TransportClaimDecision(claim=observed, created=False)
 
 
@@ -392,11 +416,11 @@ def begin_attempt_invocation(
     *,
     owner_token: bytes,
 ) -> InvocationDecision:
-    """Persist the write-once pre-launch marker for the still-current lease.
+    """Persist and read back the one-time pre-launch marker for the current lease.
 
     The ledger is revalidated immediately before marker creation. Only a newly
-    created marker grants launch permission. An existing identical marker forbids
-    a second launch, including replay by the original owner.
+    created marker whose exact canonical bytes can be read back grants launch
+    permission. Existing-marker replay never grants a second launch.
     """
 
     _require_store(store)
@@ -407,11 +431,14 @@ def begin_attempt_invocation(
     if owner_sha != claim.owner_token_sha256:
         raise TransportClaimConflict("owner token does not control this transport claim")
     claim_key = transport_claim_key(claim.lease)
-    persisted_claim = store.read(claim_key)
-    if persisted_claim is None:
-        raise TransportClaimStateError("transport claim must be durably persisted before invocation")
+    persisted_claim = _require_exact_bytes(
+        store,
+        claim_key,
+        _serialize_claim(claim),
+        object_name="transport claim",
+    )
     observed_claim = _deserialize_claim(persisted_claim)
-    if observed_claim != claim or persisted_claim != _serialize_claim(claim):
+    if observed_claim != claim:
         raise TransportClaimConflict("persisted transport claim differs from supplied claim")
     marker = PromotedInvocationMarker(
         transport_claim_sha256=claim.sha256,
@@ -421,15 +448,17 @@ def begin_attempt_invocation(
     key = transport_invocation_key(claim)
     encoded = _serialize_invocation(marker)
     if store.create_if_absent(key, encoded):
+        _require_exact_bytes(store, key, encoded, object_name="invocation marker")
         return InvocationDecision(marker=marker, created=True)
-    persisted = store.read(key)
-    if persisted is None:
-        raise TransportClaimStateError(
-            "atomic store reported an invocation marker but it cannot be read"
-        )
+    persisted = _require_exact_bytes(
+        store,
+        key,
+        encoded,
+        object_name="invocation marker",
+    )
     observed = _deserialize_invocation(persisted)
-    if observed != marker or persisted != encoded:
-        raise TransportClaimConflict("existing invocation marker differs from canonical replay")
+    if observed != marker:
+        raise TransportClaimConflict("existing invocation marker identity differs from canonical replay")
     return InvocationDecision(marker=observed, created=False)
 
 
