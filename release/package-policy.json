@@ -23,9 +23,9 @@
     {
       "path": "packages/neuros-arena",
       "distribution": "neuros-arena",
-      "release_tier": "public-runtime",
+      "release_tier": "qualified-integration",
       "scientific_maturity": "synthetic-validation",
-      "publish_candidate": true
+      "publish_candidate": false
     },
     {
       "path": "packages/neuros-models",
