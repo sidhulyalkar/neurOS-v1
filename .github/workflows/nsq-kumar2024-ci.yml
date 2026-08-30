@@ -3,6 +3,8 @@ name: NSQ Kumar2024 v1
 on:
   pull_request:
     paths:
+      - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
+      - "scripts/evidence/validate_promoted_environment.py"
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
@@ -16,12 +18,17 @@ on:
       - "tests/test_kumar2024_promoted_execution_authority.py"
       - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_kumar2024_promoted_worker_authority.py"
+      - "tests/test_promoted_environment_validator.py"
       - "tests/test_neural_system_qualification_baselines.py"
       - "docs/NSQ_KUMAR2024_V1.md"
       - ".github/workflows/nsq-kumar2024-ci.yml"
+      - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
+      - ".github/workflows/nsq-kumar2024-classical-worker-qualification.yml"
   push:
     branches: [main]
     paths:
+      - "requirements/nsq-kumar2024-promoted-py311.constraints.txt"
+      - "scripts/evidence/validate_promoted_environment.py"
       - "packages/neuros-foundation/pyproject.toml"
       - "packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py"
       - "packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py"
@@ -35,9 +42,12 @@ on:
       - "tests/test_kumar2024_promoted_execution_authority.py"
       - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_kumar2024_promoted_worker_authority.py"
+      - "tests/test_promoted_environment_validator.py"
       - "tests/test_neural_system_qualification_baselines.py"
       - "docs/NSQ_KUMAR2024_V1.md"
       - ".github/workflows/nsq-kumar2024-ci.yml"
+      - ".github/workflows/nsq-kumar2024-promoted-binding.yml"
+      - ".github/workflows/nsq-kumar2024-classical-worker-qualification.yml"
 
 permissions:
   contents: read
@@ -55,8 +65,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -82,6 +92,7 @@ jobs:
             tests/test_kumar2024_promoted_execution_authority.py \
             tests/test_kumar2024_promoted_binding_authority.py \
             tests/test_kumar2024_promoted_worker_authority.py \
+            tests/test_promoted_environment_validator.py \
             tests/test_neural_system_qualification_runner.py
       - name: Compile evidence surface
         run: |
@@ -95,14 +106,15 @@ jobs:
             packages/neuros/src/neuros/evidence/kumar2024_comparison.py \
             packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py \
             packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py \
-            packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py \
+            scripts/evidence/validate_promoted_environment.py
 
   upstream-moabb-contract:
     name: Current MOABB processed-epoch contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -134,8 +146,8 @@ jobs:
     name: Upstream pyRiemann RG+LR NSQ contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -177,8 +189,8 @@ jobs:
     name: Upstream Braindecode EEGNet training authority
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
