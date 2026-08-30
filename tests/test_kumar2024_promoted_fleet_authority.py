@@ -23,6 +23,7 @@ from neuros.evidence.kumar2024_promoted_fleet import (
     assemble_promoted_fleet,
     build_promoted_fleet_authority,
     record_infrastructure_failure,
+    record_verified_worker_bundle,
     record_worker_artifact,
 )
 
@@ -313,6 +314,19 @@ def test_infrastructure_failure_is_retryable_with_new_content_addressed_lease():
     ).hexdigest()
 
 
+def test_infrastructure_failure_code_is_machine_stable_not_free_text():
+    _, authority, ledger = _fleet(_small_plan())
+    shard_sha = authority.shard_spec_sha256_by_id[0][1]
+    lease = ledger.next_lease(shard_sha)
+
+    with pytest.raises(ValueError, match="stable lowercase machine code"):
+        record_infrastructure_failure(
+            ledger,
+            lease,
+            failure_code="Runner crashed: timeout after 10m",
+        )
+
+
 def test_retry_budget_exhaustion_is_explicit_and_cannot_loop_forever():
     _, authority, ledger = _fleet(_small_plan(), retries=1)
     shard_sha = authority.shard_spec_sha256_by_id[0][1]
@@ -431,6 +445,90 @@ def test_record_worker_artifact_rejects_foreign_result_before_closing_shard():
             lease,
             worker_bundle_sha256=_sha("foreign"),
             shard_result=foreign,
+            execution_plan=execution,
+            comparison_plan=plan,
+        )
+
+
+def test_verified_worker_bundle_ingestion_binds_receipt_to_ledger(
+    tmp_path, monkeypatch
+):
+    plan = _small_plan()
+    execution, authority, ledger = _fleet(plan)
+    shard = execution.template.shards[0]
+    lease = ledger.next_lease(shard.sha256)
+    result = _result_for_shard(shard, execution)
+    (tmp_path / "shard_result.json").write_text(
+        __import__("json").dumps(
+            {**result.to_dict(), "shard_result_sha256": result.sha256}
+        ),
+        encoding="utf-8",
+    )
+
+    from neuros.evidence import kumar2024_promoted_worker as worker
+
+    worker_bundle_sha = _sha("verified-worker-bundle")
+    monkeypatch.setattr(
+        worker,
+        "verify_promoted_worker_bundle",
+        lambda output, *, binding_root: {
+            "verified": True,
+            "worker_bundle_sha256": worker_bundle_sha,
+            "binding_bundle_sha256": authority.binding_bundle_sha256,
+            "execution_plan_sha256": authority.execution_plan_sha256,
+            "shard_spec_sha256": shard.sha256,
+            "shard_result_sha256": result.sha256,
+        },
+    )
+
+    ledger = record_verified_worker_bundle(
+        ledger,
+        lease,
+        worker_root=tmp_path,
+        binding_root=tmp_path / "binding",
+        execution_plan=execution,
+        comparison_plan=plan,
+    )
+    accepted = ledger.accepted_result_map[shard.sha256]
+    assert accepted.worker_bundle_sha256 == worker_bundle_sha
+    assert accepted.shard_result_sha256 == result.sha256
+
+
+def test_verified_worker_bundle_rejects_receipt_from_other_binding(
+    tmp_path, monkeypatch
+):
+    plan = _small_plan()
+    execution, _, ledger = _fleet(plan)
+    shard = execution.template.shards[0]
+    lease = ledger.next_lease(shard.sha256)
+    result = _result_for_shard(shard, execution)
+    (tmp_path / "shard_result.json").write_text(
+        __import__("json").dumps(
+            {**result.to_dict(), "shard_result_sha256": result.sha256}
+        ),
+        encoding="utf-8",
+    )
+
+    from neuros.evidence import kumar2024_promoted_worker as worker
+
+    monkeypatch.setattr(
+        worker,
+        "verify_promoted_worker_bundle",
+        lambda output, *, binding_root: {
+            "verified": True,
+            "worker_bundle_sha256": _sha("verified-worker-bundle"),
+            "binding_bundle_sha256": _sha("other-binding"),
+            "execution_plan_sha256": execution.sha256,
+            "shard_spec_sha256": shard.sha256,
+            "shard_result_sha256": result.sha256,
+        },
+    )
+    with pytest.raises(ValueError, match="different fleet binding bundle"):
+        record_verified_worker_bundle(
+            ledger,
+            lease,
+            worker_root=tmp_path,
+            binding_root=tmp_path / "binding",
             execution_plan=execution,
             comparison_plan=plan,
         )
