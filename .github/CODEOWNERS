@@ -1,0 +1,15 @@
+# Default ownership remains with the repository maintainer today. These explicit
+# paths make the trust boundary visible and provide a clean place to split
+# scientific/runtime ownership as additional maintainers join.
+* @sidhulyalkar
+
+# Scientific and execution authority
+/packages/neuros/src/neuros/evidence/ @sidhulyalkar
+/packages/neuros-foundation/src/neuros/foundation_models/ @sidhulyalkar
+/requirements/nsq-kumar2024-promoted-py311.constraints.txt @sidhulyalkar
+
+# CI / release / repository governance
+/.github/workflows/ @sidhulyalkar
+/.github/dependabot.yml @sidhulyalkar
+/SECURITY.md @sidhulyalkar
+/GOVERNANCE.md @sidhulyalkar

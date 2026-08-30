@@ -1,47 +1,80 @@
 # neurOS + ORION Project Status
 
-This page is the current maturity map for the repository. It intentionally distinguishes software contracts from scientific, hardware, closed-loop, and clinical evidence.
+This page is the current maturity map for the repository. It deliberately separates software contracts, execution provenance, scientific evidence, hardware evidence, closed-loop evidence, and clinical evidence.
 
-> Passing CI means a declared software contract passed its tests. It does not establish biological correctness, model superiority, hardware qualification, online BCI efficacy, safety certification, or clinical benefit.
+> Passing CI proves only the contract exercised by that CI lane. It does not establish biological correctness, model superiority, physical hardware validity, online BCI efficacy, safety certification, or clinical benefit.
 
 ## Current product thesis
 
-neurOS is converging on an **open execution and qualification layer for neural systems**.
+neurOS is converging on an **open qualification and reproducible execution layer for neural AI and BCI systems**.
 
 - **neurOS** owns acquisition/runtime contracts, timing, configuration, recording/replay, interoperability, deployment semantics, and reproducible execution.
 - **ORION** owns neural tokenization, learned representations, transfer, personalization, and governed adaptation.
-- **Evidence / NSQ** owns frozen protocol identity, observation-role authority, model participation contracts, scoring semantics, failure preservation, artifact identity, and claim qualification.
+- **Evidence / NSQ** owns frozen protocol identity, observation-role authority, model participation contracts, calibration accounting, scoring semantics, failure preservation, artifact identity, and claim qualification.
 - **Studio** is the future inspection surface over those same contracts. It must not become a second runtime.
 
 Arena is an Evidence subsystem for deterministic systems falsification. It is not a separate product and it is not a biological-truth authority.
+
+The core product distinction is increasingly simple:
+
+> neurOS should make a neural-system experiment executable without allowing infrastructure, adapters, retries, or analysis convenience to silently redefine the experiment.
 
 ## What has genuinely landed
 
 ### Runtime and reproducibility
 
-The maintained runtime now has canonical immutable `SignalFrame`/`StreamDescriptor` contracts, config-first `RuntimeGraph` execution, bounded queue policies, timing/quality telemetry, deterministic recording/replay, archive integrity, causal streaming DSP, and descriptor-bound session archives.
+The maintained runtime has canonical immutable `SignalFrame` / `StreamDescriptor` contracts, config-first `RuntimeGraph` execution, bounded queue policies, timing/quality telemetry, deterministic recording/replay, archive integrity, causal streaming DSP, descriptor-bound session archives, and an installed-wheel developer-preview path.
 
 ### Packaging and external extension
 
-The workspace builds independent wheels with unique namespace ownership. The developer-preview journey installs built wheels in a clean environment and exercises the CLI. An out-of-tree example plugin is built and executed as its own wheel through public entry points rather than relying on monorepo imports.
+The workspace builds independent wheels with unique namespace ownership. The developer-preview journey installs built wheels in a clean environment and exercises the CLI. Out-of-tree plugins are discovered through Python entry points rather than monorepo-only imports.
+
+`neuros init` provides a deterministic first-user project, and `neuros init --template nsq-method` provides an executable starter for bringing an external sklearn-style method into the production Neural System Qualification referee.
 
 ### Scientific Authority
 
-Scientific Authority v2 binds dataset/model lineage, processed-data identity, observation roles, preprocessing authority, target-information budgets, metric semantics, repeated-measures structure, and failure preservation. Leakage and pretraining overlap are explicit verdicts rather than implied cleanliness.
+Scientific Authority binds dataset/model lineage, processed-data identity, observation roles, preprocessing authority, target-information budgets, metric semantics, repeated-measures structure, and failure preservation. Leakage and pretraining overlap are explicit verdicts rather than implied cleanliness.
 
-### Model Artifact v1
+### Model Artifact
 
-Promoted decoder artifacts are content-addressed, reconstructable through bounded trusted loaders, and bind input/output semantics, preprocessing/calibration provenance, learned state, rollback identity, and scientific lineage. Pickle is not the promoted artifact boundary.
+Promoted decoder artifacts are content-addressed, reconstructable through bounded trusted loaders, and bind input/output semantics, preprocessing/calibration provenance, learned state, rollback identity, and scientific lineage. Pickle remains a legacy trusted-local compatibility path, not the promoted artifact boundary.
 
 ### Neural System Qualification
 
-NSQ v1 now provides a peer-facing external-method contract plus an executable runner. External implementations can retain their own training code while neurOS controls which observations may cross the boundary, what those observations mean, how outputs are scored, and whether failures remain visible.
+NSQ provides a peer-facing external-method contract plus an executable runner. External implementations retain their own training code while neurOS controls which observations may cross the boundary, what those observations mean, how target calibration is counted, what fitted state was evaluated, how outputs are scored, and whether failures remain visible.
 
-The production runner already has direct proving paths for canonical MNE/scikit-learn and upstream Braindecode participation. The next milestone is not another runner abstraction. It is the first frozen real-data qualification study.
+Maintained proving paths include canonical MNE/scikit-learn CSP+LDA, pyRiemann RG+LR, and upstream Braindecode EEGNet participation.
+
+The Kumar2024 promoted study has now progressed beyond benchmark design into a sealed execution authority:
+
+- 18 participants;
+- 5 target sessions;
+- 3 preregistered split seeds;
+- 270 case authorities;
+- 5 method realizations;
+- 1,350 execution shards;
+- calibration budgets `(0, 1, 2, 5, 10)` on every shard;
+- 6,750 planned fit attempts.
+
+The frozen method realizations are:
+
+1. MNE CSP + LDA, deterministic;
+2. pyRiemann RG + logistic regression, deterministic;
+3. Braindecode EEGNet seed `31415`;
+4. Braindecode EEGNet seed `384165836`;
+5. Braindecode EEGNet seed `3991196546`.
+
+A full 18-subject **no-model** binding has been generated and independently verified on exact `main`. That binding contains no decoder execution, no final-assessment predictions, and no final-assessment metrics.
+
+The only currently authorized execution is one preselected classical shard as a **non-headline systems qualification**. Its numerical result is explicitly non-interpretable. The complete 1,350-shard fleet is not authorized yet.
+
+Draft PR #110 adds FleetAuthority semantics for immutable shard leases, bounded infrastructure retries, verified worker-artifact ingestion, append-only attempt history, duplicate/conflict rejection, and complete-fleet assembly. It remains draft until the one-shard systems qualification is independently verified.
 
 ### ORION authority
 
-ORION has contract-first tokenization, representation, adaptation, state-selection, and untouched-final-assessment semantics. Its current strongest result is **process integrity**, not a claim that ORION already reduces calibration or outperforms established representations.
+ORION has contract-first tokenization, representation, adaptation, state-selection, and untouched-final-assessment semantics. Its strongest current result is **process integrity**, not a claim that ORION already reduces calibration or outperforms established representations.
+
+ORION remains outside the promoted Kumar2024 comparison until the external floor has been completely executed, independently assembled, and scientifically interpreted.
 
 ## Package maturity
 
@@ -51,11 +84,11 @@ ORION has contract-first tokenization, representation, adaptation, state-selecti
 | `neuros` | SDK, CLI, interoperability composition | **maintained public entry point** |
 | `neuros-drivers` | hardware/dataset/LSL/BrainFlow source integrations | **maintained integration layer**; device claims remain per-device |
 | `neuros-orion` (`packages/orion`) | tokenization, representations, adaptation authority | **active strategic layer**; real-data efficacy still to be earned |
-| `neuros-foundation` | upstream model/data adapters, longitudinal evidence, current NSQ implementation | **maintained evidence/interoperability layer**; namespace should be revisited only after NSQ proves broader use |
+| `neuros-foundation` | upstream model/data adapters, longitudinal evidence, current NSQ implementation | **maintained evidence/interoperability layer** |
 | `neuros-models` | task decoders and inspectable model surfaces | **maintained supporting layer** |
 | `neuros-sourceweigher` | source/domain reliability and transfer weighting | **research-supported**; must prove incremental value under NSQ |
 | `neuros-mechint` | intervention/faithfulness/replication contracts | **research-supported**; empirical mechanism claims remain study-specific |
-| `neuros-arena` | causal synthetic worlds and counterexamples | **maintained falsification tool**, currently secondary to real-data NSQ |
+| `neuros-arena` | causal synthetic worlds and counterexamples | **maintained falsification tool**, secondary to real-data NSQ |
 | `neuros-neurofm` | native foundation-model R&D | **experimental alpha**; not promoted ORION by default |
 | `neuros-ui` | Studio prototypes | **experimental integration surface**; package metadata currently overstates maturity |
 | `neuros-cloud` | distributed/provider integrations | **experimental integration surface**; package metadata currently overstates maturity |
@@ -64,53 +97,65 @@ The root workspace is a build inventory, not evidence that every member has equa
 
 ## What is not established yet
 
-The repository still lacks the evidence needed for several strategically important claims:
-
-1. **No flagship real-data NSQ result yet.** The Kumar2024 longitudinal motor-imagery study in issue #82 is the immediate scientific gate.
-2. **No demonstrated ORION calibration advantage yet.** ORION should enter comparison only after strong external baselines are frozen under identical authority.
+1. **No flagship real-data NSQ efficacy result yet.** The study authority is frozen, but the promoted model fleet has not run.
+2. **No demonstrated ORION calibration advantage yet.** ORION remains outside the comparison until the external floor exists.
 3. **No named physical EEG device is publicly qualified end to end.** Simulator and driver conformance are not device qualification.
-4. **No independent external reproduction cohort yet.** Internal CI cannot substitute for outside users reproducing a frozen result from public artifacts.
+4. **No independent external reproduction cohort yet.** Internal CI cannot substitute for outside users reproducing a frozen public artifact.
 5. **No production closed-loop safety plane yet.** Action constraints, stale-data rejection, deadman behavior, emergency-stop semantics, and hardware-in-the-loop evidence remain future work.
 6. **No clinical evidence.** The project should continue to say this plainly.
+7. **No public release train yet.** There is no coordinated package publication/release provenance contract suitable for a v1.0 claim.
 
 ## Repository debt to remove
 
-The remaining cleanup is mostly organizational rather than architectural:
+The largest remaining weaknesses are now governance and release engineering rather than a need for another broad architectural rewrite:
 
-- roughly thirty GitHub workflow files create duplicated CI orchestration and a large maintenance surface;
-- central CI still enumerates selected test files explicitly, so new tests need deliberate lane coverage rather than benefiting from universal discovery;
-- historical agent/feature branches substantially outnumber active workstreams and should be deleted after unique research is rescued or explicitly archived;
-- current docs have drifted behind recently merged Scientific Authority, Model Artifact, and NSQ work;
-- `neuros-ui` / `neuros-cloud` advertise beta/2.0-style package maturity without corresponding release qualification;
-- some experimental/research packages still contain TODO or intentionally incomplete surfaces and must remain visually distinct from promoted contracts;
-- repository-level branch protection/rulesets should match the exact-head qualification discipline enforced in code.
+- `main` is currently unprotected and has no repository ruleset;
+- roughly thirty workflow files create duplicated CI orchestration and a large maintenance surface;
+- several general workflows still reference mutable GitHub Action tags even though the promoted NSQ lane uses immutable action SHAs;
+- central CI enumerates selected test files explicitly, so new tests need deliberate lane ownership;
+- historical agent/feature branches substantially outnumber active workstreams;
+- GitHub repository metadata still understates the current qualification/evidence product thesis and exposes no search topics;
+- `neuros-ui` / `neuros-cloud` advertise beta/2.0-style maturity without corresponding release qualification;
+- some research packages intentionally contain incomplete surfaces and must remain visually distinct from promoted contracts;
+- GitHub Actions artifacts are useful execution evidence but 90-day artifact retention is not a long-lived scientific archive;
+- signed provenance / attestations and a durable content-addressed result store remain future hardening layers.
 
 ## Immediate execution gate
 
-The next coherent milestone is **NSQ Kumar2024 v1** (#82):
+The current promoted Kumar2024 sequence is intentionally narrow:
 
 ```text
-frozen MOABB Kumar2024 lineage + preprocessing
+exact-main no-model binding
         |
         v
-prospective participant/session authority
-        |
-        +-> MNE CSP + LDA
-        +-> upstream Braindecode EEGNet
-        +-> upstream EEGConformer when supported
+independent cryptographic + semantic verification
         |
         v
-participant-level calibration frontier
+one preselected MNE CSP+LDA shard
+(non-headline systems qualification;
+ numerical result quarantined)
         |
         v
-immutable qualification bundle
+FleetAuthority + trusted attempt transport
+        |
+        v
+complete 1,350-shard external-floor execution
+        |
+        v
+independent complete-fleet assembly
+        |
+        v
+scientific interpretation of external floor
+        |
+        v
+only then may ORION enter a comparison
 ```
 
-The flagship question is:
+The flagship scientific question remains:
 
 > Under identical prospective longitudinal authority, how much held-out task utility does each method achieve as a function of per-user labeled calibration cost?
 
-Only after that baseline is frozen should ORION, foundation representations, SourceWeigher, or governed adaptation compete for an improvement claim.
+The key difference from an ordinary benchmark is that the scheduler, retry system, environment, model adapter, and final assembler are not allowed to acquire hidden authority over that question.
 
 ## Promotion rule
 
@@ -122,10 +167,11 @@ experiment
   -> stable contract
   -> integration/replay evidence
   -> scientific synthetic evidence
-  -> real-dataset evidence
+  -> real-dataset execution evidence
+  -> independent reproduction
   -> hardware qualification
   -> closed-loop qualification
   -> clinical evidence (separate regulated work)
 ```
 
-The repository no longer needs a broad rewrite. It needs **fewer simultaneous workstreams, stronger external falsification, and a public result that makes the qualification layer indispensable**.
+The repository no longer needs a broad rewrite. It needs **fewer simultaneous workstreams, stronger public governance, independent users, and a flagship result whose evidence boundary is difficult to reproduce without neurOS**.
