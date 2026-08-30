@@ -110,8 +110,8 @@ def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
     ledger, lease = _ledger_and_lease()
     owner = b"a" * 32
     claim = acquire_attempt_claim(store, ledger, lease, owner_token=owner).claim
-    first = begin_attempt_invocation(store, claim, owner_token=owner)
-    replay = begin_attempt_invocation(store, claim, owner_token=owner)
+    first = begin_attempt_invocation(store, ledger, claim, owner_token=owner)
+    replay = begin_attempt_invocation(store, ledger, claim, owner_token=owner)
     assert first.created is True
     assert first.launch_permitted is True
     assert replay.created is False
@@ -120,13 +120,28 @@ def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
     assert store.read(transport_invocation_key(claim)) is not None
 
 
+def test_claim_that_becomes_stale_before_launch_cannot_invoke(tmp_path):
+    store = LocalAtomicCreateStore(tmp_path)
+    ledger, lease = _ledger_and_lease()
+    owner = b"a" * 32
+    claim = acquire_attempt_claim(store, ledger, lease, owner_token=owner).claim
+    advanced = record_infrastructure_failure(
+        ledger,
+        lease,
+        failure_code="runner_unavailable",
+    )
+    with pytest.raises(ValueError, match="exact next FleetAuthority lease"):
+        begin_attempt_invocation(store, advanced, claim, owner_token=owner)
+    assert store.read(transport_invocation_key(claim)) is None
+
+
 def test_wrong_owner_cannot_create_invocation_marker(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
     ledger, lease = _ledger_and_lease()
     owner = b"a" * 32
     claim = acquire_attempt_claim(store, ledger, lease, owner_token=owner).claim
     with pytest.raises(TransportClaimConflict, match="does not control"):
-        begin_attempt_invocation(store, claim, owner_token=b"b" * 32)
+        begin_attempt_invocation(store, ledger, claim, owner_token=b"b" * 32)
     assert store.read(transport_invocation_key(claim)) is None
 
 
