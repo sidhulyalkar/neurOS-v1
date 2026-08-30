@@ -1,0 +1,43 @@
+name: One-shot GitHub Actions pin migration
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/migrate_github_action_pins.py"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: >-
+      github.repository == 'sidhulyalkar/neurOS-v1' &&
+      github.head_ref == 'chore/github-actions-pin-policy-v1'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact PR head branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
+          fetch-depth: 0
+      - name: Apply deterministic pin migration
+        run: python scripts/migrate_github_action_pins.py
+      - name: Validate mechanical diff
+        run: |
+          set -euo pipefail
+          git diff --check
+          python scripts/check_github_action_pins.py
+      - name: Commit migration if required
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .github/workflows; then
+            echo "No action pin migration required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows
+          git commit -m "ci: pin all GitHub Actions dependencies"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
