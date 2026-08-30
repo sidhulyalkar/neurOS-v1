@@ -16,6 +16,7 @@ on:
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
+      - "tests/test_kumar2024_promoted_fleet_authority.py"
       - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_kumar2024_promoted_worker_authority.py"
       - "tests/test_promoted_environment_validator.py"
@@ -40,6 +41,7 @@ on:
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
+      - "tests/test_kumar2024_promoted_fleet_authority.py"
       - "tests/test_kumar2024_promoted_binding_authority.py"
       - "tests/test_kumar2024_promoted_worker_authority.py"
       - "tests/test_promoted_environment_validator.py"
@@ -90,6 +92,7 @@ jobs:
             tests/test_kumar2024_nsq_study.py \
             tests/test_kumar2024_comparison_authority.py \
             tests/test_kumar2024_promoted_execution_authority.py \
+            tests/test_kumar2024_promoted_fleet_authority.py \
             tests/test_kumar2024_promoted_binding_authority.py \
             tests/test_kumar2024_promoted_worker_authority.py \
             tests/test_promoted_environment_validator.py \
@@ -105,6 +108,7 @@ jobs:
             packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py \
             packages/neuros/src/neuros/evidence/kumar2024_comparison.py \
             packages/neuros/src/neuros/evidence/kumar2024_promoted_execution.py \
+            packages/neuros/src/neuros/evidence/kumar2024_promoted_fleet.py \
             packages/neuros/src/neuros/evidence/kumar2024_promoted_binding.py \
             packages/neuros/src/neuros/evidence/kumar2024_promoted_worker.py \
             scripts/evidence/validate_promoted_environment.py
