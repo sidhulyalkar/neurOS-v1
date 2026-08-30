@@ -6,6 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from _kumar2024_fleet_test_helpers import _fleet, _small_plan
+from neuros.evidence.kumar2024_promoted_fleet import (
+    PromotedShardLease,
+    record_infrastructure_failure,
+)
 from neuros.evidence.kumar2024_promoted_fleet_transport import (
     LocalAtomicCreateStore,
     PromotedTransportClaim,
@@ -17,18 +21,18 @@ from neuros.evidence.kumar2024_promoted_fleet_transport import (
 )
 
 
-def _lease():
+def _ledger_and_lease():
     _, authority, ledger = _fleet(_small_plan())
     shard_sha = authority.shard_spec_sha256_by_id[0][1]
-    return ledger.next_lease(shard_sha)
+    return ledger, ledger.next_lease(shard_sha)
 
 
 def test_claim_acquisition_is_write_once_and_claim_alone_never_launches(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
+    ledger, lease = _ledger_and_lease()
     owner = b"a" * 32
-    first = acquire_attempt_claim(store, lease, owner_token=owner)
-    second = acquire_attempt_claim(store, lease, owner_token=owner)
+    first = acquire_attempt_claim(store, ledger, lease, owner_token=owner)
+    second = acquire_attempt_claim(store, ledger, lease, owner_token=owner)
     assert first.created is True
     assert first.newly_acquired is True
     assert first.launch_permitted is False
@@ -37,22 +41,44 @@ def test_claim_acquisition_is_write_once_and_claim_alone_never_launches(tmp_path
     assert second.launch_permitted is False
 
 
+def test_transport_claim_rejects_skipped_or_stale_attempt_index(tmp_path):
+    store = LocalAtomicCreateStore(tmp_path)
+    ledger, lease0 = _ledger_and_lease()
+    future = PromotedShardLease(
+        fleet_authority_sha256=lease0.fleet_authority_sha256,
+        execution_plan_sha256=lease0.execution_plan_sha256,
+        shard_id=lease0.shard_id,
+        shard_spec_sha256=lease0.shard_spec_sha256,
+        attempt_index=1,
+    )
+    with pytest.raises(ValueError, match="exact next FleetAuthority lease"):
+        acquire_attempt_claim(store, ledger, future, owner_token=b"a" * 32)
+
+    advanced = record_infrastructure_failure(
+        ledger,
+        lease0,
+        failure_code="runner_unavailable",
+    )
+    with pytest.raises(ValueError, match="exact next FleetAuthority lease"):
+        acquire_attempt_claim(store, advanced, lease0, owner_token=b"a" * 32)
+
+
 def test_different_transport_owner_cannot_take_existing_lease(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
-    acquire_attempt_claim(store, lease, owner_token=b"a" * 32)
+    ledger, lease = _ledger_and_lease()
+    acquire_attempt_claim(store, ledger, lease, owner_token=b"a" * 32)
     with pytest.raises(TransportClaimConflict, match="already owned"):
-        acquire_attempt_claim(store, lease, owner_token=b"b" * 32)
+        acquire_attempt_claim(store, ledger, lease, owner_token=b"b" * 32)
 
 
 def test_concurrent_transport_owners_produce_exactly_one_winner(tmp_path):
-    lease = _lease()
+    ledger, lease = _ledger_and_lease()
 
     def attempt(index: int) -> bool:
         store = LocalAtomicCreateStore(tmp_path)
         token = bytes([index + 1]) * 32
         try:
-            return acquire_attempt_claim(store, lease, owner_token=token).created
+            return acquire_attempt_claim(store, ledger, lease, owner_token=token).created
         except TransportClaimConflict:
             return False
 
@@ -69,10 +95,10 @@ def test_concurrent_transport_owners_produce_exactly_one_winner(tmp_path):
 
 def test_owner_secret_is_never_persisted(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
+    ledger, lease = _ledger_and_lease()
     owner = b"this-owner-token-is-secret-32bytes!!"
     assert len(owner) >= 32
-    decision = acquire_attempt_claim(store, lease, owner_token=owner)
+    decision = acquire_attempt_claim(store, ledger, lease, owner_token=owner)
     persisted = store.read(transport_claim_key(lease))
     assert persisted is not None
     assert owner not in persisted
@@ -81,9 +107,9 @@ def test_owner_secret_is_never_persisted(tmp_path):
 
 def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
+    ledger, lease = _ledger_and_lease()
     owner = b"a" * 32
-    claim = acquire_attempt_claim(store, lease, owner_token=owner).claim
+    claim = acquire_attempt_claim(store, ledger, lease, owner_token=owner).claim
     first = begin_attempt_invocation(store, claim, owner_token=owner)
     replay = begin_attempt_invocation(store, claim, owner_token=owner)
     assert first.created is True
@@ -96,9 +122,9 @@ def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
 
 def test_wrong_owner_cannot_create_invocation_marker(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
+    ledger, lease = _ledger_and_lease()
     owner = b"a" * 32
-    claim = acquire_attempt_claim(store, lease, owner_token=owner).claim
+    claim = acquire_attempt_claim(store, ledger, lease, owner_token=owner).claim
     with pytest.raises(TransportClaimConflict, match="does not control"):
         begin_attempt_invocation(store, claim, owner_token=b"b" * 32)
     assert store.read(transport_invocation_key(claim)) is None
@@ -106,8 +132,8 @@ def test_wrong_owner_cannot_create_invocation_marker(tmp_path):
 
 def test_claim_serialization_rejects_misleading_derived_fields(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
-    claim = acquire_attempt_claim(store, lease, owner_token=b"a" * 32).claim
+    ledger, lease = _ledger_and_lease()
+    claim = acquire_attempt_claim(store, ledger, lease, owner_token=b"a" * 32).claim
     payload = {**claim.to_dict(), "transport_claim_sha256": claim.sha256}
     payload["claim_semantics"] = "scheduler may retry based on accuracy"
     with pytest.raises(ValueError, match="differs from canonical value"):
@@ -123,8 +149,8 @@ def test_transport_store_rejects_path_traversal(tmp_path):
 
 def test_transport_keys_are_scientific_lease_derived_not_scheduler_named(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
-    lease = _lease()
-    claim = acquire_attempt_claim(store, lease, owner_token=b"a" * 32).claim
+    ledger, lease = _ledger_and_lease()
+    claim = acquire_attempt_claim(store, ledger, lease, owner_token=b"a" * 32).claim
     claim_key = transport_claim_key(lease).lower()
     invocation_key = transport_invocation_key(claim).lower()
     for text in (claim_key, invocation_key):
