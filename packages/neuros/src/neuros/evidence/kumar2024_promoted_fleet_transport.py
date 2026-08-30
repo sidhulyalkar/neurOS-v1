@@ -3,8 +3,8 @@
 FleetAuthority defines which immutable shard attempt may run. This module owns a
 narrower transport invariant required before an external scheduler may launch it:
 
-    exactly one transport owner may acquire an attempt, and exactly one durable
-    invocation marker may grant permission to start it.
+    exactly one transport owner may acquire the ledger-authorized next attempt,
+    and exactly one durable invocation marker may grant permission to start it.
 
 A production backend must implement ``create_if_absent`` with a genuinely atomic
 conditional-create primitive. ``LocalAtomicCreateStore`` is a POSIX reference for
@@ -36,6 +36,7 @@ from ._kumar2024_promoted_fleet_common import (
     _require_serialized_payload,
     _sha256,
 )
+from ._kumar2024_promoted_fleet_ledger import PromotedFleetLedger
 
 
 class TransportClaimConflict(RuntimeError):
@@ -93,9 +94,9 @@ class PromotedTransportClaim:
             "lease": self.lease.to_dict(),
             "owner_token_sha256": self.owner_token_sha256,
             "claim_semantics": (
-                "only the owner whose secret token hashes to owner_token_sha256 may "
-                "attempt to create the invocation marker; claim replay never grants "
-                "a second scientific invocation"
+                "claim acquisition requires the exact next lease from a canonical "
+                "FleetAuthority ledger; only the owner whose secret token hashes to "
+                "owner_token_sha256 may attempt to create the invocation marker"
             ),
         }
 
@@ -250,8 +251,7 @@ class LocalAtomicCreateStore:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(
-            prefix=f".{path.name}.publish-",
-            dir=path.parent,
+            prefix=f".{path.name}.publish-", dir=path.parent
         )
         temporary = Path(temporary_name)
         try:
@@ -338,17 +338,30 @@ def _require_store(store: AtomicCreateStore) -> None:
         raise TypeError("store must implement AtomicCreateStore")
 
 
+def _require_exact_next_lease(
+    ledger: PromotedFleetLedger,
+    lease: PromotedShardLease,
+) -> None:
+    if not isinstance(ledger, PromotedFleetLedger):
+        raise TypeError("ledger must be PromotedFleetLedger")
+    if not isinstance(lease, PromotedShardLease):
+        raise TypeError("lease must be PromotedShardLease")
+    expected = ledger.next_lease(lease.shard_spec_sha256)
+    if expected != lease:
+        raise ValueError("transport claim requires the exact next FleetAuthority lease")
+
+
 def acquire_attempt_claim(
     store: AtomicCreateStore,
+    ledger: PromotedFleetLedger,
     lease: PromotedShardLease,
     *,
     owner_token: bytes,
 ) -> TransportClaimDecision:
-    """Atomically acquire one lease for one secret transport owner."""
+    """Atomically acquire the ledger-authorized next lease for one owner."""
 
     _require_store(store)
-    if not isinstance(lease, PromotedShardLease):
-        raise TypeError("lease must be PromotedShardLease")
+    _require_exact_next_lease(ledger, lease)
     claim = PromotedTransportClaim(
         lease=lease,
         owner_token_sha256=_owner_token_sha256(owner_token),
