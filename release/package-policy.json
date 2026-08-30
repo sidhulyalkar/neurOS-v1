@@ -1,0 +1,94 @@
+{
+  "schema": "neuros.release_package_policy.v1",
+  "policy": {
+    "workspace_membership_means": "developed and validated in this monorepo",
+    "publish_candidate_means": "included in the default neurOS release artifact set",
+    "scientific_maturity_is_independent": true
+  },
+  "packages": [
+    {
+      "path": "packages/neuros-core",
+      "distribution": "neuros-core",
+      "release_tier": "public-runtime",
+      "scientific_maturity": "platform-core",
+      "publish_candidate": true
+    },
+    {
+      "path": "packages/neuros-drivers",
+      "distribution": "neuros-drivers",
+      "release_tier": "public-runtime",
+      "scientific_maturity": "qualified-integration",
+      "publish_candidate": true
+    },
+    {
+      "path": "packages/neuros-arena",
+      "distribution": "neuros-arena",
+      "release_tier": "public-runtime",
+      "scientific_maturity": "synthetic-validation",
+      "publish_candidate": true
+    },
+    {
+      "path": "packages/neuros-models",
+      "distribution": "neuros-models",
+      "release_tier": "public-runtime",
+      "scientific_maturity": "qualified-integration",
+      "publish_candidate": true
+    },
+    {
+      "path": "packages/neuros",
+      "distribution": "neuros",
+      "release_tier": "public-runtime",
+      "scientific_maturity": "platform-core",
+      "publish_candidate": true
+    },
+    {
+      "path": "packages/neuros-foundation",
+      "distribution": "neuros-foundation",
+      "release_tier": "qualified-integration",
+      "scientific_maturity": "research-qualified",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/neuros-mechint",
+      "distribution": "neuros-mechint",
+      "release_tier": "qualified-integration",
+      "scientific_maturity": "research-qualified",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/neuros-neurofm",
+      "distribution": "neuros-neurofm",
+      "release_tier": "research-extension",
+      "scientific_maturity": "research",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/neuros-sourceweigher",
+      "distribution": "neuros-sourceweigher",
+      "release_tier": "research-extension",
+      "scientific_maturity": "research",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/orion",
+      "distribution": "neuros-orion",
+      "release_tier": "research-extension",
+      "scientific_maturity": "research",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/neuros-ui",
+      "distribution": "neuros-ui",
+      "release_tier": "internal-preview",
+      "scientific_maturity": "prototype",
+      "publish_candidate": false
+    },
+    {
+      "path": "packages/neuros-cloud",
+      "distribution": "neuros-cloud",
+      "release_tier": "internal-preview",
+      "scientific_maturity": "prototype",
+      "publish_candidate": false
+    }
+  ]
+}
