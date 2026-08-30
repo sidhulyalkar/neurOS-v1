@@ -1,8 +1,14 @@
 """Fail-closed orchestration authority for promoted Kumar2024 execution.
 
-Public fleet construction derives only from a verified binding, and public worker
-ingestion accepts only fully verified persisted worker bundles. Infrastructure
-retries remain code-owned and cannot be selected from scientific outcomes.
+This facade intentionally exposes only evidence-safe construction, ingestion,
+and assembly APIs. The implementation is split across private modules so
+scheduler plumbing cannot accidentally import a lower-level unverified worker
+admission primitive from the public surface.
+
+Public fleet construction derives only from a verified binding, and public
+worker ingestion accepts only fully verified persisted worker bundles.
+Infrastructure retries remain code-owned and cannot be selected from scientific
+outcomes.
 """
 from __future__ import annotations
 
