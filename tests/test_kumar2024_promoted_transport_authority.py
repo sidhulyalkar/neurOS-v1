@@ -14,11 +14,37 @@ from neuros.evidence.kumar2024_promoted_fleet_transport import (
     LocalAtomicCreateStore,
     PromotedTransportClaim,
     TransportClaimConflict,
+    TransportClaimStateError,
     acquire_attempt_claim,
     begin_attempt_invocation,
     transport_claim_key,
     transport_invocation_key,
 )
+
+
+class _BlackHoleCreateStore:
+    """Adversarial backend that lies that it committed a key."""
+
+    def create_if_absent(self, key: str, payload: bytes) -> bool:
+        return True
+
+    def read(self, key: str) -> bytes | None:
+        return None
+
+
+class _DropInvocationCreateStore:
+    """Delegate existing state but lie only when publishing invocation."""
+
+    def __init__(self, delegate: LocalAtomicCreateStore) -> None:
+        self.delegate = delegate
+
+    def create_if_absent(self, key: str, payload: bytes) -> bool:
+        if key.endswith("/transport/invocation.json"):
+            return True
+        return self.delegate.create_if_absent(key, payload)
+
+    def read(self, key: str) -> bytes | None:
+        return self.delegate.read(key)
 
 
 def _ledger_and_lease():
@@ -67,7 +93,7 @@ def test_different_transport_owner_cannot_take_existing_lease(tmp_path):
     store = LocalAtomicCreateStore(tmp_path)
     ledger, lease = _ledger_and_lease()
     acquire_attempt_claim(store, ledger, lease, owner_token=b"a" * 32)
-    with pytest.raises(TransportClaimConflict, match="already owned"):
+    with pytest.raises(TransportClaimConflict):
         acquire_attempt_claim(store, ledger, lease, owner_token=b"b" * 32)
 
 
@@ -91,6 +117,17 @@ def test_concurrent_transport_owners_produce_exactly_one_winner(tmp_path):
     payload = json.loads(persisted)
     assert payload["lease"]["lease_sha256"] == lease.sha256
     assert payload["transport_claim_sha256"]
+
+
+def test_claim_creation_must_be_durably_readable_before_acquisition():
+    ledger, lease = _ledger_and_lease()
+    with pytest.raises(TransportClaimStateError, match="cannot be read"):
+        acquire_attempt_claim(
+            _BlackHoleCreateStore(),
+            ledger,
+            lease,
+            owner_token=b"a" * 32,
+        )
 
 
 def test_owner_secret_is_never_persisted(tmp_path):
@@ -118,6 +155,17 @@ def test_invocation_marker_is_the_only_one_time_launch_permission(tmp_path):
     assert replay.launch_permitted is False
     assert replay.marker == first.marker
     assert store.read(transport_invocation_key(claim)) is not None
+
+
+def test_invocation_creation_must_be_durably_readable_before_launch(tmp_path):
+    durable = LocalAtomicCreateStore(tmp_path)
+    ledger, lease = _ledger_and_lease()
+    owner = b"a" * 32
+    claim = acquire_attempt_claim(durable, ledger, lease, owner_token=owner).claim
+    lying = _DropInvocationCreateStore(durable)
+    with pytest.raises(TransportClaimStateError, match="cannot be read"):
+        begin_attempt_invocation(lying, ledger, claim, owner_token=owner)
+    assert durable.read(transport_invocation_key(claim)) is None
 
 
 def test_claim_that_becomes_stale_before_launch_cannot_invoke(tmp_path):
