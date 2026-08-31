@@ -140,6 +140,13 @@ def test_schema_v2_rejects_unknown_authority_keys(location, key):
         PipelineConfig.from_mapping(raw)
 
 
+def test_schema_v2_unknown_key_reporting_handles_nonstring_yaml_keys():
+    raw = _raw_config(schema_version=2)
+    raw[1] = "unexpected"
+    with pytest.raises(ConfigurationError, match="Unknown configuration keys"):
+        PipelineConfig.from_mapping(raw)
+
+
 @pytest.mark.parametrize("stream_id", [1, True, None, object()])
 def test_stream_id_is_never_string_coerced(stream_id):
     raw = _raw_config(schema_version=2)
@@ -204,7 +211,9 @@ def test_execution_config_canonicalizes_thread_and_gpu_intent():
 
 
 def test_execution_config_canonicalizes_process_timeout():
-    execution = ExecutionConfig(executor="process", execution_timeout_s=np.float64(1.25))
+    execution = ExecutionConfig(
+        executor="process", execution_timeout_s=np.float64(1.25)
+    )
     assert execution.executor is ExecutionClass.PROCESS
     assert type(execution.execution_timeout_s) is float
     assert execution.execution_timeout_s == pytest.approx(1.25)
@@ -265,7 +274,12 @@ def test_direct_schema_v1_rejects_nondefault_execution_policy():
                 StreamConfig(
                     "eeg",
                     PluginConfig("source"),
-                    (PluginConfig("transform", execution=ExecutionConfig(executor="thread")),),
+                    (
+                        PluginConfig(
+                            "transform",
+                            execution=ExecutionConfig(executor="thread"),
+                        ),
+                    ),
                 ),
             ),
             decoder=PluginConfig("decoder"),
@@ -340,14 +354,37 @@ def test_source_nondefault_execution_fails_at_compilation(executor):
         resolve_config(config, registry=_registry())
 
 
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        {},
+        {"executor": "inline"},
+        {"executor": "thread"},
+        {"executor": "process", "execution_timeout_s": 1.0},
+    ],
+)
+def test_serialized_monitor_execution_policy_is_rejected_until_monitor_authority(
+    declaration,
+):
+    raw = _raw_config(schema_version=2)
+    raw["monitors"][0]["execution"] = declaration
+    with pytest.raises(ConfigurationError, match="monitor execution policy is unavailable"):
+        PipelineConfig.from_mapping(raw)
+
+
 @pytest.mark.parametrize("executor", ["thread", "gpu", "process"])
-def test_monitor_nondefault_execution_fails_until_monitor_authority_exists(executor):
+def test_direct_monitor_nondefault_execution_fails_at_compilation(executor):
     kwargs = {"executor": executor}
     if executor == "process":
         kwargs["execution_timeout_s"] = 1.0
-    raw = _raw_config(schema_version=2)
-    raw["monitors"][0]["execution"] = kwargs
-    config = PipelineConfig.from_mapping(raw)
+    config = PipelineConfig(
+        schema_version=2,
+        streams=(StreamConfig("eeg", PluginConfig("source")),),
+        decoder=PluginConfig("decoder"),
+        monitors=(
+            PluginConfig("monitor", execution=ExecutionConfig(**kwargs)),
+        ),
+    )
 
     with pytest.raises(ConfigurationError, match="monitor observation contract"):
         resolve_config(config, registry=_registry())
