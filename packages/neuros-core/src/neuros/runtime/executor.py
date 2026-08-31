@@ -20,6 +20,7 @@ import numpy as np
 
 from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, TransformEmission
 from neuros.errors import ProcessingError
+from neuros.runtime._validation import positive_finite_real
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from neuros.runtime.process_worker import PersistentProcessWorker
 from neuros.runtime.shared_process_worker import SharedMemoryProcessWorker
@@ -183,8 +184,9 @@ class RuntimeExecutor:
         *,
         drain_timeout_s: float = 2.0,
     ) -> None:
-        if drain_timeout_s <= 0:
-            raise ValueError("drain_timeout_s must be positive")
+        drain_timeout_s = positive_finite_real(
+            drain_timeout_s, field_name="drain_timeout_s"
+        )
         graph.validate()
         self.graph = graph
         self.drain_timeout_s = drain_timeout_s
@@ -830,8 +832,7 @@ class RuntimeExecutor:
         the same failure semantics as :meth:`run` and :meth:`wait`.
         """
 
-        if duration_s <= 0:
-            raise ValueError("duration_s must be positive")
+        duration_s = positive_finite_real(duration_s, field_name="duration_s")
         await self.start()
         if self._completion_task is None:
             raise RuntimeError("Runtime completion authority was not created")
