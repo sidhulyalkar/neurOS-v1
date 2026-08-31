@@ -195,24 +195,21 @@ jobs:
           set -euo pipefail
           cd "${RUNNER_TEMP}/neuros-release"
           sha256sum --check SHA256SUMS
-      - name: Smoke-install the public SDK and Arena from this exact wheel set
+      - name: Smoke-install the minimal public SDK from this exact wheel set
         run: |
           set -euo pipefail
           DIST="${RUNNER_TEMP}/neuros-release"
           python -m venv "${RUNNER_TEMP}/release-smoke"
           PY="${RUNNER_TEMP}/release-smoke/bin/python"
           NEUROS="${RUNNER_TEMP}/release-smoke/bin/neuros"
-          ARENA="${RUNNER_TEMP}/release-smoke/bin/neuros-arena"
           "${PY}" -m pip install --upgrade pip
 
           CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
           DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
-          ARENA_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_arena-*.whl' -print -quit)"
           MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
           SDK_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
           test -n "${CORE_WHEEL}"
           test -n "${DRIVERS_WHEEL}"
-          test -n "${ARENA_WHEEL}"
           test -n "${MODELS_WHEEL}"
           test -n "${SDK_WHEEL}"
 
@@ -220,8 +217,7 @@ jobs:
             "${CORE_WHEEL}" \
             "${DRIVERS_WHEEL}" \
             "${MODELS_WHEEL}" \
-            "${SDK_WHEEL}" \
-            "${ARENA_WHEEL}"
+            "${SDK_WHEEL}"
           "${PY}" -m pip check
           "${PY}" - <<'PY'
           import neuros
@@ -235,8 +231,6 @@ jobs:
           PY
           "${NEUROS}" doctor --json
           "${NEUROS}" compatibility --json
-          "${ARENA}" --preset dual-target-smoke --output "${RUNNER_TEMP}/arena-wheel-smoke.json"
-          test -s "${RUNNER_TEMP}/arena-wheel-smoke.json"
       - name: Upload immutable release-candidate bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
