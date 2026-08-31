@@ -9,6 +9,14 @@ from neuros.contracts import DecoderOutput, SignalFrame
 from neuros.runtime.transport import NeuralTransportProtocolError, SharedMemoryMailbox
 
 
+class DictSubclass(dict):
+    pass
+
+
+class ListSubclass(list):
+    pass
+
+
 def test_transport_manifest_rejects_coerced_and_misaligned_array_geometry():
     box = SharedMemoryMailbox(4096)
     try:
@@ -31,7 +39,12 @@ def test_transport_manifest_rejects_coerced_and_misaligned_array_geometry():
 
         corrupted = copy.deepcopy(envelope)
         corrupted["manifest"]["shape"] = tuple(envelope["manifest"]["shape"])
-        with pytest.raises(NeuralTransportProtocolError, match="shape must be a list"):
+        with pytest.raises(NeuralTransportProtocolError, match="exact list"):
+            box.decode(corrupted, expected_lease_id=7)
+
+        corrupted = copy.deepcopy(envelope)
+        corrupted["manifest"]["shape"] = ListSubclass(envelope["manifest"]["shape"])
+        with pytest.raises(NeuralTransportProtocolError, match="exact list"):
             box.decode(corrupted, expected_lease_id=7)
     finally:
         box.close_and_unlink()
@@ -61,6 +74,36 @@ def test_transport_envelope_rejects_integer_coercion_and_unreferenced_tail_bytes
         corrupted["bytes_used"] += 64
         with pytest.raises(NeuralTransportProtocolError, match="referenced payload boundary"):
             box.decode(corrupted, expected_lease_id=3)
+    finally:
+        box.close_and_unlink()
+
+
+@pytest.mark.parametrize(
+    "expected_lease_id",
+    (True, np.bool_(True), "3", 3.0, np.int64(3), 0, -1),
+)
+def test_expected_lease_identity_rejects_coercion(expected_lease_id):
+    box = SharedMemoryMailbox(4096)
+    try:
+        envelope = box.encode(np.arange(4, dtype=np.float32), lease_id=3)
+        with pytest.raises((TypeError, ValueError), match="expected_lease_id"):
+            box.decode(envelope, expected_lease_id=expected_lease_id)
+    finally:
+        box.close_and_unlink()
+
+
+def test_transport_rejects_mapping_subclasses_not_emitted_by_writer():
+    box = SharedMemoryMailbox(4096)
+    try:
+        envelope = box.encode(np.arange(4, dtype=np.float32), lease_id=4)
+
+        with pytest.raises(NeuralTransportProtocolError, match="exact mapping"):
+            box.decode(DictSubclass(envelope), expected_lease_id=4)
+
+        corrupted = copy.deepcopy(envelope)
+        corrupted["manifest"] = DictSubclass(corrupted["manifest"])
+        with pytest.raises(NeuralTransportProtocolError, match="exact mapping"):
+            box.decode(corrupted, expected_lease_id=4)
     finally:
         box.close_and_unlink()
 
@@ -128,7 +171,12 @@ def test_sequence_manifest_requires_writer_container_shape():
         envelope = box.encode((1, 2, 3), lease_id=6)
         corrupted = copy.deepcopy(envelope)
         corrupted["manifest"]["items"] = tuple(corrupted["manifest"]["items"])
-        with pytest.raises(NeuralTransportProtocolError, match="items must be a list"):
+        with pytest.raises(NeuralTransportProtocolError, match="exact list"):
+            box.decode(corrupted, expected_lease_id=6)
+
+        corrupted = copy.deepcopy(envelope)
+        corrupted["manifest"]["items"] = ListSubclass(corrupted["manifest"]["items"])
+        with pytest.raises(NeuralTransportProtocolError, match="exact list"):
             box.decode(corrupted, expected_lease_id=6)
     finally:
         box.close_and_unlink()
