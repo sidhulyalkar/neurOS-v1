@@ -10,6 +10,16 @@ from .executor import (
 )
 from .graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from .lifecycle import RuntimeEvent, RuntimeState
+from .process_worker import (
+    PersistentProcessWorker,
+    ProcessExecutionReceipt,
+    ProcessWorkerCrashedError,
+    ProcessWorkerError,
+    ProcessWorkerProtocolError,
+    ProcessWorkerRemoteError,
+    ProcessWorkerSerializationError,
+    ProcessWorkerTimeoutError,
+)
 from .queues import OverflowPolicy, QueueStats, put_with_policy
 
 __all__ = [
@@ -17,6 +27,14 @@ __all__ = [
     "NodeKind",
     "NodeStats",
     "OverflowPolicy",
+    "PersistentProcessWorker",
+    "ProcessExecutionReceipt",
+    "ProcessWorkerCrashedError",
+    "ProcessWorkerError",
+    "ProcessWorkerProtocolError",
+    "ProcessWorkerRemoteError",
+    "ProcessWorkerSerializationError",
+    "ProcessWorkerTimeoutError",
     "QueueStats",
     "RuntimeDrainTimeoutError",
     "RuntimeEdge",
