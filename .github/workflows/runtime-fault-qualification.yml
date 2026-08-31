@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/RUNTIME_PROCESS_TRANSPORT.md"
+      - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_runtime_executor.py"
@@ -12,11 +14,19 @@ on:
       - "tests/test_runtime_fusion_cancellation.py"
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
+      - "tests/test_runtime_neural_transport.py"
+      - "tests/test_runtime_shared_transport_integration.py"
+      - "tests/test_runtime_transport_protocol_corruption.py"
+      - "tests/test_runtime_process_provenance.py"
+      - "tests/test_runtime_process_transport_parity.py"
+      - "tests/test_runtime_duration_authority.py"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/RUNTIME_PROCESS_TRANSPORT.md"
+      - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_runtime_executor.py"
@@ -25,6 +35,12 @@ on:
       - "tests/test_runtime_fusion_cancellation.py"
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
+      - "tests/test_runtime_neural_transport.py"
+      - "tests/test_runtime_shared_transport_integration.py"
+      - "tests/test_runtime_transport_protocol_corruption.py"
+      - "tests/test_runtime_process_provenance.py"
+      - "tests/test_runtime_process_transport_parity.py"
+      - "tests/test_runtime_duration_authority.py"
   workflow_dispatch:
 
 permissions:
@@ -92,7 +108,13 @@ jobs:
             tests/test_runtime_fault_qualification.py \
             tests/test_runtime_fusion_cancellation.py \
             tests/test_runtime_execution_authority.py \
-            tests/test_runtime_process_authority.py
+            tests/test_runtime_process_authority.py \
+            tests/test_runtime_neural_transport.py \
+            tests/test_runtime_shared_transport_integration.py \
+            tests/test_runtime_transport_protocol_corruption.py \
+            tests/test_runtime_process_provenance.py \
+            tests/test_runtime_process_transport_parity.py \
+            tests/test_runtime_duration_authority.py
 
   runtime-fault-qualification:
     name: Runtime Fault Qualification
