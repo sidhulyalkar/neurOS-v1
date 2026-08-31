@@ -91,11 +91,19 @@ def _child(conn: Connection, operator: Any, node_id: str, generation: int) -> No
         _send(conn, {**base, "kind": "ready"})
         while True:
             try:
-                request = pickle.loads(conn.recv_bytes())
-            except EOFError:
+                payload = conn.recv_bytes()
+            except (EOFError, ConnectionResetError, BrokenPipeError, OSError):
                 return
+            try:
+                request = pickle.loads(payload)
             except Exception as exc:
-                _send(conn, {**base, "kind": "protocol_error", "message": str(exc)})
+                try:
+                    _send(
+                        conn,
+                        {**base, "kind": "protocol_error", "message": str(exc)},
+                    )
+                except (EOFError, ConnectionResetError, BrokenPipeError, OSError):
+                    pass
                 return
             if not isinstance(request, dict) or any(
                 (
@@ -242,15 +250,20 @@ class PersistentProcessWorker:
     def _send_control(self, command: str) -> None:
         if self._conn is None:
             raise ProcessWorkerCrashedError(self.node_id, "worker IPC is closed")
-        _send(
-            self._conn,
-            {
-                "protocol": _PROTOCOL,
-                "node_id": self.node_id,
-                "generation": self.generation,
-                "command": command,
-            },
-        )
+        try:
+            _send(
+                self._conn,
+                {
+                    "protocol": _PROTOCOL,
+                    "node_id": self.node_id,
+                    "generation": self.generation,
+                    "command": command,
+                },
+            )
+        except (EOFError, ConnectionResetError, BrokenPipeError, OSError) as exc:
+            raise ProcessWorkerCrashedError(
+                self.node_id, f"worker IPC failed while sending {command}"
+            ) from exc
 
     def _start(self) -> None:
         if self._terminal:
@@ -293,21 +306,33 @@ class PersistentProcessWorker:
                 item_bytes = pickle.dumps(item, protocol=pickle.HIGHEST_PROTOCOL)
                 if self._conn is None:
                     raise ProcessWorkerCrashedError(self.node_id, "worker IPC is closed")
-                _send(
-                    self._conn,
-                    {
-                        "protocol": _PROTOCOL,
-                        "node_id": self.node_id,
-                        "generation": self.generation,
-                        "command": "call",
-                        "request_id": request_id,
-                        "method": method,
-                        "item": item_bytes,
-                    },
-                )
+                try:
+                    await asyncio.to_thread(
+                        _send,
+                        self._conn,
+                        {
+                            "protocol": _PROTOCOL,
+                            "node_id": self.node_id,
+                            "generation": self.generation,
+                            "command": "call",
+                            "request_id": request_id,
+                            "method": method,
+                            "item": item_bytes,
+                        },
+                    )
+                except (EOFError, ConnectionResetError, BrokenPipeError, OSError) as exc:
+                    raise ProcessWorkerCrashedError(
+                        self.node_id,
+                        f"worker IPC failed while sending request {request_id}",
+                    ) from exc
                 response = await asyncio.to_thread(
                     self._recv, self.execution_timeout_s, request_id
                 )
+                if not isinstance(response, dict):
+                    raise ProcessWorkerProtocolError(
+                        self.node_id, "worker response is not a mapping"
+                    )
+                self._identity(response, request_id)
             except asyncio.CancelledError:
                 self._receipt(request_id, "cancelled")
                 await asyncio.shield(asyncio.to_thread(self.abort))
@@ -375,9 +400,14 @@ class PersistentProcessWorker:
             try:
                 await asyncio.to_thread(self._start)
                 await asyncio.to_thread(self._send_control, "heartbeat")
-                response = await asyncio.to_thread(self._recv, self.startup_timeout_s, None)
+                response = await asyncio.to_thread(
+                    self._recv, self.startup_timeout_s, None
+                )
                 if response.get("kind") != "heartbeat":
                     raise ProcessWorkerProtocolError(self.node_id, "worker heartbeat failed")
+            except asyncio.CancelledError:
+                await asyncio.shield(asyncio.to_thread(self.abort))
+                raise
             except Exception:
                 await asyncio.to_thread(self.abort)
                 raise

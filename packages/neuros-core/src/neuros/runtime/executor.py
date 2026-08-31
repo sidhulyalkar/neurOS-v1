@@ -12,7 +12,6 @@ import asyncio
 import inspect
 import time
 from collections import deque
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, AsyncIterator, Callable
@@ -22,6 +21,7 @@ import numpy as np
 from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, TransformEmission
 from neuros.errors import ProcessingError
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
+from neuros.runtime.process_worker import PersistentProcessWorker
 from neuros.runtime.lifecycle import RuntimeEvent, RuntimeState
 from neuros.runtime.queues import OverflowPolicy, QueueStats, put_with_policy
 
@@ -31,7 +31,8 @@ class ExecutionClass(str, Enum):
 
     ``GPU`` is scheduled inline because the operator owns its framework/device
     context; the label exists so graph specifications and telemetry preserve the
-    scheduling intent. ``PROCESS`` is opt-in because operators must be picklable.
+    scheduling intent. ``PROCESS`` owns one persistent direct child per runtime
+    node and requires an explicit hard execution timeout.
     """
 
     INLINE = "inline"
@@ -187,7 +188,12 @@ class RuntimeExecutor:
         self._completion_task: asyncio.Task[None] | None = None
         self._output_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._event_queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
-        self._process_pool: ProcessPoolExecutor | None = None
+        self._process_workers: dict[str, PersistentProcessWorker] = {}
+        self._process_receipts: dict[str, deque[dict[str, Any]]] = {
+            node_id: deque(maxlen=4096)
+            for node_id, node in graph.nodes.items()
+            if node.executor == "process"
+        }
         self._stopping = False
         self._build_channels()
 
@@ -219,20 +225,16 @@ class RuntimeExecutor:
     def edge_channels(self) -> dict[tuple[str, str], EdgeChannel]:
         return self._channels
 
-    def _close_process_pool(self) -> None:
-        """Release executor-owned process-pool authority on every terminal path.
+    async def _close_process_workers(self) -> None:
+        """Close every executor-owned direct child before supervision completes."""
 
-        ``cancel_futures=True`` prevents queued work from starting. Python cannot
-        forcibly terminate a function already executing inside a worker process,
-        so this helper deliberately claims ownership release rather than process
-        kill semantics.
-        """
-
-        if self._process_pool is None:
+        workers = tuple(self._process_workers.values())
+        if not workers:
             return
-        pool = self._process_pool
-        self._process_pool = None
-        pool.shutdown(wait=False, cancel_futures=True)
+        await asyncio.gather(
+            *(asyncio.to_thread(worker.close) for worker in workers),
+            return_exceptions=True,
+        )
 
     async def start(self) -> None:
         if self.state is not RuntimeState.CREATED:
@@ -283,7 +285,7 @@ class RuntimeExecutor:
                 return
             await self._finish_successfully()
         finally:
-            self._close_process_pool()
+            await self._close_process_workers()
 
     async def _finish_successfully(self) -> None:
         if self.state not in (RuntimeState.DRAINING, RuntimeState.STOPPED):
@@ -291,7 +293,6 @@ class RuntimeExecutor:
         self.stopped_ns = time.monotonic_ns()
         if self.state is not RuntimeState.STOPPED:
             await self._transition(RuntimeState.STOPPED, "runtime_stopped")
-        self._close_process_pool()
 
     async def _run_guarded(self, node: RuntimeNode) -> None:
         try:
@@ -328,15 +329,16 @@ class RuntimeExecutor:
                 culprit_id = exc.node_id
                 cause = exc.cause
             self._node_stats[culprit_id].failed += 1
+            error_type = str(
+                getattr(cause, "runtime_error_type", type(cause).__name__)
+            )
             if self.failure is None:
-                self.failure = RuntimeFailure(
-                    culprit_id, type(cause).__name__, str(cause)
-                )
+                self.failure = RuntimeFailure(culprit_id, error_type, str(cause))
                 await self._transition(
                     RuntimeState.FAILED,
                     "node_failed",
                     node_id=culprit_id,
-                    error_type=type(cause).__name__,
+                    error_type=error_type,
                     message=str(cause),
                 )
                 # The task currently executing this handler must be allowed to
@@ -546,12 +548,42 @@ class RuntimeExecutor:
         if execution is ExecutionClass.THREAD:
             return await asyncio.to_thread(_call, func, item)
         if execution is ExecutionClass.PROCESS:
-            if self._process_pool is None:
-                self._process_pool = ProcessPoolExecutor()
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                self._process_pool, _call, func, item
+            timeout_s = node.execution_timeout_s
+            if timeout_s is None:
+                raise ValueError(
+                    f"Process node {node.node_id} lacks execution_timeout_s"
+                )
+            method_name = getattr(func, "__name__", None)
+            if (
+                not isinstance(method_name, str)
+                or not method_name
+                or getattr(func, "__self__", None) is not node.operator
+            ):
+                raise TypeError(
+                    f"Process node {node.node_id} requires a bound operator method"
+                )
+            worker = self._process_workers.get(node.node_id)
+            if worker is None:
+                worker = PersistentProcessWorker(
+                    node.node_id,
+                    node.operator,
+                    execution_timeout_s=timeout_s,
+                )
+                self._process_workers[node.node_id] = worker
+            receipts = self._process_receipts.setdefault(
+                node.node_id, deque(maxlen=4096)
             )
+            try:
+                call = await worker.invoke(method_name, item)
+                return call.result
+            finally:
+                receipt = worker.last_receipt
+                if receipt is not None and (
+                    not receipts
+                    or receipts[-1].get("request_id") != receipt.request_id
+                    or receipts[-1].get("generation") != receipt.generation
+                ):
+                    receipts.append(receipt.as_dict())
         raise ValueError(f"Unsupported execution class: {execution.value}")
 
     async def _emit(self, node: RuntimeNode, item: Any) -> None:
@@ -656,12 +688,12 @@ class RuntimeExecutor:
                 await asyncio.gather(
                     self._completion_task, return_exceptions=True
                 )
-            self._close_process_pool()
+            await self._close_process_workers()
             return
         if self.state is RuntimeState.CREATED:
             self.stopped_ns = time.monotonic_ns()
             await self._transition(RuntimeState.STOPPED, "runtime_stopped")
-            self._close_process_pool()
+            await self._close_process_workers()
             return
 
         self._stopping = True
@@ -717,7 +749,7 @@ class RuntimeExecutor:
                 )
         finally:
             if self._completion_task is not None and self._completion_task.done():
-                self._close_process_pool()
+                await self._close_process_workers()
 
         if self.state is not RuntimeState.FAILED:
             await self._finish_successfully()
@@ -790,4 +822,8 @@ class RuntimeExecutor:
                 for node_id, stats in self._node_stats.items()
             },
             "edges": edge_metrics,
+            "process_receipts": {
+                node_id: list(receipts)
+                for node_id, receipts in self._process_receipts.items()
+            },
         }
