@@ -52,6 +52,26 @@ class InfiniteSource:
             yield self.sequence
 
 
+class ParkedSource:
+    """Emit one item, then remain live until cancellation or release."""
+
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+        self.release = asyncio.Event()
+
+    async def start(self):
+        self.started = True
+
+    async def stop(self):
+        self.started = False
+        self.stopped = True
+
+    async def frames(self):
+        yield 1
+        await self.release.wait()
+
+
 class CollectingSink:
     def __init__(self, target: int = 1):
         self.items = []
@@ -83,6 +103,12 @@ class SlowTransform:
     async def transform(self, item):
         await asyncio.sleep(0.02)
         return item
+
+
+class DelayedFailTransform:
+    async def transform(self, item):
+        await asyncio.sleep(0.02)
+        raise ValueError("delayed qualified transform failure")
 
 
 class FailTransform:
@@ -320,6 +346,70 @@ async def test_run_for_surfaces_early_failure_without_sleeping_full_duration():
         await asyncio.wait_for(executor.run_for(30.0), timeout=1.0)
 
     assert executor.snapshot()["state"] == "failed"
+    assert_executor_tasks_terminal(executor)
+    leaked = [
+        task.get_name()
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and not task.done()
+        and task.get_name().startswith("neuros:")
+    ]
+    assert leaked == []
+
+
+@pytest.mark.asyncio
+async def test_unexpected_node_cancellation_is_failed_not_silent_stopped():
+    source = ParkedSource()
+    sink = CollectingSink(target=1)
+    executor = RuntimeExecutor(
+        source_sink_graph(source, sink, capacity=4, overflow="block"),
+        drain_timeout_s=0.5,
+    )
+
+    await executor.start()
+    await asyncio.wait_for(sink.reached.wait(), timeout=1.0)
+    executor._tasks["sink"].cancel()
+
+    with pytest.raises(RuntimeError, match="RuntimeUnexpectedCancellationError"):
+        await asyncio.wait_for(executor.wait(), timeout=1.0)
+
+    snapshot = executor.snapshot()
+    assert snapshot["state"] == "failed"
+    assert snapshot["failure"] == {
+        "node_id": "sink",
+        "error_type": "RuntimeUnexpectedCancellationError",
+        "message": "runtime node task 'sink' was cancelled without shutdown authority",
+    }
+    assert snapshot["nodes"]["sink"]["failed"] == 1
+    assert source.stopped is True
+    assert_executor_tasks_terminal(executor)
+    events = await collect_events(executor)
+    assert sum(event.event == "node_cancelled" for event in events) == 1
+    assert not any(event.event == "runtime_stopped" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_failure_peer_cancellation_cannot_deadlock_on_saturated_stop_queue():
+    source = InfiniteSource()
+    executor = RuntimeExecutor(
+        source_transform_sink_graph(
+            source,
+            DelayedFailTransform(),
+            CollectingSink(),
+            source_capacity=1,
+            source_overflow="block",
+        ),
+        drain_timeout_s=0.5,
+    )
+
+    with pytest.raises(RuntimeError, match="delayed qualified transform failure"):
+        await asyncio.wait_for(executor.run(), timeout=1.0)
+
+    snapshot = executor.snapshot()
+    assert snapshot["state"] == "failed"
+    assert snapshot["failure"]["node_id"] == "transform"
+    assert snapshot["failure"]["error_type"] == "ValueError"
+    assert source.stopped is True
     assert_executor_tasks_terminal(executor)
     leaked = [
         task.get_name()

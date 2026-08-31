@@ -113,6 +113,16 @@ class RuntimeDrainTimeoutError(RuntimeError):
         )
 
 
+class RuntimeUnexpectedCancellationError(RuntimeError):
+    """Raised when a runtime node task is cancelled without runtime authority."""
+
+    def __init__(self, node_id: str) -> None:
+        self.node_id = node_id
+        super().__init__(
+            f"runtime node task {node_id!r} was cancelled without shutdown authority"
+        )
+
+
 class _AttributedNodeError(RuntimeError):
     """Internal wrapper for failures raised while executing another node's task."""
 
@@ -284,6 +294,24 @@ class RuntimeExecutor:
             else:
                 await self._run_unary(node)
         except asyncio.CancelledError:
+            if self.failure is None and not self._stopping:
+                cancellation = RuntimeUnexpectedCancellationError(node.node_id)
+                self._node_stats[node.node_id].failed += 1
+                self.failure = RuntimeFailure(
+                    node.node_id,
+                    type(cancellation).__name__,
+                    str(cancellation),
+                )
+                await self._transition(
+                    RuntimeState.FAILED,
+                    "node_cancelled",
+                    node_id=node.node_id,
+                    error_type=type(cancellation).__name__,
+                    message=str(cancellation),
+                )
+                for peer_id, task in self._tasks.items():
+                    if peer_id != node.node_id and not task.done():
+                        task.cancel()
             raise
         except Exception as exc:
             culprit_id = node.node_id
@@ -315,12 +343,26 @@ class RuntimeExecutor:
         if not all(hasattr(source, name) for name in ("start", "stop", "frames")):
             raise TypeError(f"Source node {node.node_id} does not implement Source")
         await source.start()
+        completed_normally = False
+        cancelled = False
         try:
             async for item in source.frames():
                 await self._emit(node, item)
+            completed_normally = True
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             await source.stop()
-            await self._emit_stop(node.node_id)
+            # Only normal completion or an explicit graceful stop owns an
+            # in-band shutdown marker. During failure propagation the peer
+            # consumer may already be cancelled, so enqueueing _STOP into a
+            # saturated data queue can deadlock containment indefinitely.
+            graceful_stop = (
+                cancelled and self._stopping and self.failure is None
+            )
+            if completed_normally or graceful_stop:
+                await self._emit_stop(node.node_id)
 
     async def _run_unary(self, node: RuntimeNode) -> None:
         incoming = self._incoming[node.node_id]

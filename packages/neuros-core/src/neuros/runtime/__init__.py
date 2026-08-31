@@ -6,6 +6,7 @@ from .executor import (
     RuntimeDrainTimeoutError,
     RuntimeExecutor,
     RuntimeFailure,
+    RuntimeUnexpectedCancellationError,
 )
 from .graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from .lifecycle import RuntimeEvent, RuntimeState
@@ -25,5 +26,6 @@ __all__ = [
     "RuntimeGraph",
     "RuntimeNode",
     "RuntimeState",
+    "RuntimeUnexpectedCancellationError",
     "put_with_policy",
 ]
