@@ -523,7 +523,11 @@ def _inside_environment(args: argparse.Namespace) -> int:
             "tampered-recording-replay-rejected",
             [neuros_cli, "replay", tampered_session, "--config", config, "--json"],
             cwd=work,
-            expected_codes=(5,),
+            expected_codes=(4,),
+        )
+        _require(
+            "Data hash mismatch" in results[-1].stderr,
+            "tampered recording replay failed for an unrelated runtime reason",
         )
 
         qualification = work / "qualification"
