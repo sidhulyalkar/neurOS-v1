@@ -39,6 +39,10 @@ class ProcessWorkerSerializationError(ProcessWorkerError):
     pass
 
 
+class ProcessWorkerTerminationError(ProcessWorkerError):
+    pass
+
+
 class ProcessWorkerRemoteError(ProcessWorkerError):
     def __init__(self, node_id: str, error_type: str, message: str) -> None:
         self.remote_error_type = error_type
@@ -412,25 +416,37 @@ class PersistentProcessWorker:
                 await asyncio.to_thread(self.abort)
                 raise
 
-    def abort(self) -> None:
-        self._terminal = True
-        conn, process = self._conn, self._process
-        self._conn = self._process = None
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-        if process is None:
-            return
+    def _terminate_owned_process(self, process: mp.Process) -> None:
+        """Prove the direct child is dead or fail closed with its handle retained."""
+
         if process.is_alive():
             process.terminate()
             process.join(self.termination_grace_s)
         if process.is_alive() and hasattr(process, "kill"):
             process.kill()
             process.join(self.termination_grace_s)
-        if not process.is_alive():
-            process.close()
+        if process.is_alive():
+            self._process = process
+            raise ProcessWorkerTerminationError(
+                self.node_id,
+                "direct child remained alive after terminate/join/kill escalation",
+            )
+        process.close()
+        self._process = None
+
+    def abort(self) -> None:
+        self._terminal = True
+        conn, process = self._conn, self._process
+        self._conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if process is None:
+            self._process = None
+            return
+        self._terminate_owned_process(process)
 
     def close(self) -> None:
         self._terminal = True
@@ -449,14 +465,11 @@ class PersistentProcessWorker:
             except Exception:
                 pass
         process.join(self.termination_grace_s)
-        if process.is_alive():
-            process.terminate()
-            process.join(self.termination_grace_s)
-        if process.is_alive() and hasattr(process, "kill"):
-            process.kill()
-            process.join(self.termination_grace_s)
         if conn is not None:
             conn.close()
-        self._conn = self._process = None
-        if not process.is_alive():
-            process.close()
+        self._conn = None
+        if process.is_alive():
+            self._terminate_owned_process(process)
+            return
+        process.close()
+        self._process = None

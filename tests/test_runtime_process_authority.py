@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from neuros.runtime import NodeKind, RuntimeEdge, RuntimeExecutor, RuntimeGraph, RuntimeNode
-from neuros.runtime.process_worker import PersistentProcessWorker, ProcessWorkerProtocolError
+from neuros.runtime.process_worker import (
+    PersistentProcessWorker,
+    ProcessWorkerProtocolError,
+    ProcessWorkerTerminationError,
+)
 
 
 class FiniteSource:
@@ -433,3 +437,41 @@ async def test_runtime_failure_terminates_every_executor_owned_worker(tmp_path):
     }
     assert child_pids.isdisjoint(_active_child_pids())
     assert executor.snapshot()["failure"]["node_id"] == "fail"
+
+
+class ImmortalProcess:
+    def __init__(self):
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.join_calls = 0
+
+    def is_alive(self):
+        return True
+
+    def terminate(self):
+        self.terminate_calls += 1
+
+    def kill(self):
+        self.kill_calls += 1
+
+    def join(self, timeout=None):
+        self.join_calls += 1
+
+    def close(self):
+        raise AssertionError("live process handle must not be closed")
+
+
+def test_direct_child_surviving_escalation_fails_closed():
+    worker = PersistentProcessWorker(
+        "transform", CounterTransform(), execution_timeout_s=1.0
+    )
+    process = ImmortalProcess()
+    worker._process = process
+
+    with pytest.raises(ProcessWorkerTerminationError, match="remained alive"):
+        worker.abort()
+
+    assert process.terminate_calls == 1
+    assert process.kill_calls == 1
+    assert process.join_calls == 2
+    assert worker._process is process

@@ -114,6 +114,18 @@ class RuntimeDrainTimeoutError(RuntimeError):
         )
 
 
+class RuntimeProcessCleanupError(RuntimeError):
+    """Raised when executor-owned process cleanup cannot prove termination."""
+
+    def __init__(self, failures: tuple[tuple[str, str, str], ...]) -> None:
+        self.failures = tuple(sorted(failures))
+        detail = "; ".join(
+            f"{node_id}: {error_type}: {message}"
+            for node_id, error_type, message in self.failures
+        )
+        super().__init__(f"process cleanup failed: {detail}")
+
+
 class RuntimeUnexpectedCancellationError(RuntimeError):
     """Raised when a runtime node task is cancelled without runtime authority."""
 
@@ -195,6 +207,7 @@ class RuntimeExecutor:
             if node.executor == "process"
         }
         self._stopping = False
+        self._process_cleanup_error: RuntimeProcessCleanupError | None = None
         self._build_channels()
 
     def _build_channels(self) -> None:
@@ -226,14 +239,52 @@ class RuntimeExecutor:
         return self._channels
 
     async def _close_process_workers(self) -> None:
-        """Close every executor-owned direct child before supervision completes."""
+        """Prove every executor-owned child is closed before successful terminal state."""
 
-        workers = tuple(self._process_workers.values())
+        workers = tuple(sorted(self._process_workers.items()))
         if not workers:
             return
-        await asyncio.gather(
-            *(asyncio.to_thread(worker.close) for worker in workers),
+        results = await asyncio.gather(
+            *(asyncio.to_thread(worker.close) for _, worker in workers),
             return_exceptions=True,
+        )
+        failures = tuple(
+            (
+                node_id,
+                type(result).__name__,
+                str(result),
+            )
+            for (node_id, _), result in zip(workers, results)
+            if isinstance(result, BaseException)
+        )
+        if not failures:
+            return
+        if self._process_cleanup_error is not None:
+            return
+        error = RuntimeProcessCleanupError(failures)
+        self._process_cleanup_error = error
+        metadata = {
+            "error_type": type(error).__name__,
+            "message": str(error),
+            "failures": error.failures,
+        }
+        if self.failure is None:
+            self.failure = RuntimeFailure(
+                "runtime", type(error).__name__, str(error)
+            )
+            self.stopped_ns = time.monotonic_ns()
+            await self._transition(
+                RuntimeState.FAILED,
+                "runtime_process_cleanup_failed",
+                **metadata,
+            )
+            return
+        await self._event_queue.put(
+            RuntimeEvent(
+                event="runtime_process_cleanup_failed",
+                state=RuntimeState.FAILED,
+                metadata=metadata,
+            )
         )
 
     async def start(self) -> None:
@@ -290,6 +341,9 @@ class RuntimeExecutor:
     async def _finish_successfully(self) -> None:
         if self.state not in (RuntimeState.DRAINING, RuntimeState.STOPPED):
             await self._transition(RuntimeState.DRAINING, "runtime_draining")
+        await self._close_process_workers()
+        if self.failure is not None:
+            return
         self.stopped_ns = time.monotonic_ns()
         if self.state is not RuntimeState.STOPPED:
             await self._transition(RuntimeState.STOPPED, "runtime_stopped")
@@ -691,9 +745,10 @@ class RuntimeExecutor:
             await self._close_process_workers()
             return
         if self.state is RuntimeState.CREATED:
-            self.stopped_ns = time.monotonic_ns()
-            await self._transition(RuntimeState.STOPPED, "runtime_stopped")
             await self._close_process_workers()
+            if self.failure is None:
+                self.stopped_ns = time.monotonic_ns()
+                await self._transition(RuntimeState.STOPPED, "runtime_stopped")
             return
 
         self._stopping = True

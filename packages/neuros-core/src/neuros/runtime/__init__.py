@@ -6,6 +6,7 @@ from .executor import (
     RuntimeDrainTimeoutError,
     RuntimeExecutor,
     RuntimeFailure,
+    RuntimeProcessCleanupError,
     RuntimeUnexpectedCancellationError,
 )
 from .graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
@@ -18,6 +19,7 @@ from .process_worker import (
     ProcessWorkerProtocolError,
     ProcessWorkerRemoteError,
     ProcessWorkerSerializationError,
+    ProcessWorkerTerminationError,
     ProcessWorkerTimeoutError,
 )
 from .queues import OverflowPolicy, QueueStats, put_with_policy
@@ -34,6 +36,7 @@ __all__ = [
     "ProcessWorkerProtocolError",
     "ProcessWorkerRemoteError",
     "ProcessWorkerSerializationError",
+    "ProcessWorkerTerminationError",
     "ProcessWorkerTimeoutError",
     "QueueStats",
     "RuntimeDrainTimeoutError",
@@ -41,6 +44,7 @@ __all__ = [
     "RuntimeEvent",
     "RuntimeExecutor",
     "RuntimeFailure",
+    "RuntimeProcessCleanupError",
     "RuntimeGraph",
     "RuntimeNode",
     "RuntimeState",
