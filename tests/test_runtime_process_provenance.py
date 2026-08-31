@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from neuros.runtime import NodeKind, RuntimeExecutor, RuntimeGraph, RuntimeNode
+from neuros.runtime import NodeKind, RuntimeEdge, RuntimeExecutor, RuntimeGraph, RuntimeNode
 
 
 class IdentityTransform:
@@ -10,6 +10,7 @@ class IdentityTransform:
 
 def test_snapshot_records_pickle_and_shared_memory_process_authority_before_start():
     graph = RuntimeGraph()
+    graph.add_node(RuntimeNode("source", NodeKind.SOURCE, object()))
     graph.add_node(
         RuntimeNode(
             "pickle-node",
@@ -31,6 +32,8 @@ def test_snapshot_records_pickle_and_shared_memory_process_authority_before_star
             process_response_capacity_bytes=16384,
         )
     )
+    graph.connect(RuntimeEdge("source", "pickle-node"))
+    graph.connect(RuntimeEdge("source", "shared-node"))
 
     snapshot = RuntimeExecutor(graph).snapshot()
 
