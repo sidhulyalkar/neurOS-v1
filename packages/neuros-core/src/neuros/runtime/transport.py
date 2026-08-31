@@ -143,6 +143,10 @@ class _MailboxReader:
         self.bytes_used = bytes_used
         self._ranges: list[tuple[int, int]] = []
 
+    @property
+    def referenced_end(self) -> int:
+        return max((stop for _, stop in self._ranges), default=0)
+
     def get_array(self, node: Mapping[str, Any]) -> np.ndarray:
         try:
             offset = _manifest_int(node["offset"], "ndarray.offset")
@@ -427,7 +431,12 @@ def _decode(node: Any, reader: _MailboxReader) -> Any:
 
 
 class SharedMemoryMailbox:
-    """One fixed-capacity shared-memory mailbox with explicit lease identity."""
+    """One fixed-capacity shared-memory mailbox with structural ownership.
+
+    A mailbox created by this object owns unlink authority. An attached mailbox
+    never does. Ownership is derived from creation and cannot be overridden by a
+    caller-provided flag.
+    """
 
     def __init__(
         self,
@@ -435,14 +444,13 @@ class SharedMemoryMailbox:
         *,
         name: str | None = None,
         create: bool = True,
-        owner: bool | None = None,
     ) -> None:
         if isinstance(capacity_bytes, bool) or not isinstance(capacity_bytes, int):
             raise TypeError("capacity_bytes must be an integer")
         if capacity_bytes <= 0:
             raise ValueError("capacity_bytes must be positive")
         self.capacity_bytes = capacity_bytes
-        self._owner = create if owner is None else bool(owner)
+        self._owner = bool(create)
         self._shm = shared_memory.SharedMemory(
             name=name,
             create=create,
@@ -458,7 +466,7 @@ class SharedMemoryMailbox:
 
     @classmethod
     def attach(cls, name: str, capacity_bytes: int) -> "SharedMemoryMailbox":
-        return cls(capacity_bytes, name=name, create=False, owner=False)
+        return cls(capacity_bytes, name=name, create=False)
 
     @property
     def name(self) -> str:
@@ -496,7 +504,12 @@ class SharedMemoryMailbox:
                 "shared-memory payload bytes_used exceeds mailbox capacity"
             )
         reader = _MailboxReader(self._shm.buf, bytes_used)
-        return _decode(envelope.get("manifest"), reader)
+        value = _decode(envelope.get("manifest"), reader)
+        if reader.referenced_end != bytes_used:
+            raise NeuralTransportProtocolError(
+                "shared-memory bytes_used does not match referenced payload boundary"
+            )
+        return value
 
     def close(self) -> None:
         if not self._closed:
