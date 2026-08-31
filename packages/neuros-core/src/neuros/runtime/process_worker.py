@@ -774,6 +774,14 @@ class PersistentProcessWorker:
                 response = await asyncio.to_thread(
                     self._recv, self.execution_timeout_s, request_id
                 )
+                # Defense in depth: do not make correctness depend on _recv being
+                # the only response source. Tests and future transports may wrap
+                # or replace it; every admitted call result is re-verified here.
+                if type(response) is not dict:
+                    raise ProcessWorkerProtocolError(
+                        self.node_id, "worker response is not an exact mapping"
+                    )
+                self._identity(response, request_id)
             except asyncio.CancelledError:
                 self._receipt(request_id, "cancelled")
                 await asyncio.shield(self._contain_primary_failure())
