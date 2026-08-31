@@ -360,15 +360,28 @@ class RuntimeExecutor:
         sequence_id = 0
         while len(closed) < len(incoming):
             pending = {
-                asyncio.create_task(channel.queue.get()): channel
+                asyncio.create_task(
+                    channel.queue.get(),
+                    name=f"neuros:{node.node_id}:input:{channel.edge.source}",
+                ): channel
                 for channel in incoming
                 if channel.edge.source not in closed
             }
             if not pending:
                 break
-            done, not_done = await asyncio.wait(
-                pending, return_when=asyncio.FIRST_COMPLETED
-            )
+            try:
+                done, not_done = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+            except BaseException:
+                # Fusion owns these temporary queue-get tasks. If the fusion
+                # node is cancelled, every child must be cancelled and awaited
+                # before the node itself can become terminal.
+                for task in pending:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                raise
             for task in not_done:
                 task.cancel()
             for task in not_done:
@@ -583,7 +596,16 @@ class RuntimeExecutor:
             )
 
     async def stop(self) -> None:
-        if self.state in (RuntimeState.STOPPED, RuntimeState.FAILED):
+        if self.state is RuntimeState.STOPPED:
+            return
+        if self.state is RuntimeState.FAILED:
+            # FAILED is scientific terminal authority, but callers invoking
+            # stop() also receive a resource-cleanup barrier.
+            if self._completion_task is not None and not self._completion_task.done():
+                await asyncio.gather(
+                    self._completion_task, return_exceptions=True
+                )
+            self._close_process_pool()
             return
         if self.state is RuntimeState.CREATED:
             self.stopped_ns = time.monotonic_ns()
@@ -666,7 +688,7 @@ class RuntimeExecutor:
         if duration_s <= 0:
             raise ValueError("duration_s must be positive")
         await self.start()
-        if self._completion_task is None:  # defensive: start() owns creation
+        if self._completion_task is None:
             raise RuntimeError("Runtime completion authority was not created")
 
         timer = asyncio.create_task(
