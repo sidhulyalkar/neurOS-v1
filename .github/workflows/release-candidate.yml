@@ -80,7 +80,9 @@ jobs:
       - name: Verify internal default dependency closure
         run: |
           set -euo pipefail
-          python scripts/check_release_dependency_closure.py "${RUNNER_TEMP}/neuros-release"
+          python scripts/check_release_dependency_closure.py \
+            "${RUNNER_TEMP}/neuros-release" \
+            --output "${RUNNER_TEMP}/neuros-release/release-dependency-closure.json"
       - name: Prove component namespace without the SDK
         run: |
           set -euo pipefail
@@ -124,7 +126,6 @@ jobs:
           from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
-          from packaging.requirements import Requirement
           from packaging.utils import canonicalize_name
 
           selected_policy = json.loads(
@@ -145,7 +146,6 @@ jobs:
           bundled_policy_path.write_bytes(policy_bytes)
 
           artifacts = []
-          metadata_by_distribution = {}
           for wheel in sorted(dist.glob("*.whl")):
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
               with ZipFile(wheel) as archive:
@@ -159,15 +159,13 @@ jobs:
               if not name or not version:
                   raise SystemExit(f"missing package metadata in {wheel.name}")
               artifacts.append({"file": wheel.name, "sha256": digest, "name": name, "version": version})
-              metadata_by_distribution[canonicalize_name(name)] = message
 
           if len(artifacts) != expected_count:
               raise SystemExit(f"expected {expected_count} wheels, found {len(artifacts)}")
-          if len({canonicalize_name(item["name"]) for item in artifacts}) != expected_count:
-              raise SystemExit("release contains duplicate distribution names")
-
-          expected_names = {canonicalize_name(item["distribution"]) for item in selected_policy["packages"]}
           observed_names = {canonicalize_name(item["name"]) for item in artifacts}
+          if len(observed_names) != expected_count:
+              raise SystemExit("release contains duplicate distribution names")
+          expected_names = {canonicalize_name(item["distribution"]) for item in selected_policy["packages"]}
           if expected_names != observed_names:
               raise SystemExit(
                   "release wheel distributions differ from explicit package policy: "
@@ -175,24 +173,22 @@ jobs:
                   f"foreign={sorted(observed_names - expected_names)}"
               )
 
-          internal_runtime_dependencies = []
-          for distribution, message in sorted(metadata_by_distribution.items()):
-              for raw_requirement in message.get_all("Requires-Dist") or []:
-                  requirement = Requirement(raw_requirement)
-                  dependency = canonicalize_name(requirement.name)
-                  if dependency != "neuros" and not dependency.startswith("neuros-"):
-                      continue
-                  if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
-                      continue
-                  internal_runtime_dependencies.append(
-                      {"from": distribution, "requirement": raw_requirement, "to": dependency}
-                  )
-                  if dependency not in observed_names:
-                      raise SystemExit(
-                          "default release has an unsatisfied internal runtime dependency: "
-                          f"{distribution} requires {raw_requirement!r}, but {dependency!r} "
-                          "is not present in the exact release wheel set"
-                      )
+          closure_path = dist / "release-dependency-closure.json"
+          if not closure_path.is_file():
+              raise SystemExit("release dependency closure report is missing")
+          closure_payload = json.loads(closure_path.read_text(encoding="utf-8"))
+          if closure_payload.get("schema") != "neuros.release_dependency_closure.v1":
+              raise SystemExit("unexpected release dependency closure schema")
+          if closure_payload.get("status") != "pass":
+              raise SystemExit("release dependency closure is not passing")
+          closure_names = set(closure_payload.get("distributions", {}))
+          if closure_names != observed_names:
+              raise SystemExit(
+                  "release dependency closure distribution set differs from wheels: "
+                  f"missing={sorted(observed_names - closure_names)}, "
+                  f"foreign={sorted(closure_names - observed_names)}"
+              )
+          closure_sha = hashlib.sha256(closure_path.read_bytes()).hexdigest()
 
           ownership_path = dist / "wheel-ownership.json"
           if not ownership_path.is_file():
@@ -211,9 +207,13 @@ jobs:
               "github_event_sha": os.environ["GITHUB_SHA"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
-              "internal_runtime_dependency_closure": {
-                  "status": "pass",
-                  "dependencies": internal_runtime_dependencies,
+              "release_dependency_closure": {
+                  "file": closure_path.name,
+                  "sha256": closure_sha,
+                  "schema": closure_payload["schema"],
+                  "python_versions": closure_payload.get("python_versions", []),
+                  "target_environment_count": len(closure_payload.get("target_environments", [])),
+                  "dependency_count": len(closure_payload.get("dependencies", [])),
               },
               "release_policy": {
                   "file": bundled_policy_path.name,
@@ -236,6 +236,7 @@ jobs:
 
           checksum_lines = [
               *(f"{a['sha256']}  {a['file']}\n" for a in artifacts),
+              f"{closure_sha}  {closure_path.name}\n",
               f"{ownership_sha}  {ownership_path.name}\n",
               f"{policy_sha}  {bundled_policy_path.name}\n",
               f"{manifest_sha}  {manifest_path.name}\n",
@@ -291,6 +292,7 @@ jobs:
             ${{ runner.temp }}/neuros-release/*.whl
             ${{ runner.temp }}/neuros-release/SHA256SUMS
             ${{ runner.temp }}/neuros-release/package-policy.json
+            ${{ runner.temp }}/neuros-release/release-dependency-closure.json
             ${{ runner.temp }}/neuros-release/release-manifest.json
             ${{ runner.temp }}/neuros-release/wheel-ownership.json
           if-no-files-found: error
