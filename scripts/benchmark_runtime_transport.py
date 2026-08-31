@@ -35,7 +35,7 @@ class IdentityOperator:
 
 
 def _source_revision() -> str:
-    explicit = os.environ.get("GITHUB_SHA")
+    explicit = os.environ.get("BENCH_SOURCE_SHA")
     if explicit:
         return explicit
     try:
@@ -176,6 +176,7 @@ async def run_benchmark(
     return {
         "schema": "neuros.runtime_transport_benchmark.v1",
         "source_revision": _source_revision(),
+        "semantic_source_revision": os.environ.get("BENCH_SEMANTIC_SHA", "unknown"),
         "python": sys.version,
         "platform": platform.platform(),
         "processor": platform.processor(),
