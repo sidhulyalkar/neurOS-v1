@@ -309,11 +309,6 @@ class PipelineConfig:
                 _reject_unknown_keys(
                     item, allowed=_PLUGIN_V2_KEYS, context="plugin configuration"
                 )
-                if role == "monitor" and "execution" in item:
-                    raise ConfigurationError(
-                        "monitor execution policy is unavailable until the runtime "
-                        "monitor observation contract is implemented"
-                    )
             plugin = item.get("plugin")
             options = item.get("options", {})
             execution = (
