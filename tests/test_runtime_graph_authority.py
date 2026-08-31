@@ -208,3 +208,70 @@ def test_graph_validate_rejects_duplicate_edges_even_when_public_list_is_mutated
     graph.edges.extend([edge, edge])
     with pytest.raises(ValueError, match="Duplicate edge: source -> sink"):
         graph.validate()
+
+
+@pytest.mark.parametrize(
+    ("nodes", "edges", "message"),
+    [
+        ([], [], "nodes must be a dict"),
+        ({}, (), "edges must be a list"),
+        (None, [], "nodes must be a dict"),
+        ({}, None, "edges must be a list"),
+    ],
+)
+def test_graph_constructor_rejects_wrong_container_types(nodes, edges, message):
+    with pytest.raises(TypeError, match=message):
+        RuntimeGraph(nodes=nodes, edges=edges)
+
+
+def test_graph_constructor_detaches_caller_owned_containers():
+    source = RuntimeNode("source", NodeKind.SOURCE, Source())
+    nodes = {"source": source}
+    edges: list[RuntimeEdge] = []
+    graph = RuntimeGraph(nodes=nodes, edges=edges)
+
+    nodes["other"] = RuntimeNode("other", NodeKind.SOURCE, Source())
+    edges.append(RuntimeEdge("source", "other"))
+
+    assert tuple(graph.nodes) == ("source",)
+    assert graph.edges == []
+
+
+def test_graph_constructor_rejects_invalid_initial_edge_endpoints():
+    source = RuntimeNode("source", NodeKind.SOURCE, Source())
+    with pytest.raises(ValueError, match="Invalid edge: source -> missing"):
+        RuntimeGraph(
+            nodes={"source": source},
+            edges=[RuntimeEdge("source", "missing")],
+        )
+
+
+def test_topological_order_rejects_corrupted_public_edge_list_before_traversal():
+    graph = RuntimeGraph()
+    graph.nodes["source"] = RuntimeNode("source", NodeKind.SOURCE, Source())
+    graph.edges.append(object())
+
+    with pytest.raises(TypeError, match="edges must be RuntimeEdge instances"):
+        graph.topological_order()
+
+
+@pytest.mark.parametrize("method_name", ["incoming", "outgoing"])
+def test_edge_queries_reject_corrupted_graph_structure(method_name):
+    graph = RuntimeGraph()
+    graph.nodes["source"] = RuntimeNode("source", NodeKind.SOURCE, Source())
+    graph.edges.append(object())
+
+    with pytest.raises(TypeError, match="edges must be RuntimeEdge instances"):
+        getattr(graph, method_name)("source")
+
+
+def test_graph_mutation_rejects_replaced_container_types():
+    graph = RuntimeGraph()
+    graph.nodes = []
+    with pytest.raises(TypeError, match="nodes must be a dict"):
+        graph.add_node(RuntimeNode("source", NodeKind.SOURCE, Source()))
+
+    graph = RuntimeGraph()
+    graph.edges = ()
+    with pytest.raises(TypeError, match="edges must be a list"):
+        graph.connect(RuntimeEdge("a", "b"))
