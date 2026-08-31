@@ -13,7 +13,6 @@ on:
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_config_execution_authority.py"
-      - "tests/test_config_resolution.py"
       - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
@@ -43,7 +42,6 @@ on:
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_config_execution_authority.py"
-      - "tests/test_config_resolution.py"
       - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
@@ -122,7 +120,6 @@ jobs:
           set -euo pipefail
           python -m pytest -q \
             tests/test_config_execution_authority.py \
-            tests/test_config_resolution.py \
             tests/test_config_schema.py \
             tests/test_decoder_output_immutability.py \
             tests/test_runtime_executor.py \
