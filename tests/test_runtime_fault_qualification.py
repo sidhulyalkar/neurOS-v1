@@ -121,14 +121,21 @@ class FailingMonitor:
         raise LookupError(f"monitor rejected {payload['node_id']}")
 
 
-class FakeProcessPool:
+class FakeProcessWorker:
     def __init__(self):
-        self.shutdown_calls = []
+        self.close_calls = 0
 
-    def shutdown(self, *, wait, cancel_futures):
-        self.shutdown_calls.append(
-            {"wait": wait, "cancel_futures": cancel_futures}
-        )
+    def close(self):
+        self.close_calls += 1
+
+
+class FailingProcessWorker:
+    def __init__(self):
+        self.close_calls = 0
+
+    def close(self):
+        self.close_calls += 1
+        raise RuntimeError("worker cleanup refused")
 
 
 def source_sink_graph(source, sink, *, capacity=2, overflow="block"):
@@ -311,7 +318,7 @@ async def test_fail_overflow_is_runtime_failure_at_emitting_source():
 
 
 @pytest.mark.asyncio
-async def test_executor_owned_process_pool_is_closed_on_failure_path():
+async def test_executor_owned_process_workers_are_closed_on_failure_path():
     executor = RuntimeExecutor(
         source_transform_sink_graph(
             FiniteSource([1]),
@@ -319,16 +326,13 @@ async def test_executor_owned_process_pool_is_closed_on_failure_path():
             CollectingSink(),
         )
     )
-    fake_pool = FakeProcessPool()
-    executor._process_pool = fake_pool  # ownership-path test, no subprocess spawned
+    fake_worker = FakeProcessWorker()
+    executor._process_workers["owned-test-worker"] = fake_worker
 
     with pytest.raises(RuntimeError, match="qualified transform failure"):
         await executor.run()
 
-    assert fake_pool.shutdown_calls == [
-        {"wait": False, "cancel_futures": True}
-    ]
-    assert executor._process_pool is None
+    assert fake_worker.close_calls == 1
     assert_executor_tasks_terminal(executor)
 
 
@@ -419,3 +423,48 @@ async def test_failure_peer_cancellation_cannot_deadlock_on_saturated_stop_queue
         and task.get_name().startswith("neuros:")
     ]
     assert leaked == []
+
+
+@pytest.mark.asyncio
+async def test_process_cleanup_failure_prevents_false_stopped_state():
+    executor = RuntimeExecutor(
+        source_sink_graph(FiniteSource([1]), CollectingSink())
+    )
+    failing_worker = FailingProcessWorker()
+    executor._process_workers["stuck"] = failing_worker
+
+    with pytest.raises(RuntimeError, match="RuntimeProcessCleanupError"):
+        await executor.run()
+
+    snapshot = executor.snapshot()
+    assert snapshot["state"] == "failed"
+    assert snapshot["failure"]["node_id"] == "runtime"
+    assert snapshot["failure"]["error_type"] == "RuntimeProcessCleanupError"
+    assert "worker cleanup refused" in snapshot["failure"]["message"]
+    events = await collect_events(executor)
+    assert sum(event.event == "runtime_process_cleanup_failed" for event in events) == 1
+    assert not any(event.event == "runtime_stopped" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_failure_does_not_overwrite_primary_node_culprit():
+    executor = RuntimeExecutor(
+        source_transform_sink_graph(
+            FiniteSource([1]),
+            FailTransform(),
+            CollectingSink(),
+        )
+    )
+    failing_worker = FailingProcessWorker()
+    executor._process_workers["stuck"] = failing_worker
+
+    with pytest.raises(RuntimeError, match="qualified transform failure"):
+        await executor.run()
+
+    assert executor.snapshot()["failure"] == {
+        "node_id": "transform",
+        "error_type": "ValueError",
+        "message": "qualified transform failure",
+    }
+    events = await collect_events(executor)
+    assert sum(event.event == "runtime_process_cleanup_failed" for event in events) == 1
