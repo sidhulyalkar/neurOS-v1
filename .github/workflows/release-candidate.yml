@@ -23,6 +23,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  RELEASE_SOURCE_REF: ${{ github.event.pull_request.head.ref || github.ref }}
+
 concurrency:
   group: release-candidate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -34,7 +38,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ env.RELEASE_SOURCE_SHA }}
           fetch-depth: 0
+          persist-credentials: false
+      - name: Require exact clean release source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${RELEASE_SOURCE_SHA}"
+          git diff --quiet HEAD --
+          git diff --cached --quiet HEAD --
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
@@ -169,8 +181,9 @@ jobs:
 
           manifest = {
               "schema_version": 2,
-              "git_sha": os.environ["GITHUB_SHA"],
-              "git_ref": os.environ["GITHUB_REF"],
+              "source_revision": os.environ["RELEASE_SOURCE_SHA"],
+              "source_ref": os.environ["RELEASE_SOURCE_REF"],
+              "github_event_sha": os.environ["GITHUB_SHA"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
               "release_policy": {
@@ -244,7 +257,7 @@ jobs:
       - name: Upload immutable release-candidate bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: neurOS-release-candidate-${{ github.sha }}
+          name: neurOS-release-candidate-${{ env.RELEASE_SOURCE_SHA }}
           path: |
             ${{ runner.temp }}/neuros-release/*.whl
             ${{ runner.temp }}/neuros-release/SHA256SUMS
