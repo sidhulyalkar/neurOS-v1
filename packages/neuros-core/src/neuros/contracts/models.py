@@ -16,7 +16,7 @@ _SUPPORTED_OUTPUT_ARRAY_KINDS = frozenset("biufc")
 
 
 def _freeze_output_array(value: Any, *, field_name: str) -> NDArray[np.generic]:
-    """Detach one canonical output array from caller-owned storage."""
+    """Detach one canonical numeric output array from caller-owned storage."""
 
     array = np.array(value, copy=True, subok=False)
     if array.dtype.kind not in _SUPPORTED_OUTPUT_ARRAY_KINDS:
@@ -31,15 +31,20 @@ def _freeze_prediction(value: Any, *, path: str = "prediction") -> Any:
     """Freeze deterministic prediction values without retaining mutable aliases.
 
     ``prediction`` remains intentionally more flexible than the typed numeric
-    score arrays because class labels may be strings.  Its accepted container
-    language matches the shared-memory transport: scalar primitives, numeric
-    arrays, string-key mappings, and deterministic sequences.
+    score arrays because class labels may be strings. Numeric/bool ndarrays stay
+    arrays; string/object arrays are canonicalized through nested immutable
+    sequences when every contained value belongs to the deterministic prediction
+    language supported by the shared-memory codec.
     """
 
     if isinstance(value, np.generic):
         return _freeze_prediction(value.item(), path=path)
     if isinstance(value, np.ndarray):
-        return _freeze_output_array(value, field_name=path)
+        if value.dtype.kind in _SUPPORTED_OUTPUT_ARRAY_KINDS:
+            return _freeze_output_array(value, field_name=path)
+        if value.dtype.kind in "USO":
+            return _freeze_prediction(value.tolist(), path=path)
+        raise TypeError(f"{path} uses unsupported ndarray dtype {value.dtype}")
     if value is None or isinstance(value, (str, bool, int, float, complex)):
         return value
     if isinstance(value, Mapping):
@@ -86,7 +91,7 @@ class DecoderOutput:
     Array-bearing fields are copied at construction and marked read-only, so a
     caller cannot mutate a canonical output through a retained input buffer.
     Deterministic prediction containers and metadata are recursively frozen for
-    the same reason.  This is representation immutability; it does not invent
+    the same reason. This is representation immutability; it does not invent
     confidence, calibration, or scientific validity that a decoder did not
     provide.
     """
