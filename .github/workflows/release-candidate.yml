@@ -94,7 +94,7 @@ jobs:
           if not neuros.__spec__ or not neuros.__spec__.submodule_search_locations:
               raise SystemExit("component-only neuros namespace has no search locations")
           PY
-      - name: Generate component and checksum manifests
+      - name: Generate self-describing release manifest and checksums
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -117,9 +117,13 @@ jobs:
           if expected_count <= 0:
               raise SystemExit("default release package set must not be empty")
 
-          policy_path = Path("release/package-policy.json")
-          policy_sha = hashlib.sha256(policy_path.read_bytes()).hexdigest()
+          source_policy_path = Path("release/package-policy.json")
+          policy_bytes = source_policy_path.read_bytes()
+          policy_sha = hashlib.sha256(policy_bytes).hexdigest()
           dist = Path(os.environ["RUNNER_TEMP"]) / "neuros-release"
+          bundled_policy_path = dist / "package-policy.json"
+          bundled_policy_path.write_bytes(policy_bytes)
+
           artifacts = []
           for wheel in sorted(dist.glob("*.whl")):
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
@@ -170,7 +174,8 @@ jobs:
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
               "release_policy": {
-                  "file": str(policy_path),
+                  "file": bundled_policy_path.name,
+                  "source_path": str(source_policy_path),
                   "sha256": policy_sha,
                   "selected": selected_policy,
               },
@@ -180,15 +185,20 @@ jobs:
                   "schema": ownership_payload["schema"],
               },
           }
-          (dist / "release-manifest.json").write_text(
+          manifest_path = dist / "release-manifest.json"
+          manifest_path.write_text(
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
-          (dist / "SHA256SUMS").write_text(
-              "".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts)
-              + f"{ownership_sha}  {ownership_path.name}\n",
-              encoding="utf-8",
-          )
+          manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+          checksum_lines = [
+              *(f"{a['sha256']}  {a['file']}\n" for a in artifacts),
+              f"{ownership_sha}  {ownership_path.name}\n",
+              f"{policy_sha}  {bundled_policy_path.name}\n",
+              f"{manifest_sha}  {manifest_path.name}\n",
+          ]
+          (dist / "SHA256SUMS").write_text("".join(checksum_lines), encoding="utf-8")
           PY
       - name: Verify checksums before installation
         run: |
@@ -238,6 +248,7 @@ jobs:
           path: |
             ${{ runner.temp }}/neuros-release/*.whl
             ${{ runner.temp }}/neuros-release/SHA256SUMS
+            ${{ runner.temp }}/neuros-release/package-policy.json
             ${{ runner.temp }}/neuros-release/release-manifest.json
             ${{ runner.temp }}/neuros-release/wheel-ownership.json
           if-no-files-found: error
