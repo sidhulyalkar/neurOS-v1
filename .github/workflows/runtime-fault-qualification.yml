@@ -9,6 +9,7 @@ on:
       - "tests/test_runtime_executor.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
+      - "tests/test_runtime_fusion_cancellation.py"
   push:
     branches:
       - main
@@ -19,6 +20,7 @@ on:
       - "tests/test_runtime_executor.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
+      - "tests/test_runtime_fusion_cancellation.py"
   workflow_dispatch:
 
 permissions:
@@ -83,7 +85,8 @@ jobs:
           python -m pytest -q \
             tests/test_runtime_executor.py \
             tests/test_runtime_queues.py \
-            tests/test_runtime_fault_qualification.py
+            tests/test_runtime_fault_qualification.py \
+            tests/test_runtime_fusion_cancellation.py
 
   runtime-fault-qualification:
     name: Runtime Fault Qualification
