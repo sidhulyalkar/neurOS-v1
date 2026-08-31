@@ -18,6 +18,7 @@ on:
       - "tests/test_runtime_transport_protocol_corruption.py"
       - "tests/test_runtime_process_provenance.py"
       - "tests/test_runtime_process_transport_parity.py"
+      - "tests/test_runtime_duration_authority.py"
   push:
     branches:
       - main
@@ -37,6 +38,7 @@ on:
       - "tests/test_runtime_transport_protocol_corruption.py"
       - "tests/test_runtime_process_provenance.py"
       - "tests/test_runtime_process_transport_parity.py"
+      - "tests/test_runtime_duration_authority.py"
   workflow_dispatch:
 
 permissions:
@@ -109,7 +111,8 @@ jobs:
             tests/test_runtime_shared_transport_integration.py \
             tests/test_runtime_transport_protocol_corruption.py \
             tests/test_runtime_process_provenance.py \
-            tests/test_runtime_process_transport_parity.py
+            tests/test_runtime_process_transport_parity.py \
+            tests/test_runtime_duration_authority.py
 
   runtime-fault-qualification:
     name: Runtime Fault Qualification
