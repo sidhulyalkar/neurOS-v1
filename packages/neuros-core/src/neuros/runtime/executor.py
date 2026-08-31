@@ -22,6 +22,7 @@ from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, Transform
 from neuros.errors import ProcessingError
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from neuros.runtime.process_worker import PersistentProcessWorker
+from neuros.runtime.shared_process_worker import SharedMemoryProcessWorker
 from neuros.runtime.lifecycle import RuntimeEvent, RuntimeState
 from neuros.runtime.queues import OverflowPolicy, QueueStats, put_with_policy
 
@@ -164,6 +165,9 @@ def _call(func: Callable[[Any], Any], item: Any) -> Any:
     return asyncio.run(await_result())
 
 
+_ProcessWorker = PersistentProcessWorker | SharedMemoryProcessWorker
+
+
 class RuntimeExecutor:
     """Execute a validated :class:`RuntimeGraph`.
 
@@ -200,7 +204,7 @@ class RuntimeExecutor:
         self._completion_task: asyncio.Task[None] | None = None
         self._output_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._event_queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
-        self._process_workers: dict[str, PersistentProcessWorker] = {}
+        self._process_workers: dict[str, _ProcessWorker] = {}
         self._process_receipts: dict[str, deque[dict[str, Any]]] = {
             node_id: deque(maxlen=4096)
             for node_id, node in graph.nodes.items()
@@ -618,11 +622,27 @@ class RuntimeExecutor:
                 )
             worker = self._process_workers.get(node.node_id)
             if worker is None:
-                worker = PersistentProcessWorker(
-                    node.node_id,
-                    node.operator,
-                    execution_timeout_s=timeout_s,
-                )
+                if node.process_transport == "shared_memory":
+                    request_capacity = node.process_request_capacity_bytes
+                    response_capacity = node.process_response_capacity_bytes
+                    if request_capacity is None or response_capacity is None:
+                        raise ValueError(
+                            f"Shared-memory process node {node.node_id} lacks "
+                            "explicit request/response mailbox capacities"
+                        )
+                    worker = SharedMemoryProcessWorker(
+                        node.node_id,
+                        node.operator,
+                        execution_timeout_s=timeout_s,
+                        request_capacity_bytes=request_capacity,
+                        response_capacity_bytes=response_capacity,
+                    )
+                else:
+                    worker = PersistentProcessWorker(
+                        node.node_id,
+                        node.operator,
+                        execution_timeout_s=timeout_s,
+                    )
                 self._process_workers[node.node_id] = worker
             receipts = self._process_receipts.setdefault(
                 node.node_id, deque(maxlen=4096)
