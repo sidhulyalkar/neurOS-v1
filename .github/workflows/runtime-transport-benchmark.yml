@@ -19,8 +19,15 @@ concurrency:
 
 jobs:
   benchmark:
-    name: Non-gating pickle vs shared-memory benchmark
-    runs-on: ubuntu-24.04
+    name: Non-gating benchmark / ${{ matrix.os }} / Python 3.12
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-14
+          - windows-2025
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -53,12 +60,15 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
           python -m pip check
 
-      - name: Measure persistent process transports
+      - name: Measure persistent process transports across crossover sizes
         shell: bash
         run: |
           set -euo pipefail
           python scripts/benchmark_runtime_transport.py \
-            --output "${RUNNER_TEMP}/transport-benchmark.json"
+            --payload-bytes \
+              4096 16384 32768 65536 131072 262144 524288 \
+              1048576 2097152 4194304 8388608 \
+            --output transport-benchmark.json
 
       - name: Validate evidence binding and publish readable summary
         shell: bash
@@ -67,9 +77,10 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import platform
           from pathlib import Path
 
-          path = Path(os.environ["RUNNER_TEMP"]) / "transport-benchmark.json"
+          path = Path("transport-benchmark.json")
           payload = json.loads(path.read_text(encoding="utf-8"))
           if payload.get("schema") != "neuros.runtime_transport_benchmark.v1":
               raise SystemExit("unexpected benchmark schema")
@@ -85,10 +96,11 @@ jobs:
           summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
           lines = [
               "## Runtime transport benchmark\n\n",
+              f"Runner: `{platform.platform()}`  \n",
               f"Semantic source: `{os.environ['BENCH_SEMANTIC_SHA']}`  \n",
               f"Benchmark source: `{os.environ['BENCH_SOURCE_SHA']}`  \n",
               "Timing is descriptive and non-gating.\n\n",
-              "| Payload | Pickle p50 ms | Shared p50 ms | Shared / Pickle | Pickle MiB/s | Shared MiB/s |\n",
+              "| Payload | Pickle p50 ms | Shared p50 ms | Shared/Pickle latency | Pickle MiB/s | Shared MiB/s |\n",
               "|---:|---:|---:|---:|---:|---:|\n",
           ]
           for size, rows in sorted(by_size.items()):
@@ -106,7 +118,7 @@ jobs:
       - name: Upload immutable benchmark evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: runtime-transport-benchmark-${{ env.BENCH_SOURCE_SHA }}
-          path: ${{ runner.temp }}/transport-benchmark.json
+          name: runtime-transport-benchmark-${{ matrix.os }}-${{ env.BENCH_SOURCE_SHA }}
+          path: transport-benchmark.json
           if-no-files-found: error
           retention-days: 30
