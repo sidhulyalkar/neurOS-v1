@@ -104,10 +104,13 @@ class RuntimeNode:
                 )
         elif self.process_transport == "shared_memory":
             for field_name, value in capacities:
-                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                try:
+                    resolved = positive_integral(value, field_name=field_name)
+                except (TypeError, ValueError) as exc:
                     raise ValueError(
                         f"shared_memory transport requires positive {field_name}"
-                    )
+                    ) from exc
+                object.__setattr__(self, field_name, resolved)
         elif any_capacity:
             raise ValueError(
                 "process mailbox capacities are only valid for "
