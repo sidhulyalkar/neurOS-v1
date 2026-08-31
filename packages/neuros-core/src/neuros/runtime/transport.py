@@ -5,6 +5,12 @@ and moves numeric array bytes through a fixed-capacity shared-memory mailbox.
 Decoded arrays are materialized into independent local memory before arbitrary
 operator code is invoked. This is therefore a shared-memory transport, not a
 zero-copy callback contract.
+
+Transport is representation authority, not scientific-value authority. Generic
+numeric payloads preserve their existing values, including non-finite floating
+values when the surrounding contract permits them. Canonical contracts such as
+``SignalFrame`` and ``NeuralWindow`` continue to enforce their own stricter
+scientific invariants during construction.
 """
 from __future__ import annotations
 
@@ -81,11 +87,6 @@ class _MailboxWriter:
                 "shared-memory arrays must use boolean or numeric dtype; "
                 f"received {array.dtype}"
             )
-        if array.dtype.kind in "fc" and not np.isfinite(array).all():
-            raise NeuralTransportTypeError(
-                "shared-memory arrays must be finite; preserve signal quality "
-                "with explicit samples and provenance"
-            )
         array = np.ascontiguousarray(array)
         offset = self._aligned(self.offset)
         end = offset + int(array.nbytes)
@@ -149,12 +150,14 @@ class _MailboxReader:
 
 
 def _encode(value: Any, writer: _MailboxWriter) -> Any:
-    if value is None or isinstance(value, (str, bool, int)):
+    if value is None or isinstance(value, (str, bool, int, float)):
         return {"type": "scalar", "value": value}
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise NeuralTransportTypeError("transport scalar floats must be finite")
-        return {"type": "scalar", "value": value}
+    if isinstance(value, complex):
+        return {
+            "type": "complex_scalar",
+            "real": float(value.real),
+            "imag": float(value.imag),
+        }
     if isinstance(value, np.generic):
         return _encode(value.item(), writer)
     if isinstance(value, np.ndarray):
@@ -209,12 +212,13 @@ def _encode(value: Any, writer: _MailboxWriter) -> Any:
     if isinstance(value, list):
         return {"type": "list", "items": [_encode(item, writer) for item in value]}
     if isinstance(value, Mapping):
-        items: list[list[Any]] = []
-        for key in sorted(value):
-            if not isinstance(key, str):
-                raise NeuralTransportTypeError("transport mapping keys must be strings")
-            items.append([key, _encode(value[key], writer)])
-        return {"type": "mapping", "items": items}
+        keys = tuple(value.keys())
+        if any(not isinstance(key, str) for key in keys):
+            raise NeuralTransportTypeError("transport mapping keys must be strings")
+        return {
+            "type": "mapping",
+            "items": [[key, _encode(value[key], writer)] for key in sorted(keys)],
+        }
     raise NeuralTransportTypeError(
         "unsupported shared-memory payload type "
         f"{type(value).__module__}.{type(value).__qualname__}"
@@ -229,9 +233,12 @@ def _decode(node: Any, reader: _MailboxReader) -> Any:
         value = node.get("value")
         if value is not None and not isinstance(value, (str, bool, int, float)):
             raise NeuralTransportProtocolError("invalid transport scalar")
-        if isinstance(value, float) and not math.isfinite(value):
-            raise NeuralTransportProtocolError("non-finite transport scalar")
         return value
+    if node_type == "complex_scalar":
+        try:
+            return complex(float(node["real"]), float(node["imag"]))
+        except Exception as exc:
+            raise NeuralTransportProtocolError("invalid complex transport scalar") from exc
     if node_type == "ndarray":
         return reader.get_array(node)
     if node_type == "tuple":
