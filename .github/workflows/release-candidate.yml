@@ -11,6 +11,7 @@ on:
       - "docs/SCIENTIFIC_CLAIMS.md"
       - "release/package-policy.json"
       - "scripts/check_public_contracts.py"
+      - "scripts/check_release_dependency_closure.py"
       - "scripts/check_wheel_ownership.py"
       - "scripts/list_release_packages.py"
       - "scripts/list_workspace_packages.py"
@@ -76,6 +77,10 @@ jobs:
           python -m twine check "${DIST}"/*.whl
           python scripts/check_wheel_ownership.py "${DIST}" \
             --output "${DIST}/wheel-ownership.json"
+      - name: Verify internal default dependency closure
+        run: |
+          set -euo pipefail
+          python scripts/check_release_dependency_closure.py "${RUNNER_TEMP}/neuros-release"
       - name: Prove component namespace without the SDK
         run: |
           set -euo pipefail
