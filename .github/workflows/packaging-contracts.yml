@@ -6,7 +6,13 @@ on:
       - ".github/workflows/packaging-contracts.yml"
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-candidate.yml"
+      - "release/package-policy.json"
+      - "scripts/check_release_dependency_closure.py"
       - "scripts/check_wheel_ownership.py"
+      - "scripts/list_release_packages.py"
+      - "scripts/list_workspace_packages.py"
+      - "tests/test_release_dependency_closure.py"
+      - "tests/test_release_package_policy.py"
       - "tests/test_wheel_ownership.py"
       - "packages/*/src/neuros/__init__.py"
       - "packages/*/pyproject.toml"
@@ -17,7 +23,13 @@ on:
       - ".github/workflows/packaging-contracts.yml"
       - ".github/workflows/ci.yml"
       - ".github/workflows/release-candidate.yml"
+      - "release/package-policy.json"
+      - "scripts/check_release_dependency_closure.py"
       - "scripts/check_wheel_ownership.py"
+      - "scripts/list_release_packages.py"
+      - "scripts/list_workspace_packages.py"
+      - "tests/test_release_dependency_closure.py"
+      - "tests/test_release_package_policy.py"
       - "tests/test_wheel_ownership.py"
       - "packages/*/src/neuros/__init__.py"
       - "packages/*/pyproject.toml"
@@ -31,7 +43,7 @@ concurrency:
 
 jobs:
   wheel-ownership-unit-contracts:
-    name: Wheel ownership unit contracts
+    name: Packaging and release-policy unit contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -42,6 +54,10 @@ jobs:
       - name: Install test tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pytest pytest-asyncio
-      - name: Exercise ownership normalization and fail-closed cases
-        run: pytest -q tests/test_wheel_ownership.py
+          python -m pip install pytest pytest-asyncio packaging
+      - name: Exercise release and wheel-ownership fail-closed cases
+        run: |
+          pytest -q \
+            tests/test_release_dependency_closure.py \
+            tests/test_release_package_policy.py \
+            tests/test_wheel_ownership.py
