@@ -33,10 +33,13 @@ def test_policy_classifies_every_workspace_member_once_and_release_set_is_explic
     assert published == {
         "neuros-core",
         "neuros-drivers",
-        "neuros-arena",
         "neuros-models",
         "neuros",
     }
+    arena = next(item for item in entries if item["distribution"] == "neuros-arena")
+    assert arena["release_tier"] == "qualified-integration"
+    assert arena["scientific_maturity"] == "synthetic-validation"
+    assert arena["publish_candidate"] is False
     assert all(
         (item["release_tier"] == "public-runtime") == item["publish_candidate"]
         for item in entries
@@ -70,6 +73,16 @@ def test_policy_fails_if_research_package_enters_default_release_set(tmp_path):
         item for item in payload["packages"] if item["release_tier"] == "research-extension"
     )
     research["publish_candidate"] = True
+    with pytest.raises(ValueError, match="non-public-runtime package cannot enter"):
+        release_policy(_write(tmp_path, payload))
+
+
+def test_policy_fails_if_qualified_integration_enters_default_release_set(tmp_path):
+    payload = _payload()
+    arena = next(
+        item for item in payload["packages"] if item["distribution"] == "neuros-arena"
+    )
+    arena["publish_candidate"] = True
     with pytest.raises(ValueError, match="non-public-runtime package cannot enter"):
         release_policy(_write(tmp_path, payload))
 
