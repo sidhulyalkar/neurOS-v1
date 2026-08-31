@@ -230,8 +230,32 @@ def test_capacity_and_unsupported_dtype_fail_closed_without_partial_decode():
             small.encode(np.arange(100, dtype=np.float64), lease_id=1)
         with pytest.raises(NeuralTransportTypeError, match="boolean or numeric"):
             small.encode(np.array([object()], dtype=object), lease_id=2)
+        with pytest.raises(NeuralTransportTypeError, match="keys must be strings"):
+            small.encode({"valid": 1, 2: "invalid"}, lease_id=3)
     finally:
         small.close_and_unlink()
+
+
+def test_transport_preserves_generic_numeric_values_without_inventing_policy():
+    payload = {
+        "array": np.array([np.nan, np.inf, -np.inf], dtype=np.float64),
+        "float": float("nan"),
+        "complex": complex(1.5, -2.25),
+        "complex_array": np.array([1 + 2j, np.nan + 1j], dtype=np.complex128),
+    }
+    box = SharedMemoryMailbox(4096)
+    try:
+        decoded = box.decode(box.encode(payload, lease_id=8), expected_lease_id=8)
+    finally:
+        box.close_and_unlink()
+
+    assert np.isnan(decoded["array"][0])
+    assert np.isposinf(decoded["array"][1])
+    assert np.isneginf(decoded["array"][2])
+    assert np.isnan(decoded["float"])
+    assert decoded["complex"] == complex(1.5, -2.25)
+    assert decoded["complex_array"][0] == 1 + 2j
+    assert np.isnan(decoded["complex_array"][1].real)
 
 
 def test_stale_lease_and_overlapping_array_descriptors_are_rejected():
@@ -484,8 +508,6 @@ def test_shared_worker_does_not_unlink_if_direct_child_survives_escalation():
         assert process.kill_calls == 1
         assert process.join_calls == 2
         assert worker._process is process
-        # The child is not proven dead, therefore parent must retain unlink
-        # authority rather than falsely claiming transport cleanup.
         _assert_names_exist(names)
     finally:
         worker._process = None
