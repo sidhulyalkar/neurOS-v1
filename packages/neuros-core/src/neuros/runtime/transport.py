@@ -158,9 +158,9 @@ class _MailboxReader:
                 )
             dtype = np.dtype(dtype_value)
             raw_shape = node["shape"]
-            if not isinstance(raw_shape, list):
+            if type(raw_shape) is not list:
                 raise NeuralTransportProtocolError(
-                    "transport field ndarray.shape must be a list"
+                    "transport field ndarray.shape must be an exact list"
                 )
             shape = tuple(
                 _manifest_int(dim, f"ndarray.shape[{index}]")
@@ -280,16 +280,16 @@ def _encode(value: Any, writer: _MailboxWriter) -> Any:
 
 def _decode_items(node: Mapping[str, Any], node_type: str) -> list[Any]:
     items = node.get("items")
-    if not isinstance(items, list):
+    if type(items) is not list:
         raise NeuralTransportProtocolError(
-            f"{node_type} transport manifest items must be a list"
+            f"{node_type} transport manifest items must be an exact list"
         )
     return items
 
 
 def _decode(node: Any, reader: _MailboxReader) -> Any:
-    if not isinstance(node, Mapping):
-        raise NeuralTransportProtocolError("transport manifest node is not a mapping")
+    if type(node) is not dict:
+        raise NeuralTransportProtocolError("transport manifest node is not an exact mapping")
     node_type = node.get("type")
     if node_type == "scalar":
         value = node.get("value")
@@ -316,7 +316,7 @@ def _decode(node: Any, reader: _MailboxReader) -> Any:
         result: dict[str, Any] = {}
         items = _decode_items(node, "mapping")
         for pair in items:
-            if not isinstance(pair, list) or len(pair) != 2 or not isinstance(pair[0], str):
+            if type(pair) is not list or len(pair) != 2 or not isinstance(pair[0], str):
                 raise NeuralTransportProtocolError("malformed mapping manifest item")
             key = pair[0]
             if key in result:
@@ -484,8 +484,14 @@ class SharedMemoryMailbox:
     def decode(self, envelope: Any, *, expected_lease_id: int) -> Any:
         if self._closed:
             raise NeuralTransportError("shared-memory mailbox is closed")
-        if not isinstance(envelope, Mapping):
-            raise NeuralTransportProtocolError("transport envelope is not a mapping")
+        if (
+            isinstance(expected_lease_id, bool)
+            or not isinstance(expected_lease_id, int)
+            or expected_lease_id <= 0
+        ):
+            raise ValueError("expected_lease_id must be a positive integer")
+        if type(envelope) is not dict:
+            raise NeuralTransportProtocolError("transport envelope is not an exact mapping")
         if envelope.get("schema") != _SCHEMA:
             raise NeuralTransportProtocolError("shared-memory payload schema mismatch")
         try:
