@@ -69,6 +69,14 @@ class SharedPayloadEnvelope:
         }
 
 
+def _manifest_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise NeuralTransportProtocolError(
+            f"transport field {field_name} must be an exact integer"
+        )
+    return value
+
+
 class _MailboxWriter:
     def __init__(self, buffer: memoryview, capacity_bytes: int) -> None:
         self.buffer = buffer
@@ -115,10 +123,25 @@ class _MailboxReader:
 
     def get_array(self, node: Mapping[str, Any]) -> np.ndarray:
         try:
-            offset = int(node["offset"])
-            nbytes = int(node["nbytes"])
-            dtype = np.dtype(str(node["dtype"]))
-            shape = tuple(int(dim) for dim in node["shape"])
+            offset = _manifest_int(node["offset"], "ndarray.offset")
+            nbytes = _manifest_int(node["nbytes"], "ndarray.nbytes")
+            dtype_value = node["dtype"]
+            if not isinstance(dtype_value, str):
+                raise NeuralTransportProtocolError(
+                    "transport field ndarray.dtype must be a string"
+                )
+            dtype = np.dtype(dtype_value)
+            raw_shape = node["shape"]
+            if not isinstance(raw_shape, list):
+                raise NeuralTransportProtocolError(
+                    "transport field ndarray.shape must be a list"
+                )
+            shape = tuple(
+                _manifest_int(dim, f"ndarray.shape[{index}]")
+                for index, dim in enumerate(raw_shape)
+            )
+        except NeuralTransportProtocolError:
+            raise
         except Exception as exc:
             raise NeuralTransportProtocolError(
                 f"malformed ndarray transport descriptor: {exc}"
@@ -365,8 +388,10 @@ class SharedMemoryMailbox:
         if envelope.get("schema") != _SCHEMA:
             raise NeuralTransportProtocolError("shared-memory payload schema mismatch")
         try:
-            lease_id = int(envelope["lease_id"])
-            bytes_used = int(envelope["bytes_used"])
+            lease_id = _manifest_int(envelope["lease_id"], "lease_id")
+            bytes_used = _manifest_int(envelope["bytes_used"], "bytes_used")
+        except NeuralTransportProtocolError:
+            raise
         except Exception as exc:
             raise NeuralTransportProtocolError("malformed transport envelope identity") from exc
         if lease_id != expected_lease_id:
