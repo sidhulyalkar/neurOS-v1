@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/CONFIG_EXECUTION_AUTHORITY.md"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
       - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
@@ -34,6 +35,7 @@ on:
       - main
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/CONFIG_EXECUTION_AUTHORITY.md"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
       - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
