@@ -123,7 +123,7 @@ jobs:
       - name: Install property-test environment
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ./packages/neuros-core pytest hypothesis
+          python -m pip install ./packages/neuros-core pytest pytest-asyncio hypothesis
       - name: Exercise generated signal/archive invariants
         run: pytest -q validation_tests/test_signal_contract_properties.py
 
@@ -188,7 +188,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install harness test tooling
-        run: python -m pip install --upgrade pip pytest packaging
+        run: python -m pip install --upgrade pip pytest pytest-asyncio packaging
       - name: Prove qualification helpers fail closed
         run: pytest -q tests/test_full_package_qualification_harness.py
 
