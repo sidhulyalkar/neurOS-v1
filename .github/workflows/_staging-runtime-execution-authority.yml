@@ -1,0 +1,329 @@
+name: Stage runtime execution authority
+
+on:
+  push:
+    branches:
+      - staging/runtime-execution-authority-v1
+    paths:
+      - .github/workflows/_staging-runtime-execution-authority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Apply exact authority patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one marker, found {count}")
+              return text.replace(old, new, 1)
+
+          def replace_exact(text: str, old: str, new: str, expected: int, label: str) -> str:
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{label}: expected {expected} markers, found {count}")
+              return text.replace(old, new)
+
+          graph_path = Path("packages/neuros-core/src/neuros/runtime/graph.py")
+          graph = graph_path.read_text(encoding="utf-8")
+          graph = replace_once(
+              graph,
+              '        if self.executor not in {"inline", "thread", "process", "gpu"}:\n'
+              '            raise ValueError(f"Unsupported executor: {self.executor}")\n'
+              '        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))\n',
+              '        if self.executor not in {"inline", "thread", "process", "gpu"}:\n'
+              '            raise ValueError(f"Unsupported executor: {self.executor}")\n'
+              '        if self.executor == "process":\n'
+              '            raise ValueError(\n'
+              '                "executor=\'process\' is not authoritative until neurOS uses "\n'
+              '                "a persistent per-node worker; see runtime execution authority"\n'
+              '            )\n'
+              '        if self.kind is NodeKind.SOURCE and self.executor != "inline":\n'
+              '            raise ValueError(\n'
+              '                "Source nodes currently require executor=\'inline\'; source "\n'
+              '                "lifecycle/stream isolation is not yet implemented"\n'
+              '            )\n'
+              '        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))\n',
+              "runtime node executor validation",
+          )
+          graph_path.write_text(graph, encoding="utf-8")
+
+          executor_path = Path("packages/neuros-core/src/neuros/runtime/executor.py")
+          executor = executor_path.read_text(encoding="utf-8")
+          executor = replace_once(
+              executor,
+              'def _call(func: Callable[[Any], Any], item: Any) -> Any:\n'
+              '    return func(item)\n',
+              'def _call(func: Callable[[Any], Any], item: Any) -> Any:\n'
+              '    """Execute a sync or async callback inside the current execution domain."""\n'
+              '    result = func(item)\n'
+              '    if not inspect.isawaitable(result):\n'
+              '        return result\n\n'
+              '    async def await_result() -> Any:\n'
+              '        return await result\n\n'
+              '    return asyncio.run(await_result())\n',
+              "domain callback helper",
+          )
+          executor = replace_once(
+              executor,
+              '        if node.kind is NodeKind.SINK:\n'
+              '            if not hasattr(operator, "write"):\n'
+              '                raise TypeError(f"Sink node {node.node_id} lacks write()")\n'
+              '            result = operator.write(item)\n'
+              '            if inspect.isawaitable(result):\n'
+              '                await result\n'
+              '            return None\n',
+              '        if node.kind is NodeKind.SINK:\n'
+              '            if not hasattr(operator, "write"):\n'
+              '                raise TypeError(f"Sink node {node.node_id} lacks write()")\n'
+              '            await self._invoke_callable(node, operator.write, item)\n'
+              '            return None\n',
+              "sink execution dispatch",
+          )
+          executor = replace_once(
+              executor,
+              '        if execution is ExecutionClass.THREAD:\n'
+              '            return await asyncio.to_thread(func, item)\n',
+              '        if execution is ExecutionClass.THREAD:\n'
+              '            return await asyncio.to_thread(_call, func, item)\n',
+              "thread async callback execution",
+          )
+          executor = replace_once(
+              executor,
+              '            try:\n'
+              '                result = monitor.update(\n'
+              '                    {\n'
+              '                        "node_id": node.node_id,\n'
+              '                        "kind": node.kind.value,\n'
+              '                        "item": item,\n'
+              '                        "monotonic_time_ns": time.monotonic_ns(),\n'
+              '                    }\n'
+              '                )\n'
+              '                if inspect.isawaitable(result):\n'
+              '                    await result\n'
+              '            except Exception as exc:\n'
+              '                raise _AttributedNodeError(monitor_node.node_id, exc) from exc\n',
+              '            payload = {\n'
+              '                "node_id": node.node_id,\n'
+              '                "kind": node.kind.value,\n'
+              '                "item": item,\n'
+              '                "monotonic_time_ns": time.monotonic_ns(),\n'
+              '            }\n'
+              '            started = time.perf_counter_ns()\n'
+              '            try:\n'
+              '                await self._invoke_callable(\n'
+              '                    monitor_node, monitor.update, payload\n'
+              '                )\n'
+              '                self._node_stats[monitor_node.node_id].observe(\n'
+              '                    time.perf_counter_ns() - started\n'
+              '                )\n'
+              '            except Exception as exc:\n'
+              '                raise _AttributedNodeError(monitor_node.node_id, exc) from exc\n',
+              "monitor execution dispatch",
+          )
+          executor_path.write_text(executor, encoding="utf-8")
+
+          workflow_path = Path(".github/workflows/runtime-fault-qualification.yml")
+          workflow = workflow_path.read_text(encoding="utf-8")
+          workflow = replace_exact(
+              workflow,
+              '      - "tests/test_runtime_fusion_cancellation.py"\n',
+              '      - "tests/test_runtime_fusion_cancellation.py"\n'
+              '      - "tests/test_runtime_execution_authority.py"\n',
+              2,
+              "runtime workflow path ownership",
+          )
+          workflow = replace_once(
+              workflow,
+              '            tests/test_runtime_fault_qualification.py \\\n'
+              '            tests/test_runtime_fusion_cancellation.py\n',
+              '            tests/test_runtime_fault_qualification.py \\\n'
+              '            tests/test_runtime_fusion_cancellation.py \\\n'
+              '            tests/test_runtime_execution_authority.py\n',
+              "runtime workflow test command",
+          )
+          workflow_path.write_text(workflow, encoding="utf-8")
+
+          test_path = Path("tests/test_runtime_execution_authority.py")
+          test_path.write_text(
+              'from __future__ import annotations\n\n'
+              'import asyncio\n'
+              'import threading\n\n'
+              'import pytest\n\n'
+              'from neuros.runtime import (\n'
+              '    NodeKind,\n'
+              '    RuntimeEdge,\n'
+              '    RuntimeExecutor,\n'
+              '    RuntimeGraph,\n'
+              '    RuntimeNode,\n'
+              ')\n\n\n'
+              'class FiniteSource:\n'
+              '    def __init__(self, values):\n'
+              '        self.values = tuple(values)\n\n'
+              '    async def start(self):\n'
+              '        return None\n\n'
+              '    async def stop(self):\n'
+              '        return None\n\n'
+              '    async def frames(self):\n'
+              '        for value in self.values:\n'
+              '            await asyncio.sleep(0)\n'
+              '            yield value\n\n\n'
+              'class CollectingSink:\n'
+              '    def __init__(self):\n'
+              '        self.items = []\n\n'
+              '    async def write(self, item):\n'
+              '        self.items.append(item)\n\n\n'
+              'class SyncThreadTransform:\n'
+              '    def transform(self, item):\n'
+              '        return threading.get_ident(), item\n\n\n'
+              'class AsyncThreadTransform:\n'
+              '    async def transform(self, item):\n'
+              '        await asyncio.sleep(0)\n'
+              '        return threading.get_ident(), item\n\n\n'
+              'class AsyncThreadSink:\n'
+              '    def __init__(self):\n'
+              '        self.thread_ids = []\n'
+              '        self.items = []\n\n'
+              '    async def write(self, item):\n'
+              '        await asyncio.sleep(0)\n'
+              '        self.thread_ids.append(threading.get_ident())\n'
+              '        self.items.append(item)\n\n\n'
+              'class AsyncThreadMonitor:\n'
+              '    def __init__(self):\n'
+              '        self.thread_ids = []\n'
+              '        self.nodes = []\n\n'
+              '    async def update(self, payload):\n'
+              '        await asyncio.sleep(0)\n'
+              '        self.thread_ids.append(threading.get_ident())\n'
+              '        self.nodes.append(payload["node_id"])\n\n\n'
+              'class FailingAsyncThreadMonitor:\n'
+              '    async def update(self, payload):\n'
+              '        await asyncio.sleep(0)\n'
+              '        raise LookupError(f"thread monitor rejected {payload[\"node_id\"]}")\n\n\n'
+              'def source_sink_graph(source, sink, *, sink_executor="inline"):\n'
+              '    graph = RuntimeGraph()\n'
+              '    graph.add_node(RuntimeNode("source", NodeKind.SOURCE, source))\n'
+              '    graph.add_node(\n'
+              '        RuntimeNode("sink", NodeKind.SINK, sink, executor=sink_executor)\n'
+              '    )\n'
+              '    graph.connect(RuntimeEdge("source", "sink", overflow="block"))\n'
+              '    return graph\n\n\n'
+              'def source_transform_sink_graph(transform, *, executor):\n'
+              '    sink = CollectingSink()\n'
+              '    graph = RuntimeGraph()\n'
+              '    graph.add_node(RuntimeNode("source", NodeKind.SOURCE, FiniteSource([7])))\n'
+              '    graph.add_node(\n'
+              '        RuntimeNode("transform", NodeKind.TRANSFORM, transform, executor=executor)\n'
+              '    )\n'
+              '    graph.add_node(RuntimeNode("sink", NodeKind.SINK, sink))\n'
+              '    graph.connect(RuntimeEdge("source", "transform", overflow="block"))\n'
+              '    graph.connect(RuntimeEdge("transform", "sink", overflow="block"))\n'
+              '    return graph, sink\n\n\n'
+              'def test_source_non_inline_executor_is_rejected_instead_of_ignored():\n'
+              '    with pytest.raises(ValueError, match="Source nodes currently require"):\n'
+              '        RuntimeNode("source", NodeKind.SOURCE, object(), executor="thread")\n\n\n'
+              'def test_process_executor_is_rejected_until_per_node_worker_is_authoritative():\n'
+              '    with pytest.raises(ValueError, match="not authoritative"):\n'
+              '        RuntimeNode("transform", NodeKind.TRANSFORM, object(), executor="process")\n\n\n'
+              '@pytest.mark.asyncio\n'
+              'async def test_sync_transform_thread_executor_runs_off_event_loop_thread():\n'
+              '    main_thread = threading.get_ident()\n'
+              '    graph, sink = source_transform_sink_graph(SyncThreadTransform(), executor="thread")\n'
+              '    await RuntimeExecutor(graph).run()\n'
+              '    thread_id, value = sink.items[0]\n'
+              '    assert value == 7\n'
+              '    assert thread_id != main_thread\n\n\n'
+              '@pytest.mark.asyncio\n'
+              'async def test_async_transform_thread_executor_runs_coroutine_in_worker_thread():\n'
+              '    main_thread = threading.get_ident()\n'
+              '    graph, sink = source_transform_sink_graph(AsyncThreadTransform(), executor="thread")\n'
+              '    await RuntimeExecutor(graph).run()\n'
+              '    thread_id, value = sink.items[0]\n'
+              '    assert value == 7\n'
+              '    assert thread_id != main_thread\n\n\n'
+              '@pytest.mark.asyncio\n'
+              'async def test_async_sink_honors_thread_executor():\n'
+              '    main_thread = threading.get_ident()\n'
+              '    sink = AsyncThreadSink()\n'
+              '    executor = RuntimeExecutor(\n'
+              '        source_sink_graph(FiniteSource([3]), sink, sink_executor="thread")\n'
+              '    )\n'
+              '    await executor.run()\n'
+              '    assert sink.items == [3]\n'
+              '    assert len(sink.thread_ids) == 1\n'
+              '    assert sink.thread_ids[0] != main_thread\n\n\n'
+              '@pytest.mark.asyncio\n'
+              'async def test_async_monitor_honors_thread_executor_and_records_success():\n'
+              '    main_thread = threading.get_ident()\n'
+              '    monitor = AsyncThreadMonitor()\n'
+              '    graph = source_sink_graph(FiniteSource([5]), CollectingSink())\n'
+              '    graph.add_node(\n'
+              '        RuntimeNode("monitor", NodeKind.MONITOR, monitor, executor="thread")\n'
+              '    )\n'
+              '    executor = RuntimeExecutor(graph)\n'
+              '    await executor.run()\n'
+              '    assert monitor.nodes == ["source"]\n'
+              '    assert len(monitor.thread_ids) == 1\n'
+              '    assert monitor.thread_ids[0] != main_thread\n'
+              '    assert executor.snapshot()["nodes"]["monitor"]["processed"] == 1\n\n\n'
+              '@pytest.mark.asyncio\n'
+              'async def test_thread_monitor_failure_preserves_monitor_culprit():\n'
+              '    graph = source_sink_graph(FiniteSource([11]), CollectingSink())\n'
+              '    graph.add_node(\n'
+              '        RuntimeNode(\n'
+              '            "monitor",\n'
+              '            NodeKind.MONITOR,\n'
+              '            FailingAsyncThreadMonitor(),\n'
+              '            executor="thread",\n'
+              '        )\n'
+              '    )\n'
+              '    executor = RuntimeExecutor(graph)\n'
+              '    with pytest.raises(RuntimeError, match="thread monitor rejected source"):\n'
+              '        await executor.run()\n'
+              '    assert executor.snapshot()["failure"] == {\n'
+              '        "node_id": "monitor",\n'
+              '        "error_type": "LookupError",\n'
+              '        "message": "thread monitor rejected source",\n'
+              '    }\n',
+              encoding="utf-8",
+          )
+          PY
+
+          git diff --check
+          python -m compileall -q packages/neuros-core/src/neuros/runtime tests/test_runtime_execution_authority.py
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pytest -q \
+            tests/test_runtime_executor.py \
+            tests/test_runtime_fault_qualification.py \
+            tests/test_runtime_fusion_cancellation.py \
+            tests/test_runtime_execution_authority.py
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            packages/neuros-core/src/neuros/runtime/graph.py \
+            packages/neuros-core/src/neuros/runtime/executor.py \
+            tests/test_runtime_execution_authority.py \
+            .github/workflows/runtime-fault-qualification.yml
+          git commit -m "fix(runtime): make execution declarations truthful"
+          git push origin HEAD:${GITHUB_REF_NAME}
