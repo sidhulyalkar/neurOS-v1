@@ -275,3 +275,64 @@ def test_graph_mutation_rejects_replaced_container_types():
     graph.edges = ()
     with pytest.raises(TypeError, match="edges must be a list"):
         graph.connect(RuntimeEdge("a", "b"))
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("process_request_capacity_bytes", np.int32(4096)),
+        ("process_request_capacity_bytes", np.int64(8192)),
+        ("process_response_capacity_bytes", np.int32(4096)),
+        ("process_response_capacity_bytes", np.int64(8192)),
+    ],
+)
+def test_shared_memory_capacities_normalize_integral_scalars(field_name, value):
+    kwargs = {
+        "process_request_capacity_bytes": 16 * 1024,
+        "process_response_capacity_bytes": 16 * 1024,
+    }
+    kwargs[field_name] = value
+    node = RuntimeNode(
+        "transform",
+        NodeKind.TRANSFORM,
+        IdentityTransform(),
+        executor="process",
+        execution_timeout_s=1.0,
+        process_transport="shared_memory",
+        **kwargs,
+    )
+
+    resolved = getattr(node, field_name)
+    assert type(resolved) is int
+    assert resolved == int(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, False, 4096.0, "4096", 0, -1, None],
+)
+@pytest.mark.parametrize(
+    "field_name",
+    ["process_request_capacity_bytes", "process_response_capacity_bytes"],
+)
+def test_shared_memory_capacities_reject_ambiguous_or_nonpositive_values(
+    field_name, value
+):
+    kwargs = {
+        "process_request_capacity_bytes": 16 * 1024,
+        "process_response_capacity_bytes": 16 * 1024,
+    }
+    kwargs[field_name] = value
+    with pytest.raises(
+        ValueError,
+        match=rf"shared_memory transport requires positive {field_name}",
+    ):
+        RuntimeNode(
+            "transform",
+            NodeKind.TRANSFORM,
+            IdentityTransform(),
+            executor="process",
+            execution_timeout_s=1.0,
+            process_transport="shared_memory",
+            **kwargs,
+        )
