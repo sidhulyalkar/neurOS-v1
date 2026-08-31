@@ -66,11 +66,14 @@ def _schema_version(value: Any) -> int:
 
 
 def _reject_unknown_keys(
-    value: Mapping[str, Any], *, allowed: frozenset[str], context: str
+    value: Mapping[Any, Any], *, allowed: frozenset[str], context: str
 ) -> None:
-    unknown = sorted(set(value) - allowed)
+    unknown = [
+        key for key in value if not isinstance(key, str) or key not in allowed
+    ]
     if unknown:
-        raise ConfigurationError(f"Unknown {context} keys: {unknown}")
+        rendered = sorted(repr(key) for key in unknown)
+        raise ConfigurationError(f"Unknown {context} keys: {rendered}")
 
 
 def _plugin_sequence(value: Any, *, field_name: str) -> tuple[PluginConfig, ...]:
@@ -98,7 +101,11 @@ class ExecutionConfig:
     process_response_capacity_bytes: int | None = None
 
     def __post_init__(self) -> None:
-        executor = self.executor.value if isinstance(self.executor, ExecutionClass) else self.executor
+        executor = (
+            self.executor.value
+            if isinstance(self.executor, ExecutionClass)
+            else self.executor
+        )
         try:
             probe = RuntimeNode(
                 node_id="__config_execution__",
@@ -291,7 +298,7 @@ class PipelineConfig:
                 ),
             )
 
-        def parse_plugin(item: Any) -> PluginConfig:
+        def parse_plugin(item: Any, *, role: str) -> PluginConfig:
             if not isinstance(item, Mapping):
                 raise ConfigurationError("plugin configuration must be a mapping")
             if schema_version == 1 and "execution" in item:
@@ -302,6 +309,11 @@ class PipelineConfig:
                 _reject_unknown_keys(
                     item, allowed=_PLUGIN_V2_KEYS, context="plugin configuration"
                 )
+                if role == "monitor" and "execution" in item:
+                    raise ConfigurationError(
+                        "monitor execution policy is unavailable until the runtime "
+                        "monitor observation contract is implemented"
+                    )
             plugin = item.get("plugin")
             options = item.get("options", {})
             execution = (
@@ -327,8 +339,10 @@ class PipelineConfig:
             streams.append(
                 StreamConfig(
                     stream_id=stream.get("id"),
-                    source=parse_plugin(stream.get("source", {})),
-                    transforms=tuple(parse_plugin(item) for item in transforms_raw),
+                    source=parse_plugin(stream.get("source", {}), role="source"),
+                    transforms=tuple(
+                        parse_plugin(item, role="transform") for item in transforms_raw
+                    ),
                 )
             )
 
@@ -346,11 +360,11 @@ class PipelineConfig:
             ),
         )
 
-        def parse_many(key: str) -> tuple[PluginConfig, ...]:
+        def parse_many(key: str, *, role: str) -> tuple[PluginConfig, ...]:
             values = raw.get(key, [])
             if not isinstance(values, list):
                 raise ConfigurationError(f"{key} must be a list")
-            return tuple(parse_plugin(item) for item in values)
+            return tuple(parse_plugin(item, role=role) for item in values)
 
         metadata = raw.get("metadata", {})
         if not isinstance(metadata, Mapping):
@@ -359,9 +373,9 @@ class PipelineConfig:
         return cls(
             schema_version=schema_version,
             streams=tuple(streams),
-            decoder=parse_plugin(decoder_raw),
-            sinks=parse_many("sinks"),
-            monitors=parse_many("monitors"),
+            decoder=parse_plugin(decoder_raw, role="decoder"),
+            sinks=parse_many("sinks", role="sink"),
+            monitors=parse_many("monitors", role="monitor"),
             runtime=runtime,
             metadata=metadata,
         )
