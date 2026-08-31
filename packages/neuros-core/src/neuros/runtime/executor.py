@@ -22,6 +22,7 @@ from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, Transform
 from neuros.errors import ProcessingError
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from neuros.runtime.process_worker import PersistentProcessWorker
+from neuros.runtime.shared_process_worker import SharedMemoryProcessWorker
 from neuros.runtime.lifecycle import RuntimeEvent, RuntimeState
 from neuros.runtime.queues import OverflowPolicy, QueueStats, put_with_policy
 
@@ -164,6 +165,9 @@ def _call(func: Callable[[Any], Any], item: Any) -> Any:
     return asyncio.run(await_result())
 
 
+_ProcessWorker = PersistentProcessWorker | SharedMemoryProcessWorker
+
+
 class RuntimeExecutor:
     """Execute a validated :class:`RuntimeGraph`.
 
@@ -200,7 +204,7 @@ class RuntimeExecutor:
         self._completion_task: asyncio.Task[None] | None = None
         self._output_queue: asyncio.Queue[Any] = asyncio.Queue()
         self._event_queue: asyncio.Queue[RuntimeEvent] = asyncio.Queue()
-        self._process_workers: dict[str, PersistentProcessWorker] = {}
+        self._process_workers: dict[str, _ProcessWorker] = {}
         self._process_receipts: dict[str, deque[dict[str, Any]]] = {
             node_id: deque(maxlen=4096)
             for node_id, node in graph.nodes.items()
@@ -395,8 +399,6 @@ class RuntimeExecutor:
                     error_type=error_type,
                     message=str(cause),
                 )
-                # The task currently executing this handler must be allowed to
-                # finish propagating its exception. All peers are cancelled.
                 for peer_id, task in self._tasks.items():
                     if peer_id != node.node_id and not task.done():
                         task.cancel()
@@ -418,10 +420,6 @@ class RuntimeExecutor:
             raise
         finally:
             await source.stop()
-            # Only normal completion or an explicit graceful stop owns an
-            # in-band shutdown marker. During failure propagation the peer
-            # consumer may already be cancelled, so enqueueing _STOP into a
-            # saturated data queue can deadlock containment indefinitely.
             graceful_stop = (
                 cancelled and self._stopping and self.failure is None
             )
@@ -480,9 +478,6 @@ class RuntimeExecutor:
                     pending, return_when=asyncio.FIRST_COMPLETED
                 )
             except BaseException:
-                # Fusion owns these temporary queue-get tasks. If the fusion
-                # node is cancelled, every child must be cancelled and awaited
-                # before the node itself can become terminal.
                 for task in pending:
                     if not task.done():
                         task.cancel()
@@ -618,11 +613,27 @@ class RuntimeExecutor:
                 )
             worker = self._process_workers.get(node.node_id)
             if worker is None:
-                worker = PersistentProcessWorker(
-                    node.node_id,
-                    node.operator,
-                    execution_timeout_s=timeout_s,
-                )
+                if node.process_transport == "shared_memory":
+                    request_capacity = node.process_request_capacity_bytes
+                    response_capacity = node.process_response_capacity_bytes
+                    if request_capacity is None or response_capacity is None:
+                        raise ValueError(
+                            f"Shared-memory process node {node.node_id} lacks "
+                            "explicit request/response mailbox capacities"
+                        )
+                    worker = SharedMemoryProcessWorker(
+                        node.node_id,
+                        node.operator,
+                        execution_timeout_s=timeout_s,
+                        request_capacity_bytes=request_capacity,
+                        response_capacity_bytes=response_capacity,
+                    )
+                else:
+                    worker = PersistentProcessWorker(
+                        node.node_id,
+                        node.operator,
+                        execution_timeout_s=timeout_s,
+                    )
                 self._process_workers[node.node_id] = worker
             receipts = self._process_receipts.setdefault(
                 node.node_id, deque(maxlen=4096)
@@ -657,8 +668,6 @@ class RuntimeExecutor:
 
     async def _emit_stop(self, node_id: str) -> None:
         for channel in self._outgoing[node_id]:
-            # Shutdown markers are control-plane authority and must never be
-            # dropped by the data overflow policy.
             await channel.queue.put(_STOP)
 
     async def _notify_monitors(self, node: RuntimeNode, item: Any) -> None:
@@ -736,8 +745,6 @@ class RuntimeExecutor:
         if self.state is RuntimeState.STOPPED:
             return
         if self.state is RuntimeState.FAILED:
-            # FAILED is scientific terminal authority, but callers invoking
-            # stop() also receive a resource-cleanup barrier.
             if self._completion_task is not None and not self._completion_task.done():
                 await asyncio.gather(
                     self._completion_task, return_exceptions=True
@@ -877,6 +884,16 @@ class RuntimeExecutor:
                 for node_id, stats in self._node_stats.items()
             },
             "edges": edge_metrics,
+            "process_execution": {
+                node_id: {
+                    "transport": node.process_transport,
+                    "execution_timeout_s": node.execution_timeout_s,
+                    "request_capacity_bytes": node.process_request_capacity_bytes,
+                    "response_capacity_bytes": node.process_response_capacity_bytes,
+                }
+                for node_id, node in sorted(self.graph.nodes.items())
+                if node.executor == "process"
+            },
             "process_receipts": {
                 node_id: list(receipts)
                 for node_id, receipts in self._process_receipts.items()
