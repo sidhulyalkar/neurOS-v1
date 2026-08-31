@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from typing import Any, Callable
 
+from ._validation import positive_finite_real
+
 _PROTOCOL = 1
 
 
@@ -436,17 +438,24 @@ class PersistentProcessWorker:
     ) -> None:
         if not node_id:
             raise ValueError("node_id must be non-empty")
-        if min(execution_timeout_s, startup_timeout_s, termination_grace_s) <= 0:
-            raise ValueError("worker timeouts must be positive")
+        execution_timeout_s = positive_finite_real(
+            execution_timeout_s, field_name="execution_timeout_s"
+        )
+        startup_timeout_s = positive_finite_real(
+            startup_timeout_s, field_name="startup_timeout_s"
+        )
+        termination_grace_s = positive_finite_real(
+            termination_grace_s, field_name="termination_grace_s"
+        )
         if isinstance(generation, bool) or not isinstance(generation, int) or generation < 0:
             raise ValueError("generation must be a non-negative integer")
         if not _process_name_prefix:
             raise ValueError("_process_name_prefix must be non-empty")
         self.node_id = node_id
         self.operator = operator
-        self.execution_timeout_s = float(execution_timeout_s)
-        self.startup_timeout_s = float(startup_timeout_s)
-        self.termination_grace_s = float(termination_grace_s)
+        self.execution_timeout_s = execution_timeout_s
+        self.startup_timeout_s = startup_timeout_s
+        self.termination_grace_s = termination_grace_s
         self.generation = generation
         self._ctx = mp.get_context("spawn")
         self._conn: Connection | None = None
