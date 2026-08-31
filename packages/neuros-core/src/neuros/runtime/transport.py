@@ -77,6 +77,28 @@ def _manifest_int(value: Any, field_name: str) -> int:
     return value
 
 
+def _manifest_optional_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    return _manifest_int(value, field_name)
+
+
+def _manifest_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise NeuralTransportProtocolError(
+            f"transport field {field_name} must be a string"
+        )
+    return value
+
+
+def _manifest_real(value: Any, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise NeuralTransportProtocolError(
+            f"transport field {field_name} must be a real numeric scalar"
+        )
+    return float(value)
+
+
 class _MailboxWriter:
     def __init__(self, buffer: memoryview, capacity_bytes: int) -> None:
         self.buffer = buffer
@@ -252,6 +274,15 @@ def _encode(value: Any, writer: _MailboxWriter) -> Any:
     )
 
 
+def _decode_items(node: Mapping[str, Any], node_type: str) -> list[Any]:
+    items = node.get("items")
+    if not isinstance(items, list):
+        raise NeuralTransportProtocolError(
+            f"{node_type} transport manifest items must be a list"
+        )
+    return items
+
+
 def _decode(node: Any, reader: _MailboxReader) -> Any:
     if not isinstance(node, Mapping):
         raise NeuralTransportProtocolError("transport manifest node is not a mapping")
@@ -263,20 +294,23 @@ def _decode(node: Any, reader: _MailboxReader) -> Any:
         return value
     if node_type == "complex_scalar":
         try:
-            return complex(float(node["real"]), float(node["imag"]))
+            return complex(
+                _manifest_real(node["real"], "complex.real"),
+                _manifest_real(node["imag"], "complex.imag"),
+            )
+        except NeuralTransportProtocolError:
+            raise
         except Exception as exc:
             raise NeuralTransportProtocolError("invalid complex transport scalar") from exc
     if node_type == "ndarray":
         return reader.get_array(node)
     if node_type == "tuple":
-        return tuple(_decode(item, reader) for item in node.get("items", ()))
+        return tuple(_decode(item, reader) for item in _decode_items(node, "tuple"))
     if node_type == "list":
-        return [_decode(item, reader) for item in node.get("items", ())]
+        return [_decode(item, reader) for item in _decode_items(node, "list")]
     if node_type == "mapping":
         result: dict[str, Any] = {}
-        items = node.get("items")
-        if not isinstance(items, list):
-            raise NeuralTransportProtocolError("mapping manifest items must be a list")
+        items = _decode_items(node, "mapping")
         for pair in items:
             if not isinstance(pair, list) or len(pair) != 2 or not isinstance(pair[0], str):
                 raise NeuralTransportProtocolError("malformed mapping manifest item")
@@ -286,50 +320,109 @@ def _decode(node: Any, reader: _MailboxReader) -> Any:
             result[key] = _decode(pair[1], reader)
         return result
     if node_type == "signal_frame":
-        return SignalFrame(
-            stream_id=str(node["stream_id"]),
-            sequence_id=int(node["sequence_id"]),
-            data=_decode(node["data"], reader),
-            sample_rate_hz=float(node["sample_rate_hz"]),
-            host_receive_time_ns=int(node["host_receive_time_ns"]),
-            device_time_ns=node.get("device_time_ns"),
-            synchronized_time_ns=node.get("synchronized_time_ns"),
-            clock_domain=ClockDomain(str(node["clock_domain"])),
-            quality=QualityFlag(int(node["quality"])),
-            metadata=_decode(node["metadata"], reader),
-        )
+        try:
+            return SignalFrame(
+                stream_id=_manifest_str(node["stream_id"], "signal_frame.stream_id"),
+                sequence_id=_manifest_int(node["sequence_id"], "signal_frame.sequence_id"),
+                data=_decode(node["data"], reader),
+                sample_rate_hz=_manifest_real(
+                    node["sample_rate_hz"], "signal_frame.sample_rate_hz"
+                ),
+                host_receive_time_ns=_manifest_int(
+                    node["host_receive_time_ns"], "signal_frame.host_receive_time_ns"
+                ),
+                device_time_ns=_manifest_optional_int(
+                    node.get("device_time_ns"), "signal_frame.device_time_ns"
+                ),
+                synchronized_time_ns=_manifest_optional_int(
+                    node.get("synchronized_time_ns"),
+                    "signal_frame.synchronized_time_ns",
+                ),
+                clock_domain=ClockDomain(
+                    _manifest_str(node["clock_domain"], "signal_frame.clock_domain")
+                ),
+                quality=QualityFlag(
+                    _manifest_int(node["quality"], "signal_frame.quality")
+                ),
+                metadata=_decode(node["metadata"], reader),
+            )
+        except NeuralTransportProtocolError:
+            raise
+        except Exception as exc:
+            raise NeuralTransportProtocolError(
+                f"invalid SignalFrame transport payload: {exc}"
+            ) from exc
     if node_type == "neural_window":
-        return NeuralWindow(
-            stream_id=str(node["stream_id"]),
-            window_id=int(node["window_id"]),
-            data=_decode(node["data"], reader),
-            sample_rate_hz=float(node["sample_rate_hz"]),
-            start_time_ns=int(node["start_time_ns"]),
-            end_time_ns=int(node["end_time_ns"]),
-            channel_names=tuple(_decode(node["channel_names"], reader)),
-            source_sequence_ids=tuple(_decode(node["source_sequence_ids"], reader)),
-            clock_domain=ClockDomain(str(node["clock_domain"])),
-            quality=QualityFlag(int(node["quality"])),
-            metadata=_decode(node["metadata"], reader),
-        )
+        try:
+            channel_names = _decode(node["channel_names"], reader)
+            source_sequence_ids = _decode(node["source_sequence_ids"], reader)
+            if not isinstance(channel_names, tuple):
+                raise NeuralTransportProtocolError(
+                    "NeuralWindow channel_names must decode to tuple"
+                )
+            if not isinstance(source_sequence_ids, tuple):
+                raise NeuralTransportProtocolError(
+                    "NeuralWindow source_sequence_ids must decode to tuple"
+                )
+            return NeuralWindow(
+                stream_id=_manifest_str(node["stream_id"], "neural_window.stream_id"),
+                window_id=_manifest_int(node["window_id"], "neural_window.window_id"),
+                data=_decode(node["data"], reader),
+                sample_rate_hz=_manifest_real(
+                    node["sample_rate_hz"], "neural_window.sample_rate_hz"
+                ),
+                start_time_ns=_manifest_int(
+                    node["start_time_ns"], "neural_window.start_time_ns"
+                ),
+                end_time_ns=_manifest_int(
+                    node["end_time_ns"], "neural_window.end_time_ns"
+                ),
+                channel_names=channel_names,
+                source_sequence_ids=source_sequence_ids,
+                clock_domain=ClockDomain(
+                    _manifest_str(node["clock_domain"], "neural_window.clock_domain")
+                ),
+                quality=QualityFlag(
+                    _manifest_int(node["quality"], "neural_window.quality")
+                ),
+                metadata=_decode(node["metadata"], reader),
+            )
+        except NeuralTransportProtocolError:
+            raise
+        except Exception as exc:
+            raise NeuralTransportProtocolError(
+                f"invalid NeuralWindow transport payload: {exc}"
+            ) from exc
     if node_type == "decoder_output":
-        return DecoderOutput(
-            prediction=_decode(node["prediction"], reader),
-            confidence=_decode(node["confidence"], reader),
-            uncertainty=_decode(node["uncertainty"], reader),
-            probabilities=_decode(node["probabilities"], reader),
-            logits=_decode(node["logits"], reader),
-            embedding=_decode(node["embedding"], reader),
-            model_id=_decode(node["model_id"], reader),
-            model_version=_decode(node["model_version"], reader),
-            inference_time_ns=_decode(node["inference_time_ns"], reader),
-            metadata=_decode(node["metadata"], reader),
-        )
+        try:
+            return DecoderOutput(
+                prediction=_decode(node["prediction"], reader),
+                confidence=_decode(node["confidence"], reader),
+                uncertainty=_decode(node["uncertainty"], reader),
+                probabilities=_decode(node["probabilities"], reader),
+                logits=_decode(node["logits"], reader),
+                embedding=_decode(node["embedding"], reader),
+                model_id=_decode(node["model_id"], reader),
+                model_version=_decode(node["model_version"], reader),
+                inference_time_ns=_decode(node["inference_time_ns"], reader),
+                metadata=_decode(node["metadata"], reader),
+            )
+        except NeuralTransportProtocolError:
+            raise
+        except Exception as exc:
+            raise NeuralTransportProtocolError(
+                f"invalid DecoderOutput transport payload: {exc}"
+            ) from exc
     if node_type == "transform_emission":
         items = _decode(node["items"], reader)
         if not isinstance(items, tuple):
             raise NeuralTransportProtocolError("TransformEmission items must decode to tuple")
-        return TransformEmission(items)
+        try:
+            return TransformEmission(items)
+        except Exception as exc:
+            raise NeuralTransportProtocolError(
+                f"invalid TransformEmission transport payload: {exc}"
+            ) from exc
     raise NeuralTransportProtocolError(f"unknown transport manifest node type {node_type!r}")
 
 
