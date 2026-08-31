@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/release-candidate.yml"
+      - ".github/workflows/reproducible-release-build.yml"
       - "requirements/release-build-py311.txt"
       - "packages/*/pyproject.toml"
       - "packages/*/src/neuros/__init__.py"
