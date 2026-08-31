@@ -7,6 +7,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from ._validation import positive_finite_real
 from .queues import OverflowPolicy
 
 
@@ -38,10 +39,22 @@ class RuntimeNode:
     def __post_init__(self) -> None:
         if not self.node_id:
             raise ValueError("node_id must be non-empty")
-        if self.latency_budget_ms is not None and self.latency_budget_ms <= 0:
-            raise ValueError("latency_budget_ms must be positive")
-        if self.execution_timeout_s is not None and self.execution_timeout_s <= 0:
-            raise ValueError("execution_timeout_s must be positive")
+        if self.latency_budget_ms is not None:
+            object.__setattr__(
+                self,
+                "latency_budget_ms",
+                positive_finite_real(
+                    self.latency_budget_ms, field_name="latency_budget_ms"
+                ),
+            )
+        if self.execution_timeout_s is not None:
+            object.__setattr__(
+                self,
+                "execution_timeout_s",
+                positive_finite_real(
+                    self.execution_timeout_s, field_name="execution_timeout_s"
+                ),
+            )
         if self.executor not in {"inline", "thread", "process", "gpu"}:
             raise ValueError(f"Unsupported executor: {self.executor}")
         if self.kind is NodeKind.SOURCE and self.executor != "inline":
