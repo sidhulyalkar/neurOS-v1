@@ -49,11 +49,6 @@ def _execution_kwargs(config: PluginConfig, *, role: str) -> dict[str, Any]:
             f"source plugin '{config.plugin}' cannot declare non-inline execution; "
             "source lifecycle isolation is not implemented"
         )
-    if role == "monitor" and not execution.is_default:
-        raise ConfigurationError(
-            f"monitor plugin '{config.plugin}' cannot declare execution policy until "
-            "the runtime monitor observation contract is implemented"
-        )
     return execution.runtime_kwargs()
 
 
@@ -200,8 +195,6 @@ def resolve_config(
             )
         )
 
-    for monitor_config in config.monitors:
-        _execution_kwargs(monitor_config, role="monitor")
     monitors = tuple(
         _create(plugin_registry, PluginKind.MONITOR, item) for item in config.monitors
     )
