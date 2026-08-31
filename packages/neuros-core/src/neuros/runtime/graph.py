@@ -19,6 +19,9 @@ class NodeKind(str, Enum):
     MONITOR = "monitor"
 
 
+_PROCESS_TRANSPORTS = frozenset({"pickle", "shared_memory"})
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeNode:
     node_id: str
@@ -27,6 +30,9 @@ class RuntimeNode:
     executor: str = "inline"
     latency_budget_ms: float | None = None
     execution_timeout_s: float | None = None
+    process_transport: str = "pickle"
+    process_request_capacity_bytes: int | None = None
+    process_response_capacity_bytes: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -52,6 +58,33 @@ class RuntimeNode:
                 "executor='process' requires an explicit execution_timeout_s; "
                 "latency_budget_ms is an SLO and is not termination authority"
             )
+
+        if self.process_transport not in _PROCESS_TRANSPORTS:
+            raise ValueError(
+                f"Unsupported process_transport: {self.process_transport}"
+            )
+        capacities = (
+            ("process_request_capacity_bytes", self.process_request_capacity_bytes),
+            ("process_response_capacity_bytes", self.process_response_capacity_bytes),
+        )
+        any_capacity = any(value is not None for _, value in capacities)
+        if self.executor != "process":
+            if self.process_transport != "pickle" or any_capacity:
+                raise ValueError(
+                    "process transport declarations are only valid for executor='process'"
+                )
+        elif self.process_transport == "shared_memory":
+            for field_name, value in capacities:
+                if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                    raise ValueError(
+                        f"shared_memory transport requires positive {field_name}"
+                    )
+        elif any_capacity:
+            raise ValueError(
+                "process mailbox capacities are only valid for "
+                "process_transport='shared_memory'"
+            )
+
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
