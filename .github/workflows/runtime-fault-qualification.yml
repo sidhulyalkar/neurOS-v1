@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
+      - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
       - "packages/neuros-core/src/neuros/contracts/models.py"
       - "packages/neuros-core/src/neuros/contracts/window.py"
@@ -30,6 +31,7 @@ on:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
+      - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
       - "packages/neuros-core/src/neuros/contracts/models.py"
       - "packages/neuros-core/src/neuros/contracts/window.py"
