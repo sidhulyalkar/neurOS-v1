@@ -4,15 +4,20 @@ on:
   pull_request:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/CONFIG_EXECUTION_AUTHORITY.md"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
       - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
+      - "packages/neuros-core/src/neuros/config/**"
       - "packages/neuros-core/src/neuros/contracts/models.py"
       - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
+      - "tests/test_config_execution_authority.py"
+      - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_execution_evidence.py"
       - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
@@ -30,15 +35,20 @@ on:
       - main
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/CONFIG_EXECUTION_AUTHORITY.md"
       - "docs/DECODER_OUTPUT_CONTRACT.md"
       - "docs/RUNTIME_GRAPH_CONTRACT.md"
       - "docs/RUNTIME_PROCESS_TRANSPORT.md"
+      - "packages/neuros-core/src/neuros/config/**"
       - "packages/neuros-core/src/neuros/contracts/models.py"
       - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
+      - "tests/test_config_execution_authority.py"
+      - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_execution_evidence.py"
       - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
@@ -108,13 +118,16 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
           python -m pip check
 
-      - name: Exercise runtime and queue fault contracts
+      - name: Exercise configuration, runtime, and queue fault contracts
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q \
+            tests/test_config_execution_authority.py \
+            tests/test_config_schema.py \
             tests/test_decoder_output_immutability.py \
             tests/test_runtime_executor.py \
+            tests/test_runtime_execution_evidence.py \
             tests/test_runtime_graph_authority.py \
             tests/test_runtime_queues.py \
             tests/test_runtime_fault_qualification.py \

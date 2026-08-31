@@ -20,6 +20,10 @@ import numpy as np
 
 from neuros.contracts import DecoderOutput, NeuralWindow, SignalFrame, TransformEmission
 from neuros.errors import ProcessingError
+from neuros.runtime._execution_evidence import (
+    capture_execution_authority,
+    execution_authority_snapshot,
+)
 from neuros.runtime._validation import positive_finite_real
 from neuros.runtime.graph import NodeKind, RuntimeEdge, RuntimeGraph, RuntimeNode
 from neuros.runtime.process_worker import PersistentProcessWorker
@@ -188,6 +192,7 @@ class RuntimeExecutor:
             drain_timeout_s, field_name="drain_timeout_s"
         )
         graph.validate()
+        self._execution_authority = capture_execution_authority(graph.nodes)
         self.graph = graph
         self.drain_timeout_s = drain_timeout_s
         self.state = RuntimeState.CREATED
@@ -885,6 +890,7 @@ class RuntimeExecutor:
                 for node_id, stats in self._node_stats.items()
             },
             "edges": edge_metrics,
+            "execution": execution_authority_snapshot(self._execution_authority),
             "process_execution": {
                 node_id: {
                     "transport": node.process_transport,
