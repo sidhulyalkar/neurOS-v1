@@ -37,7 +37,7 @@ def test_transport_manifest_rejects_coerced_and_misaligned_array_geometry():
         box.close_and_unlink()
 
 
-def test_transport_envelope_rejects_integer_coercion_for_identity_and_boundary():
+def test_transport_envelope_rejects_integer_coercion_and_unreferenced_tail_bytes():
     box = SharedMemoryMailbox(4096)
     try:
         envelope = box.encode(np.arange(4, dtype=np.float32), lease_id=3)
@@ -56,8 +56,27 @@ def test_transport_envelope_rejects_integer_coercion_for_identity_and_boundary()
         corrupted["bytes_used"] = True
         with pytest.raises(NeuralTransportProtocolError, match="exact integer"):
             box.decode(corrupted, expected_lease_id=3)
+
+        corrupted = copy.deepcopy(envelope)
+        corrupted["bytes_used"] += 64
+        with pytest.raises(NeuralTransportProtocolError, match="referenced payload boundary"):
+            box.decode(corrupted, expected_lease_id=3)
     finally:
         box.close_and_unlink()
+
+
+def test_mailbox_ownership_cannot_be_forged_when_attaching():
+    owner = SharedMemoryMailbox(4096)
+    try:
+        with pytest.raises(TypeError, match="unexpected keyword argument 'owner'"):
+            SharedMemoryMailbox(
+                4096,
+                name=owner.name,
+                create=False,
+                owner=True,
+            )
+    finally:
+        owner.close_and_unlink()
 
 
 def test_canonical_frame_manifest_rejects_lossy_field_coercion():
