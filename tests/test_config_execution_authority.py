@@ -46,6 +46,9 @@ class Sink:
 
 
 class Monitor:
+    def update(self, payload):
+        return None
+
     def result(self):
         return {}
 
@@ -295,6 +298,7 @@ def test_schema_v2_compiles_mixed_execution_policy_to_runtime_nodes():
         "process_transport": "pickle",
     }
     raw["sinks"][0]["execution"] = {"executor": "gpu"}
+    raw["monitors"][0]["execution"] = {"executor": "thread"}
 
     config = PipelineConfig.from_mapping(raw)
     resolved = resolve_config(config, registry=_registry())
@@ -311,7 +315,7 @@ def test_schema_v2_compiles_mixed_execution_policy_to_runtime_nodes():
     assert decoder.execution_timeout_s == pytest.approx(1.5)
     assert decoder.process_transport == "pickle"
     assert sink.executor == "gpu"
-    assert monitor.executor == "inline"
+    assert monitor.executor == "thread"
 
 
 def test_schema_v2_compiles_shared_memory_policy_without_loss():
@@ -355,39 +359,54 @@ def test_source_nondefault_execution_fails_at_compilation(executor):
 
 
 @pytest.mark.parametrize(
-    "declaration",
+    ("declaration", "expected_executor", "expected_timeout"),
     [
-        {},
-        {"executor": "inline"},
-        {"executor": "thread"},
-        {"executor": "process", "execution_timeout_s": 1.0},
+        ({}, "inline", None),
+        ({"executor": "inline"}, "inline", None),
+        ({"executor": "thread"}, "thread", None),
+        ({"executor": "gpu"}, "gpu", None),
+        ({"executor": "process", "execution_timeout_s": 1.25}, "process", 1.25),
     ],
 )
-def test_serialized_monitor_execution_policy_is_rejected_until_monitor_authority(
-    declaration,
+def test_serialized_monitor_execution_policy_compiles_losslessly(
+    declaration, expected_executor, expected_timeout
 ):
     raw = _raw_config(schema_version=2)
     raw["monitors"][0]["execution"] = declaration
-    with pytest.raises(ConfigurationError, match="monitor execution policy is unavailable"):
-        PipelineConfig.from_mapping(raw)
+    config = PipelineConfig.from_mapping(raw)
+    resolved = resolve_config(config, registry=_registry())
+    monitor = resolved.graph.nodes["monitor:0"]
+
+    assert monitor.executor == expected_executor
+    assert monitor.execution_timeout_s == expected_timeout
 
 
-@pytest.mark.parametrize("executor", ["thread", "gpu", "process"])
-def test_direct_monitor_nondefault_execution_fails_at_compilation(executor):
-    kwargs = {"executor": executor}
-    if executor == "process":
-        kwargs["execution_timeout_s"] = 1.0
+def test_direct_process_monitor_execution_policy_compiles_losslessly():
     config = PipelineConfig(
         schema_version=2,
         streams=(StreamConfig("eeg", PluginConfig("source")),),
         decoder=PluginConfig("decoder"),
         monitors=(
-            PluginConfig("monitor", execution=ExecutionConfig(**kwargs)),
+            PluginConfig(
+                "monitor",
+                execution=ExecutionConfig(
+                    executor="process",
+                    execution_timeout_s=2.0,
+                    process_transport="shared_memory",
+                    process_request_capacity_bytes=np.int64(32768),
+                    process_response_capacity_bytes=np.int64(32768),
+                ),
+            ),
         ),
     )
+    resolved = resolve_config(config, registry=_registry())
+    monitor = resolved.graph.nodes["monitor:0"]
 
-    with pytest.raises(ConfigurationError, match="monitor observation contract"):
-        resolve_config(config, registry=_registry())
+    assert monitor.executor == "process"
+    assert monitor.execution_timeout_s == 2.0
+    assert monitor.process_transport == "shared_memory"
+    assert monitor.process_request_capacity_bytes == 32768
+    assert monitor.process_response_capacity_bytes == 32768
 
 
 def test_execution_config_and_direct_runtime_node_have_identical_canonical_fields():
