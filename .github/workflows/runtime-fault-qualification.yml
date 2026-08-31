@@ -12,6 +12,7 @@ on:
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
       - "tests/test_runtime_fusion_cancellation.py"
@@ -36,6 +37,7 @@ on:
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
       - "tests/test_runtime_fusion_cancellation.py"
@@ -111,6 +113,7 @@ jobs:
           python -m pytest -q \
             tests/test_decoder_output_immutability.py \
             tests/test_runtime_executor.py \
+            tests/test_runtime_graph_authority.py \
             tests/test_runtime_queues.py \
             tests/test_runtime_fault_qualification.py \
             tests/test_runtime_fusion_cancellation.py \
