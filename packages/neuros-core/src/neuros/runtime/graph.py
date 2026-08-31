@@ -151,11 +151,15 @@ class RuntimeGraph:
     edges: list[RuntimeEdge] = field(default_factory=list)
 
     def add_node(self, node: RuntimeNode) -> None:
+        if not isinstance(node, RuntimeNode):
+            raise TypeError("node must be a RuntimeNode")
         if node.node_id in self.nodes:
             raise ValueError(f"Duplicate node_id: {node.node_id}")
         self.nodes[node.node_id] = node
 
     def connect(self, edge: RuntimeEdge) -> None:
+        if not isinstance(edge, RuntimeEdge):
+            raise TypeError("edge must be a RuntimeEdge")
         if edge.source not in self.nodes or edge.target not in self.nodes:
             raise ValueError("Both edge endpoints must be registered nodes")
         if any(
@@ -192,9 +196,28 @@ class RuntimeGraph:
         return tuple(order)
 
     def validate(self) -> None:
+        for node_id, node in self.nodes.items():
+            if not isinstance(node_id, str):
+                raise TypeError("RuntimeGraph node keys must be strings")
+            if not isinstance(node, RuntimeNode):
+                raise TypeError(f"RuntimeGraph node {node_id!r} must be a RuntimeNode")
+            if node_id != node.node_id:
+                raise ValueError(
+                    f"RuntimeGraph node key {node_id!r} does not match "
+                    f"node_id {node.node_id!r}"
+                )
+
+        seen_edges: set[tuple[str, str]] = set()
         for edge in self.edges:
+            if not isinstance(edge, RuntimeEdge):
+                raise TypeError("RuntimeGraph edges must be RuntimeEdge instances")
+            edge_key = (edge.source, edge.target)
+            if edge_key in seen_edges:
+                raise ValueError(f"Duplicate edge: {edge.source} -> {edge.target}")
+            seen_edges.add(edge_key)
             if edge.source not in self.nodes or edge.target not in self.nodes:
                 raise ValueError(f"Invalid edge: {edge.source} -> {edge.target}")
+
         self.topological_order()
 
         for node_id, node in self.nodes.items():
