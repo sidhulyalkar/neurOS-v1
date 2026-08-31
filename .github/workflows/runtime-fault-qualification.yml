@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_runtime_executor.py"
@@ -12,11 +13,13 @@ on:
       - "tests/test_runtime_fusion_cancellation.py"
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
+      - "tests/test_runtime_neural_transport.py"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
       - "tests/test_runtime_executor.py"
@@ -25,6 +28,7 @@ on:
       - "tests/test_runtime_fusion_cancellation.py"
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
+      - "tests/test_runtime_neural_transport.py"
   workflow_dispatch:
 
 permissions:
@@ -92,7 +96,8 @@ jobs:
             tests/test_runtime_fault_qualification.py \
             tests/test_runtime_fusion_cancellation.py \
             tests/test_runtime_execution_authority.py \
-            tests/test_runtime_process_authority.py
+            tests/test_runtime_process_authority.py \
+            tests/test_runtime_neural_transport.py
 
   runtime-fault-qualification:
     name: Runtime Fault Qualification
