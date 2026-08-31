@@ -26,223 +26,212 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one marker, found {count}")
+              return text.replace(old, new, 1)
+
           executor_path = Path("packages/neuros-core/src/neuros/runtime/executor.py")
           text = executor_path.read_text(encoding="utf-8")
 
-          marker = '''class _AttributedNodeError(RuntimeError):
-          '''
-          insertion = '''class RuntimeUnexpectedCancellationError(RuntimeError):
-              """Raised when a runtime node task is cancelled without runtime authority."""
+          marker = "class _AttributedNodeError(RuntimeError):\n"
+          insertion = (
+              "class RuntimeUnexpectedCancellationError(RuntimeError):\n"
+              "    \"\"\"Raised when a runtime node task is cancelled without runtime authority.\"\"\"\n\n"
+              "    def __init__(self, node_id: str) -> None:\n"
+              "        self.node_id = node_id\n"
+              "        super().__init__(\n"
+              "            f\"runtime node task {node_id!r} was cancelled without shutdown authority\"\n"
+              "        )\n\n\n"
+              "class _AttributedNodeError(RuntimeError):\n"
+          )
+          text = replace_once(text, marker, insertion, "cancellation class insertion")
 
-              def __init__(self, node_id: str) -> None:
-                  self.node_id = node_id
-                  super().__init__(
-                      f"runtime node task {node_id!r} was cancelled without shutdown authority"
-                  )
+          old_cancel = (
+              "        except asyncio.CancelledError:\n"
+              "            raise\n"
+              "        except Exception as exc:\n"
+          )
+          new_cancel = (
+              "        except asyncio.CancelledError:\n"
+              "            if self.failure is None and not self._stopping:\n"
+              "                cancellation = RuntimeUnexpectedCancellationError(node.node_id)\n"
+              "                self._node_stats[node.node_id].failed += 1\n"
+              "                self.failure = RuntimeFailure(\n"
+              "                    node.node_id,\n"
+              "                    type(cancellation).__name__,\n"
+              "                    str(cancellation),\n"
+              "                )\n"
+              "                await self._transition(\n"
+              "                    RuntimeState.FAILED,\n"
+              "                    \"node_cancelled\",\n"
+              "                    node_id=node.node_id,\n"
+              "                    error_type=type(cancellation).__name__,\n"
+              "                    message=str(cancellation),\n"
+              "                )\n"
+              "                for peer_id, task in self._tasks.items():\n"
+              "                    if peer_id != node.node_id and not task.done():\n"
+              "                        task.cancel()\n"
+              "            raise\n"
+              "        except Exception as exc:\n"
+          )
+          text = replace_once(text, old_cancel, new_cancel, "guarded cancellation")
 
-
-          class _AttributedNodeError(RuntimeError):
-          '''
-          if text.count(marker) != 1:
-              raise SystemExit("unexpected cancellation class insertion marker count")
-          text = text.replace(marker, insertion, 1)
-
-          old_cancel = '''        except asyncio.CancelledError:
-              raise
-          '''
-          new_cancel = '''        except asyncio.CancelledError:
-              if self.failure is None and not self._stopping:
-                  cancellation = RuntimeUnexpectedCancellationError(node.node_id)
-                  self._node_stats[node.node_id].failed += 1
-                  self.failure = RuntimeFailure(
-                      node.node_id,
-                      type(cancellation).__name__,
-                      str(cancellation),
-                  )
-                  await self._transition(
-                      RuntimeState.FAILED,
-                      "node_cancelled",
-                      node_id=node.node_id,
-                      error_type=type(cancellation).__name__,
-                      message=str(cancellation),
-                  )
-                  for peer_id, task in self._tasks.items():
-                      if peer_id != node.node_id and not task.done():
-                          task.cancel()
-              raise
-          '''
-          if text.count(old_cancel) != 1:
-              raise SystemExit("unexpected guarded cancellation marker count")
-          text = text.replace(old_cancel, new_cancel, 1)
-
-          old_source = '''        await source.start()
-              try:
-                  async for item in source.frames():
-                      await self._emit(node, item)
-              finally:
-                  await source.stop()
-                  await self._emit_stop(node.node_id)
-          '''
-          new_source = '''        await source.start()
-              completed_normally = False
-              cancelled = False
-              try:
-                  async for item in source.frames():
-                      await self._emit(node, item)
-                  completed_normally = True
-              except asyncio.CancelledError:
-                  cancelled = True
-                  raise
-              finally:
-                  await source.stop()
-                  # Only normal completion or an explicit graceful stop owns an
-                  # in-band shutdown marker. During failure propagation the peer
-                  # consumer may already be cancelled, so enqueueing _STOP into a
-                  # saturated data queue can deadlock containment indefinitely.
-                  graceful_stop = cancelled and self._stopping and self.failure is None
-                  if completed_normally or graceful_stop:
-                      await self._emit_stop(node.node_id)
-          '''
-          if text.count(old_source) != 1:
-              raise SystemExit("unexpected source finalization marker count")
-          text = text.replace(old_source, new_source, 1)
+          old_source = (
+              "        await source.start()\n"
+              "        try:\n"
+              "            async for item in source.frames():\n"
+              "                await self._emit(node, item)\n"
+              "        finally:\n"
+              "            await source.stop()\n"
+              "            await self._emit_stop(node.node_id)\n"
+          )
+          new_source = (
+              "        await source.start()\n"
+              "        completed_normally = False\n"
+              "        cancelled = False\n"
+              "        try:\n"
+              "            async for item in source.frames():\n"
+              "                await self._emit(node, item)\n"
+              "            completed_normally = True\n"
+              "        except asyncio.CancelledError:\n"
+              "            cancelled = True\n"
+              "            raise\n"
+              "        finally:\n"
+              "            await source.stop()\n"
+              "            # Only normal completion or an explicit graceful stop owns an\n"
+              "            # in-band shutdown marker. During failure propagation the peer\n"
+              "            # consumer may already be cancelled, so enqueueing _STOP into a\n"
+              "            # saturated data queue can deadlock containment indefinitely.\n"
+              "            graceful_stop = (\n"
+              "                cancelled and self._stopping and self.failure is None\n"
+              "            )\n"
+              "            if completed_normally or graceful_stop:\n"
+              "                await self._emit_stop(node.node_id)\n"
+          )
+          text = replace_once(text, old_source, new_source, "source finalization")
           executor_path.write_text(text, encoding="utf-8")
 
           init_path = Path("packages/neuros-core/src/neuros/runtime/__init__.py")
           init_text = init_path.read_text(encoding="utf-8")
-          old_import = '''    RuntimeFailure,
+          init_text = replace_once(
+              init_text,
+              "    RuntimeFailure,\n)\n",
+              "    RuntimeFailure,\n    RuntimeUnexpectedCancellationError,\n)\n",
+              "runtime import",
           )
-          '''
-          new_import = '''    RuntimeFailure,
-              RuntimeUnexpectedCancellationError,
+          init_text = replace_once(
+              init_text,
+              '    "RuntimeState",\n    "put_with_policy",\n]\n',
+              '    "RuntimeState",\n    "RuntimeUnexpectedCancellationError",\n    "put_with_policy",\n]\n',
+              "runtime __all__",
           )
-          '''
-          if init_text.count(old_import) != 1:
-              raise SystemExit("unexpected runtime import marker count")
-          init_text = init_text.replace(old_import, new_import, 1)
-          old_all = '''    "RuntimeState",
-              "put_with_policy",
-          ]
-          '''
-          new_all = '''    "RuntimeState",
-              "RuntimeUnexpectedCancellationError",
-              "put_with_policy",
-          ]
-          '''
-          if init_text.count(old_all) != 1:
-              raise SystemExit("unexpected runtime __all__ marker count")
-          init_text = init_text.replace(old_all, new_all, 1)
           init_path.write_text(init_text, encoding="utf-8")
 
           test_path = Path("tests/test_runtime_fault_qualification.py")
           tests = test_path.read_text(encoding="utf-8")
-          source_marker = '''class CollectingSink:
-          '''
-          parked_source = '''class ParkedSource:
-              """Emit one item, then remain live until cancellation or release."""
-
-              def __init__(self):
-                  self.started = False
-                  self.stopped = False
-                  self.release = asyncio.Event()
-
-              async def start(self):
-                  self.started = True
-
-              async def stop(self):
-                  self.started = False
-                  self.stopped = True
-
-              async def frames(self):
-                  yield 1
-                  await self.release.wait()
-
-
-          class CollectingSink:
-          '''
-          if tests.count(source_marker) != 1:
-              raise SystemExit("unexpected parked source marker count")
-          tests = tests.replace(source_marker, parked_source, 1)
-
-          slow_marker = '''class FailTransform:
-          '''
-          delayed_transform = '''class DelayedFailTransform:
-              async def transform(self, item):
-                  await asyncio.sleep(0.02)
-                  raise ValueError("delayed qualified transform failure")
-
-
-          class FailTransform:
-          '''
-          if tests.count(slow_marker) != 1:
-              raise SystemExit("unexpected delayed transform marker count")
-          tests = tests.replace(slow_marker, delayed_transform, 1)
-
+          parked_source = (
+              "class ParkedSource:\n"
+              "    \"\"\"Emit one item, then remain live until cancellation or release.\"\"\"\n\n"
+              "    def __init__(self):\n"
+              "        self.started = False\n"
+              "        self.stopped = False\n"
+              "        self.release = asyncio.Event()\n\n"
+              "    async def start(self):\n"
+              "        self.started = True\n\n"
+              "    async def stop(self):\n"
+              "        self.started = False\n"
+              "        self.stopped = True\n\n"
+              "    async def frames(self):\n"
+              "        yield 1\n"
+              "        await self.release.wait()\n\n\n"
+              "class CollectingSink:\n"
+          )
+          tests = replace_once(
+              tests,
+              "class CollectingSink:\n",
+              parked_source,
+              "parked source",
+          )
+          delayed_transform = (
+              "class DelayedFailTransform:\n"
+              "    async def transform(self, item):\n"
+              "        await asyncio.sleep(0.02)\n"
+              "        raise ValueError(\"delayed qualified transform failure\")\n\n\n"
+              "class FailTransform:\n"
+          )
+          tests = replace_once(
+              tests,
+              "class FailTransform:\n",
+              delayed_transform,
+              "delayed transform",
+          )
           tests += '''
 
-          @pytest.mark.asyncio
-          async def test_unexpected_node_cancellation_is_failed_not_silent_stopped():
-              source = ParkedSource()
-              sink = CollectingSink(target=1)
-              executor = RuntimeExecutor(
-                  source_sink_graph(source, sink, capacity=4, overflow="block"),
-                  drain_timeout_s=0.5,
-              )
+@pytest.mark.asyncio
+async def test_unexpected_node_cancellation_is_failed_not_silent_stopped():
+    source = ParkedSource()
+    sink = CollectingSink(target=1)
+    executor = RuntimeExecutor(
+        source_sink_graph(source, sink, capacity=4, overflow="block"),
+        drain_timeout_s=0.5,
+    )
 
-              await executor.start()
-              await asyncio.wait_for(sink.reached.wait(), timeout=1.0)
-              executor._tasks["sink"].cancel()
+    await executor.start()
+    await asyncio.wait_for(sink.reached.wait(), timeout=1.0)
+    executor._tasks["sink"].cancel()
 
-              with pytest.raises(RuntimeError, match="RuntimeUnexpectedCancellationError"):
-                  await asyncio.wait_for(executor.wait(), timeout=1.0)
+    with pytest.raises(RuntimeError, match="RuntimeUnexpectedCancellationError"):
+        await asyncio.wait_for(executor.wait(), timeout=1.0)
 
-              snapshot = executor.snapshot()
-              assert snapshot["state"] == "failed"
-              assert snapshot["failure"] == {
-                  "node_id": "sink",
-                  "error_type": "RuntimeUnexpectedCancellationError",
-                  "message": "runtime node task 'sink' was cancelled without shutdown authority",
-              }
-              assert snapshot["nodes"]["sink"]["failed"] == 1
-              assert source.stopped is True
-              assert_executor_tasks_terminal(executor)
-              events = await collect_events(executor)
-              assert sum(event.event == "node_cancelled" for event in events) == 1
-              assert not any(event.event == "runtime_stopped" for event in events)
+    snapshot = executor.snapshot()
+    assert snapshot["state"] == "failed"
+    assert snapshot["failure"] == {
+        "node_id": "sink",
+        "error_type": "RuntimeUnexpectedCancellationError",
+        "message": "runtime node task 'sink' was cancelled without shutdown authority",
+    }
+    assert snapshot["nodes"]["sink"]["failed"] == 1
+    assert source.stopped is True
+    assert_executor_tasks_terminal(executor)
+    events = await collect_events(executor)
+    assert sum(event.event == "node_cancelled" for event in events) == 1
+    assert not any(event.event == "runtime_stopped" for event in events)
 
 
-          @pytest.mark.asyncio
-          async def test_failure_peer_cancellation_cannot_deadlock_on_saturated_stop_queue():
-              source = InfiniteSource()
-              executor = RuntimeExecutor(
-                  source_transform_sink_graph(
-                      source,
-                      DelayedFailTransform(),
-                      CollectingSink(),
-                      source_capacity=1,
-                      source_overflow="block",
-                  ),
-                  drain_timeout_s=0.5,
-              )
+@pytest.mark.asyncio
+async def test_failure_peer_cancellation_cannot_deadlock_on_saturated_stop_queue():
+    source = InfiniteSource()
+    executor = RuntimeExecutor(
+        source_transform_sink_graph(
+            source,
+            DelayedFailTransform(),
+            CollectingSink(),
+            source_capacity=1,
+            source_overflow="block",
+        ),
+        drain_timeout_s=0.5,
+    )
 
-              with pytest.raises(RuntimeError, match="delayed qualified transform failure"):
-                  await asyncio.wait_for(executor.run(), timeout=1.0)
+    with pytest.raises(RuntimeError, match="delayed qualified transform failure"):
+        await asyncio.wait_for(executor.run(), timeout=1.0)
 
-              snapshot = executor.snapshot()
-              assert snapshot["state"] == "failed"
-              assert snapshot["failure"]["node_id"] == "transform"
-              assert snapshot["failure"]["error_type"] == "ValueError"
-              assert source.stopped is True
-              assert_executor_tasks_terminal(executor)
-              leaked = [
-                  task.get_name()
-                  for task in asyncio.all_tasks()
-                  if task is not asyncio.current_task()
-                  and not task.done()
-                  and task.get_name().startswith("neuros:")
-              ]
-              assert leaked == []
-          '''
+    snapshot = executor.snapshot()
+    assert snapshot["state"] == "failed"
+    assert snapshot["failure"]["node_id"] == "transform"
+    assert snapshot["failure"]["error_type"] == "ValueError"
+    assert source.stopped is True
+    assert_executor_tasks_terminal(executor)
+    leaked = [
+        task.get_name()
+        for task in asyncio.all_tasks()
+        if task is not asyncio.current_task()
+        and not task.done()
+        and task.get_name().startswith("neuros:")
+    ]
+    assert leaked == []
+'''
           test_path.write_text(tests, encoding="utf-8")
           PY
 
