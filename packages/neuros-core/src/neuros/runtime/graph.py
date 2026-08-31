@@ -35,6 +35,16 @@ class RuntimeNode:
             raise ValueError("latency_budget_ms must be positive")
         if self.executor not in {"inline", "thread", "process", "gpu"}:
             raise ValueError(f"Unsupported executor: {self.executor}")
+        if self.executor == "process":
+            raise ValueError(
+                "executor='process' is not authoritative until neurOS uses "
+                "a persistent per-node worker; see runtime execution authority"
+            )
+        if self.kind is NodeKind.SOURCE and self.executor != "inline":
+            raise ValueError(
+                "Source nodes currently require executor='inline'; source "
+                "lifecycle/stream isolation is not yet implemented"
+            )
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 

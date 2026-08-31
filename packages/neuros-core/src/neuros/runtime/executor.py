@@ -140,7 +140,15 @@ _STOP = _Stop()
 
 
 def _call(func: Callable[[Any], Any], item: Any) -> Any:
-    return func(item)
+    """Execute a sync or async callback inside the current execution domain."""
+    result = func(item)
+    if not inspect.isawaitable(result):
+        return result
+
+    async def await_result() -> Any:
+        return await result
+
+    return asyncio.run(await_result())
 
 
 class RuntimeExecutor:
@@ -520,9 +528,7 @@ class RuntimeExecutor:
         if node.kind is NodeKind.SINK:
             if not hasattr(operator, "write"):
                 raise TypeError(f"Sink node {node.node_id} lacks write()")
-            result = operator.write(item)
-            if inspect.isawaitable(result):
-                await result
+            await self._invoke_callable(node, operator.write, item)
             return None
         raise ProcessingError(
             f"Unsupported unary node kind: {node.kind.value}"
@@ -538,7 +544,7 @@ class RuntimeExecutor:
                 return await result
             return result
         if execution is ExecutionClass.THREAD:
-            return await asyncio.to_thread(func, item)
+            return await asyncio.to_thread(_call, func, item)
         if execution is ExecutionClass.PROCESS:
             if self._process_pool is None:
                 self._process_pool = ProcessPoolExecutor()
@@ -576,17 +582,20 @@ class RuntimeExecutor:
             monitor = monitor_node.operator
             if not hasattr(monitor, "update"):
                 continue
+            payload = {
+                "node_id": node.node_id,
+                "kind": node.kind.value,
+                "item": item,
+                "monotonic_time_ns": time.monotonic_ns(),
+            }
+            started = time.perf_counter_ns()
             try:
-                result = monitor.update(
-                    {
-                        "node_id": node.node_id,
-                        "kind": node.kind.value,
-                        "item": item,
-                        "monotonic_time_ns": time.monotonic_ns(),
-                    }
+                await self._invoke_callable(
+                    monitor_node, monitor.update, payload
                 )
-                if inspect.isawaitable(result):
-                    await result
+                self._node_stats[monitor_node.node_id].observe(
+                    time.perf_counter_ns() - started
+                )
             except Exception as exc:
                 raise _AttributedNodeError(monitor_node.node_id, exc) from exc
 
