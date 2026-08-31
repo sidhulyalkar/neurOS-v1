@@ -11,7 +11,11 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from check_release_dependency_closure import inspect_release_dependency_closure  # noqa: E402
+from check_release_dependency_closure import (  # noqa: E402
+    SUPPORTED_PYTHON_VERSIONS,
+    TARGET_ENVIRONMENTS,
+    inspect_release_dependency_closure,
+)
 
 
 def _wheel(
@@ -50,14 +54,15 @@ def test_internal_default_dependencies_must_be_present_and_version_compatible(tm
     report = inspect_release_dependency_closure(tmp_path)
     assert report["status"] == "pass"
     assert report["distribution_count"] == 2
-    assert report["dependencies"] == [
-        {
-            "from": "neuros-drivers",
-            "requirement": "neuros-core>=2.0.0",
-            "to": "neuros-core",
-            "resolved_version": "2.0.0",
-        }
-    ]
+    assert report["python_versions"] == list(SUPPORTED_PYTHON_VERSIONS)
+    assert report["target_environments"] == [item[0] for item in TARGET_ENVIRONMENTS]
+    assert len(report["dependencies"]) == 1
+    dependency = report["dependencies"][0]
+    assert dependency["from"] == "neuros-drivers"
+    assert dependency["requirement"] == "neuros-core>=2.0.0"
+    assert dependency["to"] == "neuros-core"
+    assert dependency["resolved_version"] == "2.0.0"
+    assert dependency["active_targets"] == report["target_environments"]
 
 
 def test_missing_internal_default_dependency_fails_closed(tmp_path):
@@ -81,6 +86,30 @@ def test_incompatible_internal_version_fails_closed(tmp_path):
     )
     with pytest.raises(ValueError, match="incompatible internal runtime dependency"):
         inspect_release_dependency_closure(tmp_path)
+
+
+def test_python_gated_dependency_is_checked_across_supported_versions(tmp_path):
+    _wheel(
+        tmp_path,
+        name="neuros",
+        version="2.1.0",
+        requires=('neuros-legacy>=1.0; python_version < "3.11"',),
+    )
+    with pytest.raises(ValueError, match="unsatisfied internal runtime dependency") as exc:
+        inspect_release_dependency_closure(tmp_path)
+    assert "cp3.10-" in str(exc.value)
+
+
+def test_platform_gated_dependency_is_checked_beyond_linux_runner(tmp_path):
+    _wheel(
+        tmp_path,
+        name="neuros",
+        version="2.1.0",
+        requires=('neuros-winbridge>=1.0; sys_platform == "win32"',),
+    )
+    with pytest.raises(ValueError, match="unsatisfied internal runtime dependency") as exc:
+        inspect_release_dependency_closure(tmp_path)
+    assert "windows-" in str(exc.value)
 
 
 def test_active_internal_extra_requirement_fails_until_extra_closure_is_modeled(tmp_path):
