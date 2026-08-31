@@ -41,6 +41,22 @@ def _create(
         ) from exc
 
 
+def _execution_kwargs(config: PluginConfig, *, role: str) -> dict[str, Any]:
+    """Return runtime execution kwargs after role-specific feasibility checks."""
+    execution = config.execution
+    if role == "source" and not execution.is_default:
+        raise ConfigurationError(
+            f"source plugin '{config.plugin}' cannot declare non-inline execution; "
+            "source lifecycle isolation is not implemented"
+        )
+    if role == "monitor" and not execution.is_default:
+        raise ConfigurationError(
+            f"monitor plugin '{config.plugin}' cannot declare execution policy until "
+            "the runtime monitor observation contract is implemented"
+        )
+    return execution.runtime_kwargs()
+
+
 def resolve_config(
     config: PipelineConfig,
     *,
@@ -55,6 +71,9 @@ def resolve_config(
     not have the original device SDK installed.
     """
 
+    if not isinstance(config, PipelineConfig):
+        raise ConfigurationError("config must be a PipelineConfig")
+
     plugin_registry = registry or default_registry
     plugin_registry.discover()
     overrides = dict(source_overrides or {})
@@ -67,6 +86,7 @@ def resolve_config(
     stream_tails: list[str] = []
 
     for stream in config.streams:
+        source_execution = _execution_kwargs(stream.source, role="source")
         source = overrides.get(stream.stream_id)
         if source is None:
             source = _create(plugin_registry, PluginKind.SOURCE, stream.source)
@@ -81,6 +101,7 @@ def resolve_config(
                 kind=NodeKind.SOURCE,
                 operator=source,
                 metadata={"stream_id": stream.stream_id, "plugin": stream.source.plugin},
+                **source_execution,
             )
         )
         tail = source_id
@@ -94,6 +115,7 @@ def resolve_config(
                     kind=NodeKind.TRANSFORM,
                     operator=transform,
                     metadata={"plugin": transform_config.plugin},
+                    **_execution_kwargs(transform_config, role="transform"),
                 )
             )
             graph.connect(
@@ -122,6 +144,7 @@ def resolve_config(
             kind=NodeKind.DECODER,
             operator=decoder,
             metadata={"plugin": config.decoder.plugin},
+            **_execution_kwargs(config.decoder, role="decoder"),
         )
     )
 
@@ -165,6 +188,7 @@ def resolve_config(
                 kind=NodeKind.SINK,
                 operator=sink,
                 metadata={"plugin": sink_config.plugin},
+                **_execution_kwargs(sink_config, role="sink"),
             )
         )
         graph.connect(
@@ -176,6 +200,8 @@ def resolve_config(
             )
         )
 
+    for monitor_config in config.monitors:
+        _execution_kwargs(monitor_config, role="monitor")
     monitors = tuple(
         _create(plugin_registry, PluginKind.MONITOR, item) for item in config.monitors
     )
@@ -186,6 +212,7 @@ def resolve_config(
                 kind=NodeKind.MONITOR,
                 operator=monitor,
                 metadata={"plugin": monitor_config.plugin},
+                **_execution_kwargs(monitor_config, role="monitor"),
             )
         )
 
