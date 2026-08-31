@@ -26,6 +26,7 @@ class RuntimeNode:
     operator: Any
     executor: str = "inline"
     latency_budget_ms: float | None = None
+    execution_timeout_s: float | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -33,17 +34,23 @@ class RuntimeNode:
             raise ValueError("node_id must be non-empty")
         if self.latency_budget_ms is not None and self.latency_budget_ms <= 0:
             raise ValueError("latency_budget_ms must be positive")
+        if self.execution_timeout_s is not None and self.execution_timeout_s <= 0:
+            raise ValueError("execution_timeout_s must be positive")
         if self.executor not in {"inline", "thread", "process", "gpu"}:
             raise ValueError(f"Unsupported executor: {self.executor}")
-        if self.executor == "process":
-            raise ValueError(
-                "executor='process' is not authoritative until neurOS uses "
-                "a persistent per-node worker; see runtime execution authority"
-            )
         if self.kind is NodeKind.SOURCE and self.executor != "inline":
             raise ValueError(
                 "Source nodes currently require executor='inline'; source "
                 "lifecycle/stream isolation is not yet implemented"
+            )
+        if self.execution_timeout_s is not None and self.executor != "process":
+            raise ValueError(
+                "execution_timeout_s is only authoritative for executor='process'"
+            )
+        if self.executor == "process" and self.execution_timeout_s is None:
+            raise ValueError(
+                "executor='process' requires an explicit execution_timeout_s; "
+                "latency_budget_ms is an SLO and is not termination authority"
             )
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 

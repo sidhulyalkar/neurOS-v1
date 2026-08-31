@@ -121,14 +121,12 @@ class FailingMonitor:
         raise LookupError(f"monitor rejected {payload['node_id']}")
 
 
-class FakeProcessPool:
+class FakeProcessWorker:
     def __init__(self):
-        self.shutdown_calls = []
+        self.close_calls = 0
 
-    def shutdown(self, *, wait, cancel_futures):
-        self.shutdown_calls.append(
-            {"wait": wait, "cancel_futures": cancel_futures}
-        )
+    def close(self):
+        self.close_calls += 1
 
 
 def source_sink_graph(source, sink, *, capacity=2, overflow="block"):
@@ -311,7 +309,7 @@ async def test_fail_overflow_is_runtime_failure_at_emitting_source():
 
 
 @pytest.mark.asyncio
-async def test_executor_owned_process_pool_is_closed_on_failure_path():
+async def test_executor_owned_process_workers_are_closed_on_failure_path():
     executor = RuntimeExecutor(
         source_transform_sink_graph(
             FiniteSource([1]),
@@ -319,16 +317,13 @@ async def test_executor_owned_process_pool_is_closed_on_failure_path():
             CollectingSink(),
         )
     )
-    fake_pool = FakeProcessPool()
-    executor._process_pool = fake_pool  # ownership-path test, no subprocess spawned
+    fake_worker = FakeProcessWorker()
+    executor._process_workers["owned-test-worker"] = fake_worker
 
     with pytest.raises(RuntimeError, match="qualified transform failure"):
         await executor.run()
 
-    assert fake_pool.shutdown_calls == [
-        {"wait": False, "cancel_futures": True}
-    ]
-    assert executor._process_pool is None
+    assert fake_worker.close_calls == 1
     assert_executor_tasks_terminal(executor)
 
 

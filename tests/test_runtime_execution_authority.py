@@ -105,9 +105,17 @@ def test_source_non_inline_executor_is_rejected_instead_of_ignored():
         RuntimeNode("source", NodeKind.SOURCE, object(), executor="thread")
 
 
-def test_process_executor_is_rejected_until_per_node_worker_is_authoritative():
-    with pytest.raises(ValueError, match="not authoritative"):
+def test_process_executor_requires_explicit_hard_timeout():
+    with pytest.raises(ValueError, match="execution_timeout_s"):
         RuntimeNode("transform", NodeKind.TRANSFORM, object(), executor="process")
+    node = RuntimeNode(
+        "transform",
+        NodeKind.TRANSFORM,
+        object(),
+        executor="process",
+        execution_timeout_s=1.0,
+    )
+    assert node.execution_timeout_s == 1.0
 
 
 @pytest.mark.asyncio
