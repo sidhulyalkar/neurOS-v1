@@ -143,7 +143,14 @@ def test_graph_with_plain_string_node_kinds_validates_with_canonical_topology():
     graph.add_node(RuntimeNode("source", "source", Source()))
     graph.add_node(RuntimeNode("transform", "transform", IdentityTransform()))
     graph.add_node(RuntimeNode("sink", "sink", object()))
-    graph.connect(RuntimeEdge("source", "transform", capacity=np.int64(2), overflow=OverflowPolicy.BLOCK))
+    graph.connect(
+        RuntimeEdge(
+            "source",
+            "transform",
+            capacity=np.int64(2),
+            overflow=OverflowPolicy.BLOCK,
+        )
+    )
     graph.connect(RuntimeEdge("transform", "sink", capacity=2, overflow="block"))
 
     graph.validate()
@@ -161,3 +168,43 @@ def test_unknown_edge_endpoint_still_fails_before_runtime_execution():
     edge = RuntimeEdge("a", "missing")
     with pytest.raises(ValueError, match="Both edge endpoints must be registered nodes"):
         graph.connect(edge)
+
+
+def test_graph_mutation_methods_require_typed_node_and_edge_objects():
+    graph = RuntimeGraph()
+    with pytest.raises(TypeError, match="node must be a RuntimeNode"):
+        graph.add_node(object())
+
+    with pytest.raises(TypeError, match="edge must be a RuntimeEdge"):
+        graph.connect(object())
+
+
+def test_graph_validate_rejects_externally_corrupted_node_value():
+    graph = RuntimeGraph()
+    graph.nodes["corrupt"] = object()
+    with pytest.raises(TypeError, match="must be a RuntimeNode"):
+        graph.validate()
+
+
+def test_graph_validate_rejects_node_key_identity_drift():
+    graph = RuntimeGraph()
+    graph.nodes["alias"] = RuntimeNode("actual", NodeKind.SOURCE, Source())
+    with pytest.raises(ValueError, match="does not match node_id"):
+        graph.validate()
+
+
+def test_graph_validate_rejects_externally_corrupted_edge_value():
+    graph = RuntimeGraph()
+    graph.edges.append(object())
+    with pytest.raises(TypeError, match="edges must be RuntimeEdge instances"):
+        graph.validate()
+
+
+def test_graph_validate_rejects_duplicate_edges_even_when_public_list_is_mutated():
+    graph = RuntimeGraph()
+    graph.add_node(RuntimeNode("source", NodeKind.SOURCE, Source()))
+    graph.add_node(RuntimeNode("sink", NodeKind.SINK, object()))
+    edge = RuntimeEdge("source", "sink")
+    graph.edges.extend([edge, edge])
+    with pytest.raises(ValueError, match="Duplicate edge: source -> sink"):
+        graph.validate()
