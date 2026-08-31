@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/RUNTIME_PROCESS_TRANSPORT.md"
       - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
@@ -24,6 +25,7 @@ on:
       - main
     paths:
       - ".github/workflows/runtime-fault-qualification.yml"
+      - "docs/RUNTIME_PROCESS_TRANSPORT.md"
       - "packages/neuros-core/src/neuros/contracts/window.py"
       - "packages/neuros-core/src/neuros/runtime/**"
       - "packages/neuros-core/pyproject.toml"
