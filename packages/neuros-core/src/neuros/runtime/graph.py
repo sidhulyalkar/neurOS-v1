@@ -7,7 +7,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from ._validation import positive_finite_real
+from ._validation import nonblank_string, positive_finite_real, positive_integral
 from .queues import OverflowPolicy
 
 
@@ -21,6 +21,7 @@ class NodeKind(str, Enum):
 
 
 _PROCESS_TRANSPORTS = frozenset({"pickle", "shared_memory"})
+_EXECUTORS = frozenset({"inline", "thread", "process", "gpu"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +38,18 @@ class RuntimeNode:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.node_id:
-            raise ValueError("node_id must be non-empty")
+        object.__setattr__(
+            self, "node_id", nonblank_string(self.node_id, field_name="node_id")
+        )
+
+        if not isinstance(self.kind, (NodeKind, str)):
+            raise TypeError("kind must be a NodeKind or node-kind string")
+        try:
+            kind = NodeKind(self.kind)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported node kind: {self.kind}") from exc
+        object.__setattr__(self, "kind", kind)
+
         if self.latency_budget_ms is not None:
             object.__setattr__(
                 self,
@@ -55,7 +66,10 @@ class RuntimeNode:
                     self.execution_timeout_s, field_name="execution_timeout_s"
                 ),
             )
-        if self.executor not in {"inline", "thread", "process", "gpu"}:
+
+        if not isinstance(self.executor, str):
+            raise TypeError("executor must be a string")
+        if self.executor not in _EXECUTORS:
             raise ValueError(f"Unsupported executor: {self.executor}")
         if self.kind is NodeKind.SOURCE and self.executor != "inline":
             raise ValueError(
@@ -72,6 +86,8 @@ class RuntimeNode:
                 "latency_budget_ms is an SLO and is not termination authority"
             )
 
+        if not isinstance(self.process_transport, str):
+            raise TypeError("process_transport must be a string")
         if self.process_transport not in _PROCESS_TRANSPORTS:
             raise ValueError(
                 f"Unsupported process_transport: {self.process_transport}"
@@ -109,9 +125,20 @@ class RuntimeEdge:
     overflow: str = "drop_oldest"
 
     def __post_init__(self) -> None:
-        if self.capacity <= 0:
-            raise ValueError("capacity must be positive")
-        OverflowPolicy(self.overflow)
+        object.__setattr__(
+            self, "source", nonblank_string(self.source, field_name="source")
+        )
+        object.__setattr__(
+            self, "target", nonblank_string(self.target, field_name="target")
+        )
+        object.__setattr__(
+            self, "capacity", positive_integral(self.capacity, field_name="capacity")
+        )
+        try:
+            overflow = OverflowPolicy(self.overflow)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Unsupported overflow policy: {self.overflow}") from exc
+        object.__setattr__(self, "overflow", overflow.value)
         if self.source == self.target:
             raise ValueError("self edges are not allowed")
 
