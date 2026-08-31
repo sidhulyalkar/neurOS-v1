@@ -14,6 +14,7 @@ on:
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
       - "tests/test_runtime_neural_transport.py"
+      - "tests/test_runtime_shared_transport_integration.py"
   push:
     branches:
       - main
@@ -29,6 +30,7 @@ on:
       - "tests/test_runtime_execution_authority.py"
       - "tests/test_runtime_process_authority.py"
       - "tests/test_runtime_neural_transport.py"
+      - "tests/test_runtime_shared_transport_integration.py"
   workflow_dispatch:
 
 permissions:
@@ -97,7 +99,8 @@ jobs:
             tests/test_runtime_fusion_cancellation.py \
             tests/test_runtime_execution_authority.py \
             tests/test_runtime_process_authority.py \
-            tests/test_runtime_neural_transport.py
+            tests/test_runtime_neural_transport.py \
+            tests/test_runtime_shared_transport_integration.py
 
   runtime-fault-qualification:
     name: Runtime Fault Qualification
