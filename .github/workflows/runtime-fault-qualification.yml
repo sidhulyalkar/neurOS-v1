@@ -16,6 +16,7 @@ on:
       - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_execution_evidence.py"
       - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
@@ -45,6 +46,7 @@ on:
       - "tests/test_config_schema.py"
       - "tests/test_decoder_output_immutability.py"
       - "tests/test_runtime_executor.py"
+      - "tests/test_runtime_execution_evidence.py"
       - "tests/test_runtime_graph_authority.py"
       - "tests/test_runtime_queues.py"
       - "tests/test_runtime_fault_qualification.py"
@@ -123,6 +125,7 @@ jobs:
             tests/test_config_schema.py \
             tests/test_decoder_output_immutability.py \
             tests/test_runtime_executor.py \
+            tests/test_runtime_execution_evidence.py \
             tests/test_runtime_graph_authority.py \
             tests/test_runtime_queues.py \
             tests/test_runtime_fault_qualification.py \
