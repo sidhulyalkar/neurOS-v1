@@ -150,55 +150,30 @@ class RuntimeGraph:
     nodes: dict[str, RuntimeNode] = field(default_factory=dict)
     edges: list[RuntimeEdge] = field(default_factory=list)
 
-    def add_node(self, node: RuntimeNode) -> None:
-        if not isinstance(node, RuntimeNode):
-            raise TypeError("node must be a RuntimeNode")
-        if node.node_id in self.nodes:
-            raise ValueError(f"Duplicate node_id: {node.node_id}")
-        self.nodes[node.node_id] = node
+    def __post_init__(self) -> None:
+        if not isinstance(self.nodes, dict):
+            raise TypeError("RuntimeGraph nodes must be a dict")
+        if not isinstance(self.edges, list):
+            raise TypeError("RuntimeGraph edges must be a list")
+        # Detach constructor-owned containers. The graph remains intentionally
+        # mutable through its own public containers and mutation methods, but a
+        # caller retaining the constructor arguments must not mutate it by alias.
+        self.nodes = dict(self.nodes)
+        self.edges = list(self.edges)
+        self._validate_structure()
 
-    def connect(self, edge: RuntimeEdge) -> None:
-        if not isinstance(edge, RuntimeEdge):
-            raise TypeError("edge must be a RuntimeEdge")
-        if edge.source not in self.nodes or edge.target not in self.nodes:
-            raise ValueError("Both edge endpoints must be registered nodes")
-        if any(
-            existing.source == edge.source and existing.target == edge.target
-            for existing in self.edges
-        ):
-            raise ValueError(f"Duplicate edge: {edge.source} -> {edge.target}")
-        self.edges.append(edge)
+    def _validate_container_types(self) -> None:
+        if not isinstance(self.nodes, dict):
+            raise TypeError("RuntimeGraph nodes must be a dict")
+        if not isinstance(self.edges, list):
+            raise TypeError("RuntimeGraph edges must be a list")
 
-    def incoming(self, node_id: str) -> tuple[RuntimeEdge, ...]:
-        return tuple(edge for edge in self.edges if edge.target == node_id)
+    def _validate_structure(self) -> None:
+        """Prove graph container, identity, edge-type, and endpoint integrity."""
 
-    def outgoing(self, node_id: str) -> tuple[RuntimeEdge, ...]:
-        return tuple(edge for edge in self.edges if edge.source == node_id)
-
-    def topological_order(self) -> tuple[str, ...]:
-        indegree = {node_id: 0 for node_id in self.nodes}
-        adjacency: dict[str, list[str]] = {node_id: [] for node_id in self.nodes}
-        for edge in self.edges:
-            indegree[edge.target] += 1
-            adjacency[edge.source].append(edge.target)
-        ready = sorted(node_id for node_id, degree in indegree.items() if degree == 0)
-        order: list[str] = []
-        while ready:
-            node_id = ready.pop(0)
-            order.append(node_id)
-            for target in adjacency[node_id]:
-                indegree[target] -= 1
-                if indegree[target] == 0:
-                    ready.append(target)
-                    ready.sort()
-        if len(order) != len(self.nodes):
-            raise ValueError("RuntimeGraph must be acyclic")
-        return tuple(order)
-
-    def validate(self) -> None:
+        self._validate_container_types()
         for node_id, node in self.nodes.items():
-            if not isinstance(node_id, str):
-                raise TypeError("RuntimeGraph node keys must be strings")
+            nonblank_string(node_id, field_name="RuntimeGraph node key")
             if not isinstance(node, RuntimeNode):
                 raise TypeError(f"RuntimeGraph node {node_id!r} must be a RuntimeNode")
             if node_id != node.node_id:
@@ -218,11 +193,72 @@ class RuntimeGraph:
             if edge.source not in self.nodes or edge.target not in self.nodes:
                 raise ValueError(f"Invalid edge: {edge.source} -> {edge.target}")
 
-        self.topological_order()
+    def add_node(self, node: RuntimeNode) -> None:
+        if not isinstance(node, RuntimeNode):
+            raise TypeError("node must be a RuntimeNode")
+        self._validate_structure()
+        if node.node_id in self.nodes:
+            raise ValueError(f"Duplicate node_id: {node.node_id}")
+        self.nodes[node.node_id] = node
+
+    def connect(self, edge: RuntimeEdge) -> None:
+        if not isinstance(edge, RuntimeEdge):
+            raise TypeError("edge must be a RuntimeEdge")
+        self._validate_structure()
+        if edge.source not in self.nodes or edge.target not in self.nodes:
+            raise ValueError("Both edge endpoints must be registered nodes")
+        if any(
+            existing.source == edge.source and existing.target == edge.target
+            for existing in self.edges
+        ):
+            raise ValueError(f"Duplicate edge: {edge.source} -> {edge.target}")
+        self.edges.append(edge)
+
+    def _incoming_unchecked(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        return tuple(edge for edge in self.edges if edge.target == node_id)
+
+    def _outgoing_unchecked(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        return tuple(edge for edge in self.edges if edge.source == node_id)
+
+    def incoming(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        self._validate_structure()
+        return self._incoming_unchecked(node_id)
+
+    def outgoing(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        self._validate_structure()
+        return self._outgoing_unchecked(node_id)
+
+    def _topological_order_unchecked(self) -> tuple[str, ...]:
+        indegree = {node_id: 0 for node_id in self.nodes}
+        adjacency: dict[str, list[str]] = {node_id: [] for node_id in self.nodes}
+        for edge in self.edges:
+            indegree[edge.target] += 1
+            adjacency[edge.source].append(edge.target)
+        ready = sorted(node_id for node_id, degree in indegree.items() if degree == 0)
+        order: list[str] = []
+        while ready:
+            node_id = ready.pop(0)
+            order.append(node_id)
+            for target in adjacency[node_id]:
+                indegree[target] -= 1
+                if indegree[target] == 0:
+                    ready.append(target)
+                    ready.sort()
+        if len(order) != len(self.nodes):
+            raise ValueError("RuntimeGraph must be acyclic")
+        return tuple(order)
+
+    def topological_order(self) -> tuple[str, ...]:
+        self._validate_structure()
+        return self._topological_order_unchecked()
+
+    def validate(self) -> None:
+        self._validate_structure()
+        self._topological_order_unchecked()
 
         for node_id, node in self.nodes.items():
-            incoming = self.incoming(node_id)
-            outgoing = self.outgoing(node_id)
+            incoming = self._incoming_unchecked(node_id)
+            outgoing = self._outgoing_unchecked(node_id)
             if node.kind is NodeKind.SOURCE and incoming:
                 raise ValueError(f"Source node {node_id} cannot have incoming edges")
             if node.kind is NodeKind.FUSION and len(incoming) < 2:
