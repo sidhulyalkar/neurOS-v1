@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/reproducible-release-build.yml"
+      - ".github/workflows/release-candidate.yml"
       - "requirements/release-build-py311.txt"
       - "scripts/build_reproducible_release.py"
       - "scripts/check_reproducible_wheels.py"
@@ -20,6 +21,7 @@ on:
       - main
     paths:
       - ".github/workflows/reproducible-release-build.yml"
+      - ".github/workflows/release-candidate.yml"
       - "requirements/release-build-py311.txt"
       - "scripts/build_reproducible_release.py"
       - "scripts/check_reproducible_wheels.py"
