@@ -9,14 +9,15 @@ replayable.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
-from types import MappingProxyType
+from numbers import Integral, Real
 from typing import Any, Mapping
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .signal import ClockDomain, QualityFlag
+from .signal import ClockDomain, QualityFlag, _freeze_metadata_mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,10 @@ class NeuralWindow:
     ``data`` is always two-dimensional and channel-major: ``(channels, time)``.
     The runtime adds the batch axis at decoder invocation, yielding
     ``(batch=1, channels, time)`` for raw-window neural decoders.
+
+    Window arrays and metadata are detached from caller-owned mutable state at
+    construction. ``data`` is stored read-only, matching :class:`SignalFrame`'s
+    immutable software-observation boundary.
     """
 
     stream_id: str
@@ -78,16 +83,39 @@ class NeuralWindow:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.stream_id:
+        if not isinstance(self.stream_id, str) or not self.stream_id.strip():
             raise ValueError("stream_id must be non-empty")
-        if self.window_id < 0:
+        if isinstance(self.window_id, (bool, np.bool_)) or not isinstance(
+            self.window_id, Integral
+        ):
+            raise TypeError("window_id must be an integer")
+        if int(self.window_id) < 0:
             raise ValueError("window_id must be >= 0")
-        if self.sample_rate_hz <= 0:
-            raise ValueError("sample_rate_hz must be positive")
-        if self.start_time_ns < 0 or self.end_time_ns <= self.start_time_ns:
-            raise ValueError("NeuralWindow requires a positive half-open time interval")
+        object.__setattr__(self, "window_id", int(self.window_id))
 
-        arr = np.asarray(self.data)
+        if isinstance(self.sample_rate_hz, (bool, np.bool_)) or not isinstance(
+            self.sample_rate_hz, Real
+        ):
+            raise TypeError("sample_rate_hz must be a real numeric scalar")
+        sample_rate_hz = float(self.sample_rate_hz)
+        if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
+            raise ValueError("sample_rate_hz must be finite and positive")
+        object.__setattr__(self, "sample_rate_hz", sample_rate_hz)
+
+        for field_name, value in (
+            ("start_time_ns", self.start_time_ns),
+            ("end_time_ns", self.end_time_ns),
+        ):
+            if isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral):
+                raise TypeError(f"{field_name} must be an integer")
+        start_time_ns = int(self.start_time_ns)
+        end_time_ns = int(self.end_time_ns)
+        if start_time_ns < 0 or end_time_ns <= start_time_ns:
+            raise ValueError("NeuralWindow requires a positive half-open time interval")
+        object.__setattr__(self, "start_time_ns", start_time_ns)
+        object.__setattr__(self, "end_time_ns", end_time_ns)
+
+        arr = np.array(self.data, copy=True, subok=False)
         if arr.ndim != 2:
             raise ValueError(
                 "NeuralWindow.data must have shape (channels, time); "
@@ -95,22 +123,55 @@ class NeuralWindow:
             )
         if arr.shape[0] <= 0 or arr.shape[1] <= 0:
             raise ValueError("NeuralWindow.data cannot contain empty axes")
-        if not np.isfinite(arr).all():
+        if arr.dtype.kind not in "biufc":
+            raise TypeError(
+                "NeuralWindow.data must use a boolean or numeric dtype; "
+                f"received {arr.dtype}"
+            )
+        if arr.dtype.kind in "fc" and not np.isfinite(arr).all():
             raise ValueError("NeuralWindow.data contains NaN or infinite values")
-        if self.channel_names and len(self.channel_names) != arr.shape[0]:
+
+        channel_names = tuple(self.channel_names)
+        if any(not isinstance(name, str) or not name.strip() for name in channel_names):
+            raise ValueError("channel_names must contain non-empty strings")
+        if channel_names and len(channel_names) != arr.shape[0]:
             raise ValueError("channel_names must match the channel axis")
-        if any(sequence_id < 0 for sequence_id in self.source_sequence_ids):
-            raise ValueError("source_sequence_ids must be non-negative")
+        object.__setattr__(self, "channel_names", channel_names)
+
+        source_sequence_ids: list[int] = []
+        for sequence_id in self.source_sequence_ids:
+            if isinstance(sequence_id, (bool, np.bool_)) or not isinstance(
+                sequence_id, Integral
+            ):
+                raise TypeError("source_sequence_ids must contain integers")
+            resolved = int(sequence_id)
+            if resolved < 0:
+                raise ValueError("source_sequence_ids must be non-negative")
+            source_sequence_ids.append(resolved)
+        source_sequence_tuple = tuple(source_sequence_ids)
         if any(
             current <= previous
             for previous, current in zip(
-                self.source_sequence_ids, self.source_sequence_ids[1:]
+                source_sequence_tuple, source_sequence_tuple[1:]
             )
         ):
             raise ValueError("source_sequence_ids must be strictly increasing")
+        object.__setattr__(self, "source_sequence_ids", source_sequence_tuple)
 
+        object.__setattr__(self, "clock_domain", ClockDomain(self.clock_domain))
+        quality_value = int(self.quality)
+        if quality_value < 0:
+            raise ValueError("quality must be non-negative")
+        known_mask = 0
+        for flag in QualityFlag:
+            known_mask |= int(flag)
+        if quality_value & ~known_mask:
+            raise ValueError("quality contains undefined QualityFlag bits")
+        object.__setattr__(self, "quality", QualityFlag(quality_value))
+
+        arr.setflags(write=False)
         object.__setattr__(self, "data", arr)
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "metadata", _freeze_metadata_mapping(self.metadata))
 
     @property
     def n_channels(self) -> int:
