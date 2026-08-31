@@ -54,7 +54,7 @@ jobs:
       - name: Install release tooling
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build twine pyyaml mkdocs-material cffconvert
+          python -m pip install build twine packaging pyyaml mkdocs-material cffconvert
       - name: Validate public contracts, release policy, and documentation
         run: |
           python scripts/check_public_contracts.py
@@ -116,8 +116,11 @@ jobs:
           import os
           import subprocess
           import sys
+          from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
 
           selected_policy = json.loads(
               subprocess.check_output(
@@ -137,6 +140,7 @@ jobs:
           bundled_policy_path.write_bytes(policy_bytes)
 
           artifacts = []
+          metadata_by_distribution = {}
           for wheel in sorted(dist.glob("*.whl")):
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
               with ZipFile(wheel) as archive:
@@ -144,30 +148,46 @@ jobs:
                       name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
                   )
                   metadata = archive.read(metadata_name).decode("utf-8", errors="strict")
-              fields = {}
-              for line in metadata.splitlines():
-                  if line.startswith("Name: "):
-                      fields["name"] = line[6:]
-                  elif line.startswith("Version: "):
-                      fields["version"] = line[9:]
-                  if len(fields) == 2:
-                      break
-              if set(fields) != {"name", "version"}:
+              message = Parser().parsestr(metadata)
+              name = message.get("Name")
+              version = message.get("Version")
+              if not name or not version:
                   raise SystemExit(f"missing package metadata in {wheel.name}")
-              artifacts.append({"file": wheel.name, "sha256": digest, **fields})
+              artifacts.append({"file": wheel.name, "sha256": digest, "name": name, "version": version})
+              metadata_by_distribution[canonicalize_name(name)] = message
+
           if len(artifacts) != expected_count:
               raise SystemExit(f"expected {expected_count} wheels, found {len(artifacts)}")
-          if len({item["name"] for item in artifacts}) != expected_count:
+          if len({canonicalize_name(item["name"]) for item in artifacts}) != expected_count:
               raise SystemExit("release contains duplicate distribution names")
 
-          expected_names = {item["distribution"] for item in selected_policy["packages"]}
-          observed_names = {item["name"] for item in artifacts}
+          expected_names = {canonicalize_name(item["distribution"]) for item in selected_policy["packages"]}
+          observed_names = {canonicalize_name(item["name"]) for item in artifacts}
           if expected_names != observed_names:
               raise SystemExit(
                   "release wheel distributions differ from explicit package policy: "
                   f"missing={sorted(expected_names - observed_names)}, "
                   f"foreign={sorted(observed_names - expected_names)}"
               )
+
+          internal_runtime_dependencies = []
+          for distribution, message in sorted(metadata_by_distribution.items()):
+              for raw_requirement in message.get_all("Requires-Dist") or []:
+                  requirement = Requirement(raw_requirement)
+                  dependency = canonicalize_name(requirement.name)
+                  if dependency != "neuros" and not dependency.startswith("neuros-"):
+                      continue
+                  if requirement.marker is not None and not requirement.marker.evaluate({"extra": ""}):
+                      continue
+                  internal_runtime_dependencies.append(
+                      {"from": distribution, "requirement": raw_requirement, "to": dependency}
+                  )
+                  if dependency not in observed_names:
+                      raise SystemExit(
+                          "default release has an unsatisfied internal runtime dependency: "
+                          f"{distribution} requires {raw_requirement!r}, but {dependency!r} "
+                          "is not present in the exact release wheel set"
+                      )
 
           ownership_path = dist / "wheel-ownership.json"
           if not ownership_path.is_file():
@@ -186,6 +206,10 @@ jobs:
               "github_event_sha": os.environ["GITHUB_SHA"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
+              "internal_runtime_dependency_closure": {
+                  "status": "pass",
+                  "dependencies": internal_runtime_dependencies,
+              },
               "release_policy": {
                   "file": bundled_policy_path.name,
                   "source_path": str(source_policy_path),
