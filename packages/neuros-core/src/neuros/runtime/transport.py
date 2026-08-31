@@ -125,6 +125,10 @@ class _MailboxReader:
             ) from exc
         if offset < 0 or nbytes < 0 or any(dim < 0 for dim in shape):
             raise NeuralTransportProtocolError("negative shared-memory array geometry")
+        if offset % _ALIGNMENT != 0:
+            raise NeuralTransportProtocolError(
+                f"shared-memory ndarray offset must be {_ALIGNMENT}-byte aligned"
+            )
         if dtype.kind not in _SUPPORTED_ARRAY_KINDS:
             raise NeuralTransportProtocolError(
                 f"unsupported shared-memory dtype {dtype}"
