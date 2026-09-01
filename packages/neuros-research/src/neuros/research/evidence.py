@@ -11,6 +11,8 @@ from ._canonical import canonical_sha256, freeze_json, require_nonempty, thaw_js
 
 EvidenceStatus = Literal["completed", "failed", "unavailable"]
 CheckStatus = Literal["pass", "fail", "unavailable"]
+_EVIDENCE_STATUSES = frozenset({"completed", "failed", "unavailable"})
+_CHECK_STATUSES = frozenset({"pass", "fail", "unavailable"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +57,10 @@ class AdversarialCheck:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "check_id", require_nonempty(self.check_id, name="check_id"))
+        normalized_status = require_nonempty(str(self.status), name="check status")
+        if normalized_status not in _CHECK_STATUSES:
+            raise ValueError(f"unsupported check status: {normalized_status!r}")
+        object.__setattr__(self, "status", normalized_status)
         object.__setattr__(self, "detail", str(self.detail).strip())
         object.__setattr__(self, "metadata", freeze_json(self.metadata, path="check.metadata"))
 
@@ -91,6 +97,11 @@ class ExperimentEvidence:
             if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
                 raise ValueError(f"{name} must be a full SHA-256")
             object.__setattr__(self, name, value)
+
+        normalized_status = require_nonempty(str(self.status), name="evidence status")
+        if normalized_status not in _EVIDENCE_STATUSES:
+            raise ValueError(f"unsupported evidence status: {normalized_status!r}")
+        object.__setattr__(self, "status", normalized_status)
 
         metric_keys = [metric.key for metric in self.metrics]
         if len(set(metric_keys)) != len(metric_keys):
