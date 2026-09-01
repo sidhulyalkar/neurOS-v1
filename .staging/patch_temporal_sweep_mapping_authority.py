@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Applicator revision 2: rerun after fixing the negative-seed adversary harness.
 SOURCE = Path("packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py")
 TEST = Path("packages/neuros-mechint/tests/test_mechint_temporal_sweep.py")
 
