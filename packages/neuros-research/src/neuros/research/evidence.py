@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from typing import Any, Literal
 
 from ._canonical import canonical_sha256, freeze_json, require_nonempty, thaw_json
 
@@ -105,7 +106,11 @@ class ExperimentEvidence:
         if self.status != "completed" and not (self.failure_reason or "").strip():
             raise ValueError("failed/unavailable evidence must explain failure_reason")
         if self.failure_reason is not None:
-            object.__setattr__(self, "failure_reason", require_nonempty(self.failure_reason, name="failure_reason"))
+            object.__setattr__(
+                self,
+                "failure_reason",
+                require_nonempty(self.failure_reason, name="failure_reason"),
+            )
 
         normalized_artifacts: dict[str, str] = {}
         for name, digest in self.artifact_fingerprints.items():
