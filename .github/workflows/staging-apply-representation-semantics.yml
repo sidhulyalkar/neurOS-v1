@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python .staging/fix_representation_semantics_test_harness.py
           python .staging/patch_representation_semantics_contracts.py
           python .staging/patch_representation_semantics_cases.py
           python .staging/patch_representation_semantics_sweep.py
