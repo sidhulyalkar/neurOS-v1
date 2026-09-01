@@ -16,6 +16,7 @@ from .contracts import (
 from .external import PrecomputedTemporalSSLRepresentation
 from .metrics import (
     aggregate_geometry_metrics,
+    aggregate_reference_metrics,
     local_neighborhood_preservation,
     pairwise_distance_rank_preservation,
     temporal_continuity_ratio,
@@ -49,6 +50,7 @@ __all__ = [
     "UPSTREAM_LICENSE_NOTICE",
     "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
+    "aggregate_reference_metrics",
     "local_neighborhood_preservation",
     "pairwise_distance_rank_preservation",
     "temporal_continuity_ratio",
