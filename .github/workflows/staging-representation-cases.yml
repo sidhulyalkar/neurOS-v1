@@ -1,9 +1,9 @@
-name: Staging Representation Case Authority
+name: Staging Representation Evidence Semantics v2
 
 on:
   push:
     branches:
-      - staging/representation-cases-sweep-v1
+      - staging/representation-evidence-semantics-v2
     paths:
       - ".github/workflows/staging-representation-cases.yml"
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
@@ -16,13 +16,19 @@ permissions:
   contents: read
 
 jobs:
-  case-authority:
+  evidence-semantics:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Require exact clean staging source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
@@ -30,7 +36,7 @@ jobs:
           cache-dependency-path: |
             packages/neuros-core/pyproject.toml
             packages/neuros-mechint/pyproject.toml
-      - name: Install case-authority surface
+      - name: Install evidence-authority surface
         shell: bash
         run: |
           set -euo pipefail
@@ -38,16 +44,21 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
           python -m pip install -e packages/neuros-mechint
           python -m pip check
-      - name: Compile case and sweep authority
+      - name: Compile representation authority
         shell: bash
         run: |
           set -euo pipefail
           python -m py_compile \
+            packages/neuros-mechint/src/neuros_mechint/representations/contracts.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/pca.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/autoencoder.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/tphate.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/external.py \
             packages/neuros-mechint/src/neuros_mechint/representations/cases.py \
             packages/neuros-mechint/src/neuros_mechint/representations/synthetic.py \
             packages/neuros-mechint/src/neuros_mechint/representations/sweep.py \
             packages/neuros-mechint/examples/12_representation_noise_sweep.py
-      - name: Exercise representation authority adversary
+      - name: Exercise representation authority adversaries
         shell: bash
         run: |
           set -euo pipefail
@@ -56,11 +67,11 @@ jobs:
             packages/neuros-mechint/tests/test_mechint_representation_authority.py \
             packages/neuros-mechint/tests/test_mechint_representation_cases.py \
             packages/neuros-mechint/tests/test_mechint_representation_sweep.py
-      - name: Exercise controlled multi-seed sweep
+      - name: Exercise v2 controlled multi-seed evidence
         shell: bash
         run: |
           set -euo pipefail
-          OUT="${RUNNER_TEMP}/representation-sweep.json"
+          OUT="${RUNNER_TEMP}/representation-sweep-v2.json"
           python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
             --noise-levels 0.0,0.35,0.75 \
             --seeds 0,1,2 \
@@ -74,7 +85,7 @@ jobs:
           import sys
 
           payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          assert payload["schema"] == "neuros.representation.controlled_noise_sweep.v1"
+          assert payload["schema"] == "neuros.representation.controlled_noise_sweep.v2"
           assert payload["metadata"]["ranking_policy"] == "none"
           assert payload["noise_levels"] == [0.0, 0.35, 0.75]
           assert payload["seeds"] == [0, 1, 2]
@@ -88,7 +99,9 @@ jobs:
           tphate = [r for r in records if r["method_id"] == "tphate"]
           assert len(pca) == len(ae) == len(tphate) == 9
           assert all(r["status"] == "ok" for r in pca + ae)
+          assert all(r["evaluation_scope"] == "batch_transform" for r in pca + ae)
           assert all(r["status"] == "unavailable" for r in tphate)
+          assert all(r["evaluation_scope"] == "sequence_local" for r in tphate)
           assert all(r["metrics"] == {} for r in tphate)
           assert all(r["error_type"] == "TPHATEUnavailableError" for r in tphate)
 
@@ -101,7 +114,12 @@ jobs:
                   row = summaries[(method_id, noise)]
                   assert row["total_cases"] == 3
                   assert row["ok_cases"] == 3
-                  assert row["failure_rate"] == 0.0
+                  assert row["non_ok_rate"] == 0.0
+                  assert row["failed_rate"] == 0.0
+                  assert row["unavailable_rate"] == 0.0
+                  assert row["nonconverged_rate"] == 0.0
+                  assert "failure_rate" not in row
+                  assert row["metric_n"]["reference_pairwise_distance_rank"] == 3
                   value = row["metric_mean"]["reference_pairwise_distance_rank"]
                   assert math.isfinite(value)
                   assert math.isfinite(row["metric_sem"]["reference_pairwise_distance_rank"])
@@ -109,7 +127,11 @@ jobs:
               row = summaries[("tphate", noise)]
               assert row["total_cases"] == 3
               assert row["unavailable_cases"] == 3
-              assert row["failure_rate"] == 1.0
+              assert row["non_ok_rate"] == 1.0
+              assert row["unavailable_rate"] == 1.0
+              assert row["failed_rate"] == 0.0
+              assert row["nonconverged_rate"] == 0.0
+              assert row["metric_n"] == {}
 
           diagnostics = {
               method: {
@@ -120,5 +142,5 @@ jobs:
               }
               for method in ("pca", "autoencoder")
           }
-          print("SWEEP_DIAGNOSTICS=" + json.dumps(diagnostics, sort_keys=True))
+          print("SWEEP_V2_DIAGNOSTICS=" + json.dumps(diagnostics, sort_keys=True))
           PY
