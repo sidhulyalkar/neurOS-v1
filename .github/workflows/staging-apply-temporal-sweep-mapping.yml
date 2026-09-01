@@ -1,0 +1,88 @@
+name: Staging Apply Temporal Sweep Mapping Authority
+
+on:
+  push:
+    branches:
+      - staging/representation-temporal-ablation-v1
+    paths:
+      - ".github/workflows/staging-apply-temporal-sweep-mapping.yml"
+      - ".staging/patch_temporal_sweep_mapping_authority.py"
+  workflow_dispatch:
+
+concurrency:
+  group: staging-apply-temporal-sweep-mapping-v1
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 1
+      - name: Require exact clean applicator source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            packages/neuros-core/pyproject.toml
+            packages/neuros-mechint/pyproject.toml
+      - name: Apply exact reviewed mapping transforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .staging/patch_temporal_sweep_mapping_authority.py
+          git diff --check
+          git diff --exit-code -- .staging/patch_temporal_sweep_mapping_authority.py .github/workflows/staging-apply-temporal-sweep-mapping.yml
+      - name: Compile patched semantic surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py
+      - name: Install targeted authority surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e packages/neuros-mechint
+          python -m pip check
+      - name: Exercise patched temporal authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_temporal_ablation.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_ablation_provenance.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+      - name: Commit validated semantic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          changed="$(git status --porcelain -- \
+            packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py)"
+          test -n "${changed}"
+          git config user.name "neurOS staging authority"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py
+          test -z "$(git status --porcelain --untracked-files=no | grep -v '^M  packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py$' | grep -v '^M  packages/neuros-mechint/tests/test_mechint_temporal_sweep.py$' || true)"
+          git commit -m "staging: harden temporal sweep mapping semantics"
+          git push origin HEAD:staging/representation-temporal-ablation-v1
