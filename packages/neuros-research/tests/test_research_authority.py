@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
 from neuros.research import (
     AdversarialCheck,
     DatasetAuthority,
