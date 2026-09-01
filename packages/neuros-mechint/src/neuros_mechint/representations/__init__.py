@@ -26,6 +26,7 @@ from .pca import PCARepresentation
 from .sweep import (
     CaseMethodEvidence,
     MethodSweepSummary,
+    NoiseMethodSummary,
     RepresentationSweepResult,
     SweepCase,
     build_representation_sweep,
@@ -47,6 +48,7 @@ __all__ = [
     "MethodOutcome",
     "MethodStatus",
     "MethodSweepSummary",
+    "NoiseMethodSummary",
     "PCARepresentation",
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",

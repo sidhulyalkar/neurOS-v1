@@ -87,7 +87,7 @@ def main() -> int:
         case_results,
         metadata={
             "study": "controlled_temporal_manifold_noise_sweep",
-            "study_version": 1,
+            "study_version": 2,
             "source_revision": os.environ.get("GITHUB_SHA", "local-unspecified"),
             "components": args.components,
             "autoencoder_epochs": args.ae_epochs,
@@ -100,10 +100,19 @@ def main() -> int:
             ),
         },
     )
+
+    scientific_payload: dict[str, object] = {
+        "schema_version": 2,
+        "kind": "neuros_controlled_representation_noise_sweep_scientific",
+        **sweep.to_scientific_dict(),
+    }
+    scientific_fingerprint = _fingerprint(scientific_payload)
+
     payload: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "neuros_controlled_representation_noise_sweep",
         **sweep.to_dict(),
+        "scientific_fingerprint": scientific_fingerprint,
     }
     payload["fingerprint"] = _fingerprint(payload)
     print(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False))
