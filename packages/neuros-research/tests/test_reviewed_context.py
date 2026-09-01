@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from neuros.research._canonical import canonical_sha256
 from neuros.research.reviewed_context import load_reviewed_aggregate_context
 
