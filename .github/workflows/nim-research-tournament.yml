@@ -1,0 +1,153 @@
+name: NVIDIA NIM Research Tournament
+
+on:
+  push:
+    branches:
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/nim-research-tournament.yml"
+      - "packages/neuros-research/**"
+      - "docs/RESEARCH_TOURNAMENT.md"
+      - "docs/NVIDIA_NIM_RESEARCH.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nim-research-tournament-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nim-proposal-tournament:
+    name: Bounded NVIDIA NIM proposal tournament
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.NVIDIA_NIM_API_KEY || secrets.NVAPI_KEY }}
+      NVIDIA_NIM_ENDPOINT: https://integrate.api.nvidia.com/v1
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: packages/neuros-research/pyproject.toml
+
+      - name: Require NVIDIA API credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "::error::Expected repository secret NVIDIA_API_KEY, NVIDIA_NIM_API_KEY, or NVAPI_KEY."
+            exit 1
+          fi
+          echo "::add-mask::${NVIDIA_API_KEY}"
+
+      - name: Install research authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-research[dev]"
+          python -m pip check
+
+      - name: Qualify local authority before network dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q packages/neuros-research/src packages/neuros-research/examples
+          python -m ruff check packages/neuros-research
+          python -m pytest -q packages/neuros-research/tests
+          packet_hash="$(python packages/neuros-research/examples/01_algonauts_packet.py)"
+          test "${#packet_hash}" -eq 64
+
+      - name: Run live NVIDIA NIM tournament
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nim-research
+          python packages/neuros-research/examples/02_nim_algonauts_tournament.py \
+            --output artifacts/nim-research/tournament.json \
+            --max-tokens 1800
+          sha256sum artifacts/nim-research/tournament.json \
+            > artifacts/nim-research/SHA256SUMS
+
+      - name: Verify tournament artifact and secret non-disclosure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/nim-research/tournament.json")
+          raw = path.read_text(encoding="utf-8")
+          key = os.environ["NVIDIA_API_KEY"]
+          if key and key in raw:
+              raise SystemExit("credential material leaked into tournament artifact")
+          payload = json.loads(raw)
+          if payload.get("kind") != "neuros_nim_research_tournament":
+              raise SystemExit("unexpected tournament artifact kind")
+          if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("tournament artifact source revision mismatch")
+          if len(payload.get("proposals", [])) != 5:
+              raise SystemExit("expected exactly five validated proposals")
+          queue = payload.get("synthesis", {}).get("priority_queue", [])
+          proposal_ids = {row["candidate_id"] for row in payload["proposals"]}
+          if not queue or not set(queue).issubset(proposal_ids):
+              raise SystemExit("priority queue is not bound to validated proposal identities")
+          if payload.get("scientific_boundary", "").find("not ExperimentEvidence") < 0:
+              raise SystemExit("scientific authority boundary is missing")
+          print("NIM artifact contract verified")
+          PY
+          sha256sum -c artifacts/nim-research/SHA256SUMS
+
+      - name: Write safe run summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/nim-research/tournament.json").read_text(encoding="utf-8")
+          )
+          print("## NVIDIA NIM research tournament")
+          print()
+          print(f"- Artifact: `{payload['fingerprint']}`")
+          print(f"- Source: `{payload['source_revision']}`")
+          print("- Models:")
+          for role, model in payload["selected_models"].items():
+              print(f"  - {role}: `{model}`")
+          print("- Proposed development queue:")
+          by_id = {row["candidate_id"]: row for row in payload["proposals"]}
+          for candidate_id in payload["synthesis"]["priority_queue"]:
+              print(f"  - `{candidate_id}`: {by_id[candidate_id]['title']}")
+          print()
+          print(
+              "**Boundary:** this is proposal material only. No OOD truth was used and no "
+              "candidate was scientifically promoted."
+          )
+          PY
+
+      - name: Upload immutable proposal evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nim-research-tournament-${{ github.sha }}
+          path: artifacts/nim-research/
+          if-no-files-found: error
+          retention-days: 30
