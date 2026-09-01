@@ -1,5 +1,6 @@
 """Provider-agnostic autonomous research authority for neurOS."""
 
+from .algonauts import AlgonautsAuthoritySpec
 from .arbiter import EvidenceArbiter, MetricGate, PromotionDecision, PromotionPolicy
 from .contracts import (
     DatasetAuthority,
@@ -16,6 +17,7 @@ from .registry import ResearchRegistry
 
 __all__ = [
     "AdversarialCheck",
+    "AlgonautsAuthoritySpec",
     "DatasetAuthority",
     "EvaluationAuthority",
     "EvidenceArbiter",
