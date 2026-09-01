@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: nim-research-tournament-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   nim-proposal-tournament:
@@ -80,7 +80,7 @@ jobs:
           mkdir -p artifacts/nim-research
           python packages/neuros-research/examples/02_nim_algonauts_tournament.py \
             --output artifacts/nim-research/tournament.json \
-            --max-tokens 1800
+            --max-tokens 4000
           sha256sum artifacts/nim-research/tournament.json \
             > artifacts/nim-research/SHA256SUMS
 

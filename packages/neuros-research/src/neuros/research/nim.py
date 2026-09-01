@@ -46,11 +46,11 @@ _FORBIDDEN_TEXT = (
     "private leaderboard",
 )
 DEFAULT_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
+# The first live calibration deliberately prefers one currently documented hosted model.
+# Additional Nemotron variants can be admitted after their structured-output behavior is
+# independently qualified under the same adapter contract.
 DEFAULT_NVIDIA_MODEL_PREFERENCES = (
-    "nvidia/nemotron-3-ultra-550b-a55b",
     "nvidia/nemotron-3-super-120b-a12b",
-    "nvidia/nemotron-3.5-lightning-30b-a3b",
-    "nvidia/llama-3.3-nemotron-super-49b-v1.5",
 )
 
 
@@ -210,7 +210,14 @@ class NimCallRecord:
     response_text: str = field(repr=False)
 
     def __post_init__(self) -> None:
-        for name in ("role", "model", "endpoint", "prompt_sha256", "request_sha256", "response_sha256"):
+        for name in (
+            "role",
+            "model",
+            "endpoint",
+            "prompt_sha256",
+            "request_sha256",
+            "response_sha256",
+        ):
             object.__setattr__(self, name, require_nonempty(getattr(self, name), name=name))
         object.__setattr__(self, "response_text", str(self.response_text))
 
@@ -295,6 +302,14 @@ class NvidiaNimClient:
             raise ValueError("NIM model catalog is empty")
         return tuple(dict.fromkeys(models))
 
+    def discover_models(self) -> tuple[tuple[str, ...], str]:
+        """Use API discovery when available, otherwise retain a documented fixed fallback."""
+
+        try:
+            return self.list_models(), "api_models_endpoint"
+        except (RuntimeError, ValueError):
+            return DEFAULT_NVIDIA_MODEL_PREFERENCES, "documented_model_fallback"
+
     @staticmethod
     def select_models(
         available: tuple[str, ...],
@@ -305,21 +320,10 @@ class NvidiaNimClient:
         if count < 1:
             raise ValueError("count must be positive")
         available_set = set(available)
-        selected = [model for model in preferences if model in available_set]
-        if len(selected) < count:
-            fallback = sorted(
-                model
-                for model in available
-                if model.startswith("nvidia/")
-                and "nemotron" in model.lower()
-                and model not in selected
-            )
-            selected.extend(fallback)
+        selected = tuple(model for model in preferences if model in available_set)
         if not selected:
-            raise ValueError(
-                "none of the approved NVIDIA Nemotron models are available to this API key"
-            )
-        return tuple(selected[:count])
+            raise ValueError("the qualified NVIDIA Nemotron model is not available")
+        return selected[:count]
 
     def chat_json(
         self,
@@ -328,15 +332,15 @@ class NvidiaNimClient:
         model: str,
         system_prompt: str,
         user_prompt: str,
-        max_tokens: int = 1800,
+        max_tokens: int = 4000,
         temperature: float = 0.2,
     ) -> tuple[dict[str, Any], NimCallRecord]:
         role = require_nonempty(role, name="role")
         model = require_nonempty(model, name="model")
         system_prompt = require_nonempty(system_prompt, name="system_prompt")
         user_prompt = require_nonempty(user_prompt, name="user_prompt")
-        if max_tokens < 128 or max_tokens > 8192:
-            raise ValueError("max_tokens must be in [128, 8192]")
+        if max_tokens < 128 or max_tokens > 16384:
+            raise ValueError("max_tokens must be in [128, 16384]")
         if temperature < 0.0 or temperature > 1.0:
             raise ValueError("temperature must be in [0, 1]")
 
@@ -349,6 +353,10 @@ class NvidiaNimClient:
             "temperature": float(temperature),
             "max_tokens": int(max_tokens),
             "stream": False,
+            # Nemotron 3 Super defaults to reasoning mode. For this machine-validated
+            # proposal channel we explicitly request final-answer generation so the
+            # token budget is spent on the JSON contract rather than an opaque trace.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         response = self._request("chat/completions", payload=request_payload)
         choices = response.get("choices")
@@ -385,7 +393,9 @@ def parse_proposals(
     if not isinstance(rows, list):
         raise ValueError("proposal response must contain a candidates list")
     if len(rows) < min_candidates or len(rows) > max_candidates:
-        raise ValueError(f"proposal response must contain {min_candidates}..{max_candidates} candidates")
+        raise ValueError(
+            f"proposal response must contain {min_candidates}..{max_candidates} candidates"
+        )
     proposals = tuple(
         ResearchProposal.from_dict(
             row,

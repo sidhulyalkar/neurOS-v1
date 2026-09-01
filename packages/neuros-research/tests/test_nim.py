@@ -98,16 +98,15 @@ def test_parse_proposals_requires_unique_ids() -> None:
         )
 
 
-def test_model_selection_prefers_approved_nvidia_reasoners() -> None:
-    available = (
-        "other/model",
-        DEFAULT_NVIDIA_MODEL_PREFERENCES[2],
-        DEFAULT_NVIDIA_MODEL_PREFERENCES[0],
-    )
-    assert NvidiaNimClient.select_models(available, count=2) == (
-        DEFAULT_NVIDIA_MODEL_PREFERENCES[0],
-        DEFAULT_NVIDIA_MODEL_PREFERENCES[2],
-    )
+def test_model_selection_uses_only_qualified_nvidia_reasoner() -> None:
+    qualified = DEFAULT_NVIDIA_MODEL_PREFERENCES[0]
+    available = ("other/model", qualified, "nvidia/some-unqualified-nemotron")
+    assert NvidiaNimClient.select_models(available, count=3) == (qualified,)
+
+
+def test_model_selection_fails_closed_without_qualified_model() -> None:
+    with pytest.raises(ValueError, match="qualified NVIDIA Nemotron"):
+        NvidiaNimClient.select_models(("other/model",), count=1)
 
 
 def test_public_context_is_detached_and_stable() -> None:
@@ -118,3 +117,31 @@ def test_public_context_is_detached_and_stable() -> None:
     assert frozen["context"]["metrics"] == ["validation_pearson"]
     assert frozen["context_sha256"] == fingerprint
     json.dumps(frozen)
+
+
+def test_chat_json_disables_reasoning_for_machine_validated_output() -> None:
+    captured: dict[str, object] = {}
+
+    class StubNimClient(NvidiaNimClient):
+        def _request(self, path: str, *, payload=None):  # type: ignore[no-untyped-def]
+            captured["path"] = path
+            captured["payload"] = payload
+            return {
+                "choices": [
+                    {"message": {"content": '{"ok": true}'}}
+                ]
+            }
+
+    client = StubNimClient("secret-for-test-only")
+    parsed, record = client.chat_json(
+        role="test",
+        model=DEFAULT_NVIDIA_MODEL_PREFERENCES[0],
+        system_prompt="Return JSON only.",
+        user_prompt="Return ok.",
+    )
+    assert parsed == {"ok": True}
+    assert captured["path"] == "chat/completions"
+    request = captured["payload"]
+    assert isinstance(request, dict)
+    assert request["chat_template_kwargs"] == {"enable_thinking": False}
+    assert record.model == DEFAULT_NVIDIA_MODEL_PREFERENCES[0]
