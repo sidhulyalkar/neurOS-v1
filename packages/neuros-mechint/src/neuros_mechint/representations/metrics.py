@@ -10,10 +10,14 @@ def _paired_arrays(
     source: np.ndarray,
     embedding: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    source = np.asarray(source, dtype=np.float64)
-    embedding = np.asarray(embedding, dtype=np.float64)
-    if source.ndim != 2 or embedding.ndim != 2:
+    source_raw = np.asarray(source)
+    embedding_raw = np.asarray(embedding)
+    if source_raw.ndim != 2 or embedding_raw.ndim != 2:
         raise ValueError("source and embedding must both be 2-D")
+    if source_raw.dtype.kind not in "iuf" or embedding_raw.dtype.kind not in "iuf":
+        raise TypeError("metric inputs must contain real numeric values")
+    source = np.asarray(source_raw, dtype=np.float64)
+    embedding = np.asarray(embedding_raw, dtype=np.float64)
     if source.shape[0] != embedding.shape[0]:
         raise ValueError("source and embedding must have matching timepoints")
     if source.shape[0] < 3:
@@ -30,7 +34,6 @@ def pairwise_distance_rank_preservation(
     max_points: int = 512,
 ) -> float | None:
     """Spearman correlation between source and latent pairwise distances."""
-
     source, embedding = _paired_arrays(source, embedding)
     if isinstance(max_points, bool) or not isinstance(max_points, (int, np.integer)):
         raise TypeError("max_points must be an integer")
@@ -43,9 +46,7 @@ def pairwise_distance_rank_preservation(
         embedding = embedding[indices]
     source_dist = pdist(source)
     embedding_dist = pdist(embedding)
-    if np.allclose(source_dist, source_dist[0]) or np.allclose(
-        embedding_dist, embedding_dist[0]
-    ):
+    if np.allclose(source_dist, source_dist[0]) or np.allclose(embedding_dist, embedding_dist[0]):
         return None
     statistic = spearmanr(source_dist, embedding_dist).statistic
     if statistic is None or not np.isfinite(statistic):
@@ -60,7 +61,6 @@ def local_neighborhood_preservation(
     k: int = 5,
 ) -> float:
     """Mean fraction of source-space kNNs retained in latent space."""
-
     source, embedding = _paired_arrays(source, embedding)
     if isinstance(k, bool) or not isinstance(k, (int, np.integer)):
         raise TypeError("k must be an integer")
@@ -82,16 +82,13 @@ def local_neighborhood_preservation(
 
 
 def temporal_continuity_ratio(embedding: np.ndarray) -> float | None:
-    """Adjacent-step distance divided by nonlocal temporal distance.
-
-    Lower values indicate adjacent latent states are closer than states separated
-    by at least two steps. This is descriptive, not a universal optimization
-    target: over-smoothing can score well while erasing meaningful transitions.
-    """
-
-    embedding = np.asarray(embedding, dtype=np.float64)
-    if embedding.ndim != 2 or embedding.shape[0] < 3:
+    """Adjacent-step distance divided by nonlocal temporal distance."""
+    raw = np.asarray(embedding)
+    if raw.ndim != 2 or raw.shape[0] < 3:
         raise ValueError("embedding must be 2-D with at least three timepoints")
+    if raw.dtype.kind not in "iuf":
+        raise TypeError("embedding must contain real numeric values")
+    embedding = np.asarray(raw, dtype=np.float64)
     if not np.all(np.isfinite(embedding)):
         raise ValueError("embedding must contain only finite values")
     adjacent = np.linalg.norm(np.diff(embedding, axis=0), axis=1)
@@ -113,7 +110,6 @@ def aggregate_geometry_metrics(
     k: int = 5,
 ) -> dict[str, float | None]:
     """Aggregate trajectory-local metrics without pooling coordinate axes."""
-
     if len(sources) != len(embeddings) or not sources:
         raise ValueError("sources and embeddings must be aligned and nonempty")
     neighborhood: list[float] = []
@@ -141,15 +137,12 @@ def aggregate_reference_metrics(
     k: int = 5,
 ) -> dict[str, float | None]:
     """Compare embeddings to known clean/reference trajectory geometry."""
-
     if len(references) != len(embeddings) or not references:
         raise ValueError("references and embeddings must be aligned and nonempty")
     neighborhood: list[float] = []
     rank: list[float] = []
     for reference, embedding in zip(references, embeddings, strict=True):
-        neighborhood.append(
-            local_neighborhood_preservation(reference, embedding, k=k)
-        )
+        neighborhood.append(local_neighborhood_preservation(reference, embedding, k=k))
         rank_value = pairwise_distance_rank_preservation(reference, embedding)
         if rank_value is not None:
             rank.append(rank_value)
