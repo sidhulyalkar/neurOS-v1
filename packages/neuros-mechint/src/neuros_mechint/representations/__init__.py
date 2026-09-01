@@ -31,14 +31,16 @@ from .sweep import (
     build_representation_sweep,
 )
 from .tphate import (
+    UPSTREAM_LICENSE_NOTICE,
+    UPSTREAM_REPOSITORY,
     TPHATEEmbeddingError,
     TPHATERepresentation,
     TPHATEUnavailableError,
-    UPSTREAM_LICENSE_NOTICE,
-    UPSTREAM_REPOSITORY,
 )
 
 __all__ = [
+    "UPSTREAM_LICENSE_NOTICE",
+    "UPSTREAM_REPOSITORY",
     "AutoencoderRepresentation",
     "CaseMethodEvidence",
     "FitRegime",
@@ -59,8 +61,6 @@ __all__ = [
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
-    "UPSTREAM_LICENSE_NOTICE",
-    "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
     "build_controlled_temporal_manifold",

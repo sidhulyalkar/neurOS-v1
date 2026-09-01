@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - ".github/workflows/representation-noise-sweep.yml"
+      - "packages/neuros-mechint/pyproject.toml"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/benchmark.py"
       - "packages/neuros-mechint/src/neuros_mechint/representations/controlled.py"
       - "packages/neuros-mechint/src/neuros_mechint/representations/sweep.py"
       - "packages/neuros-mechint/src/neuros_mechint/representations/__init__.py"
@@ -50,6 +52,9 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e "packages/neuros-core[test]"
+          # The sweep runs on a CPU GitHub runner. Preinstalling the CPU wheel prevents
+          # the generic torch dependency from pulling an unused multi-gigabyte CUDA stack.
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e "packages/neuros-mechint[dev]"
           python -m pip check
 

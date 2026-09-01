@@ -116,7 +116,9 @@ class RepresentationBenchmark:
                         error_message=str(exc),
                     )
                 )
-            except Exception as exc:
+            # A representation plugin is an experiment subject. Any plugin-local failure must
+            # become explicit FAILED evidence rather than aborting the remaining comparison.
+            except Exception as exc:  # noqa: BLE001
                 outcomes.append(
                     MethodOutcome(
                         method_id=method.method_id,
