@@ -11,6 +11,10 @@ on:
       - "packages/neuros-mechint/tests/test_mechint_temporal_sweep.py"
   workflow_dispatch:
 
+concurrency:
+  group: staging-representation-temporal-ablation-v1
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
