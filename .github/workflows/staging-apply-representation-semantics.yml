@@ -1,0 +1,122 @@
+name: Staging Apply Representation Evidence Semantics
+
+on:
+  push:
+    branches:
+      - staging/representation-evidence-semantics-v2
+    paths:
+      - ".github/workflows/staging-apply-representation-semantics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: staging/representation-evidence-semantics-v2
+          persist-credentials: true
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            packages/neuros-core/pyproject.toml
+            packages/neuros-mechint/pyproject.toml
+      - name: Apply exact reviewed transforms
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .staging/patch_representation_semantics_contracts.py
+          python .staging/patch_representation_semantics_cases.py
+          python .staging/patch_representation_semantics_sweep.py
+          python .staging/patch_representation_semantics_tests.py
+          git diff --check
+      - name: Compile semantic surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            packages/neuros-mechint/src/neuros_mechint/representations/contracts.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/pca.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/autoencoder.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/tphate.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/external.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/cases.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/sweep.py \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+      - name: Install targeted authority surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install -e packages/neuros-mechint
+          python -m pip check
+      - name: Run representation adversaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_representation_authority.py \
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+      - name: Validate v2 evidence export
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/representation-sweep-v2.json"
+          python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            --noise-levels 0.0,0.35 \
+            --seeds 0,1 \
+            --components 3 \
+            --ae-epochs 2 \
+            --model-seed 17 > "${OUT}"
+          python - "${OUT}" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["schema"] == "neuros.representation.controlled_noise_sweep.v2"
+          assert len(payload["records"]) == 12
+          assert len(payload["summaries"]) == 6
+          summaries = {(row["method_id"], row["noise_std"]): row for row in payload["summaries"]}
+          for method in ("pca", "autoencoder"):
+              for noise in (0.0, 0.35):
+                  row = summaries[(method, noise)]
+                  assert row["evaluation_scope"] == "batch_transform"
+                  assert row["non_ok_rate"] == 0.0
+                  assert row["failed_rate"] == 0.0
+                  assert row["metric_n"]["reference_pairwise_distance_rank"] == 2
+                  assert "failure_rate" not in row
+          for noise in (0.0, 0.35):
+              row = summaries[("tphate", noise)]
+              assert row["evaluation_scope"] == "sequence_local"
+              assert row["unavailable_rate"] == 1.0
+              assert row["failed_rate"] == 0.0
+              assert row["nonconverged_rate"] == 0.0
+              assert row["metric_n"] == {}
+          PY
+      - name: Commit validated semantic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "neurOS staging authority"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            packages/neuros-mechint/src/neuros_mechint/representations \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+          git commit -m "staging: harden representation evidence semantics"
+          git push origin HEAD:staging/representation-evidence-semantics-v2
