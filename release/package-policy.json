@@ -70,6 +70,13 @@
       "publish_candidate": false
     },
     {
+      "path": "packages/neuros-research",
+      "distribution": "neuros-research",
+      "release_tier": "research-extension",
+      "scientific_maturity": "research",
+      "publish_candidate": false
+    },
+    {
       "path": "packages/orion",
       "distribution": "neuros-orion",
       "release_tier": "research-extension",
