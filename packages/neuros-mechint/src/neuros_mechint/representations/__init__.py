@@ -22,6 +22,10 @@ from .contracts import (
     RepresentationUnavailableError,
     SequenceBatch,
 )
+from .corruptions import (
+    TemporalCorruption,
+    make_controlled_corruption_manifold,
+)
 from .external import PrecomputedTemporalSSLRepresentation
 from .metrics import (
     aggregate_geometry_metrics,
@@ -42,6 +46,7 @@ from .synthetic import (
     latent_trajectory,
     make_controlled_temporal_manifold,
 )
+from .temporal_ablation import TemporalOrderInterventionRepresentation
 from .tphate import (
     TPHATEEmbeddingError,
     TPHATERepresentation,
@@ -78,12 +83,15 @@ __all__ = [
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
+    "TemporalCorruption",
+    "TemporalOrderInterventionRepresentation",
     "UPSTREAM_LICENSE_NOTICE",
     "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
     "latent_trajectory",
     "local_neighborhood_preservation",
+    "make_controlled_corruption_manifold",
     "make_controlled_temporal_manifold",
     "pairwise_distance_rank_preservation",
     "run_controlled_noise_sweep",
