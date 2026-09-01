@@ -302,3 +302,44 @@ def test_benchmark_preserves_method_failure_without_dropping_other_results() -> 
     assert outcomes["broken"].status is MethodStatus.FAILED
     assert outcomes["broken"].error_type == "RuntimeError"
     assert outcomes["broken"].error_message == "deliberate"
+
+
+def test_benchmark_can_score_known_reference_geometry() -> None:
+    train, evaluation = _batches()
+    reference = SequenceBatch(
+        sequences=tuple(
+            np.column_stack(
+                [
+                    np.linspace(0.0, 1.0, sequence.shape[0]),
+                    np.sin(np.linspace(0.0, np.pi, sequence.shape[0])),
+                ]
+            )
+            for sequence in evaluation.sequences
+        ),
+        sequence_ids=evaluation.sequence_ids,
+    )
+
+    result = RepresentationBenchmark(
+        [PCARepresentation(2)],
+        neighborhood_k=3,
+    ).run(train, evaluation, reference=reference)
+
+    outcome = result.by_method()["pca"]
+    assert outcome.status is MethodStatus.OK
+    assert "reference_local_knn_preservation" in outcome.metrics
+    assert "reference_pairwise_distance_rank" in outcome.metrics
+    assert result.metadata["reference_geometry"] == "provided"
+
+
+def test_reference_geometry_must_preserve_evaluation_identity() -> None:
+    train, evaluation = _batches()
+    reference = SequenceBatch(
+        sequences=(np.ones((9, 2)), np.ones((8, 2))),
+        sequence_ids=("eval-a", "wrong-id"),
+    )
+    with pytest.raises(ValueError, match="reference sequence identity"):
+        RepresentationBenchmark([PCARepresentation(2)]).run(
+            train,
+            evaluation,
+            reference=reference,
+        )
