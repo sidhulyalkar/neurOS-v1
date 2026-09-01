@@ -81,10 +81,10 @@ def test_corruption_metadata_parameters_fail_closed_even_when_not_active(
     kwargs,
     error,
 ):
+    call_kwargs = {"seed": 1, **kwargs}
     with pytest.raises(error):
         make_controlled_corruption_manifold(
             corruption="iid_gaussian",
             corruption_scale=0.0,
-            seed=1,
-            **kwargs,
+            **call_kwargs,
         )
