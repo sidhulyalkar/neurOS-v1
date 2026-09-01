@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from ._canonical import canonical_sha256, require_nonempty
+from ._canonical import canonical_sha256, require_nonempty, require_sha256
 from .contracts import ExperimentPacket
 from .evidence import ExperimentEvidence
 
 Comparator = Literal["ge", "gt", "le", "lt"]
 DecisionState = Literal["promoted", "rejected", "non_evaluable"]
+_COMPARATORS = frozenset({"ge", "gt", "le", "lt"})
+_DECISION_STATES = frozenset({"promoted", "rejected", "non_evaluable"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +29,17 @@ class MetricGate:
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", require_nonempty(self.name, name="gate.name"))
         object.__setattr__(self, "domain", require_nonempty(self.domain, name="gate.domain"))
+        comparator = require_nonempty(str(self.comparator), name="gate.comparator")
+        if comparator not in _COMPARATORS:
+            raise ValueError(f"unsupported gate comparator: {comparator!r}")
+        object.__setattr__(self, "comparator", comparator)
+        for field_name in ("threshold", "min_delta_from_baseline"):
+            value = getattr(self, field_name)
+            if value is not None:
+                normalized = float(value)
+                if not math.isfinite(normalized):
+                    raise ValueError(f"gate {field_name} must be finite")
+                object.__setattr__(self, field_name, normalized)
         if self.threshold is None and self.min_delta_from_baseline is None:
             raise ValueError("a MetricGate requires threshold and/or min_delta_from_baseline")
 
@@ -63,6 +77,8 @@ class PromotionPolicy:
         if len(set(checks)) != len(checks):
             raise ValueError("required_checks must be unique")
         object.__setattr__(self, "required_checks", checks)
+        if not isinstance(self.require_all_checks_pass, bool):
+            raise ValueError("require_all_checks_pass must be boolean")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +101,23 @@ class PromotionDecision:
     policy_fingerprint: str
     state: DecisionState
     reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "experiment_id",
+            require_nonempty(self.experiment_id, name="decision experiment_id"),
+        )
+        for name in ("packet_fingerprint", "evidence_fingerprint", "policy_fingerprint"):
+            object.__setattr__(self, name, require_sha256(getattr(self, name), name=name))
+        state = require_nonempty(str(self.state), name="decision state")
+        if state not in _DECISION_STATES:
+            raise ValueError(f"unsupported decision state: {state!r}")
+        object.__setattr__(self, "state", state)
+        reasons = tuple(require_nonempty(reason, name="decision reason") for reason in self.reasons)
+        if not reasons:
+            raise ValueError("promotion decision must preserve at least one reason")
+        object.__setattr__(self, "reasons", reasons)
 
     def to_dict(self, *, include_fingerprint: bool = True) -> dict[str, Any]:
         payload = {
