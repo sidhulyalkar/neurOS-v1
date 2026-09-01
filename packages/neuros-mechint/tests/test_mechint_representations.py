@@ -168,6 +168,68 @@ def test_tphate_fits_each_evaluation_sequence_independently(monkeypatch: pytest.
     assert embedding.metadata["sequence_boundary_policy"] == "fresh_estimator_per_sequence"
 
 
+def test_tphate_records_requested_and_effective_n_pca(monkeypatch: pytest.MonkeyPatch) -> None:
+    train, evaluation = _batches()
+    instances: list[object] = []
+
+    class FakeTPHATE:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            instances.append(self)
+
+        def fit_transform(self, x):
+            x = np.asarray(x)
+            return x[:, : self.kwargs["n_components"]]
+
+    monkeypatch.setattr(
+        tphate_module,
+        "import_module",
+        lambda _: SimpleNamespace(TPHATE=FakeTPHATE, __version__="test"),
+    )
+    embedding = TPHATERepresentation(n_components=2, n_pca=2).embed(train, evaluation)
+
+    assert [instance.kwargs["n_pca"] for instance in instances] == [2, 2]
+    assert embedding.metadata["requested_n_pca"] == 2
+    assert dict(embedding.metadata["effective_n_pca_by_sequence"]) == {
+        "eval-a": 2,
+        "eval-b": 2,
+    }
+
+
+def test_tphate_records_when_n_pca_is_disabled_per_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train, evaluation = _batches()
+    instances: list[object] = []
+
+    class FakeTPHATE:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            instances.append(self)
+
+        def fit_transform(self, x):
+            x = np.asarray(x)
+            return x[:, : self.kwargs["n_components"]]
+
+    monkeypatch.setattr(
+        tphate_module,
+        "import_module",
+        lambda _: SimpleNamespace(TPHATE=FakeTPHATE, __version__="test"),
+    )
+    embedding = TPHATERepresentation(n_components=2, n_pca=4).embed(train, evaluation)
+
+    assert [instance.kwargs["n_pca"] for instance in instances] == [None, None]
+    assert embedding.metadata["requested_n_pca"] == 4
+    assert dict(embedding.metadata["effective_n_pca_by_sequence"]) == {
+        "eval-a": None,
+        "eval-b": None,
+    }
+    assert (
+        embedding.metadata["n_pca_policy"]
+        == "disable_when_not_strictly_below_sequence_shape"
+    )
+
+
 def test_tphate_missing_dependency_fails_with_license_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
