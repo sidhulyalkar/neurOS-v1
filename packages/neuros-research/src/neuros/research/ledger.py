@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping
+from typing import Any, Literal
 
 from ._canonical import canonical_json, canonical_sha256, freeze_json, require_nonempty, thaw_json
 
@@ -36,7 +37,7 @@ class LedgerEvent:
         experiment_id: str,
         payload: Mapping[str, Any],
         previous_hash: str,
-    ) -> "LedgerEvent":
+    ) -> LedgerEvent:
         if index < 0:
             raise ValueError("ledger index must be non-negative")
         if event_type not in _ALLOWED_EVENT_TYPES:
@@ -80,9 +81,7 @@ class LedgerEvent:
                 f"ledger index mismatch: expected {expected_index}, observed {self.index}"
             )
         if self.previous_hash != expected_previous_hash:
-            raise ValueError(
-                f"ledger previous_hash mismatch at index {self.index}"
-            )
+            raise ValueError(f"ledger previous_hash mismatch at index {self.index}")
         expected_hash = canonical_sha256(self.unsigned_dict())
         if self.event_hash != expected_hash:
             raise ValueError(f"ledger event hash mismatch at index {self.index}")
@@ -131,7 +130,7 @@ class EvidenceLedger:
         )
 
     @classmethod
-    def from_jsonl(cls, raw: str) -> "EvidenceLedger":
+    def from_jsonl(cls, raw: str) -> EvidenceLedger:
         events: list[LedgerEvent] = []
         for line_number, line in enumerate(raw.splitlines(), start=1):
             if not line.strip():
