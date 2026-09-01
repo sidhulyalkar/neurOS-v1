@@ -9,6 +9,7 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representation_cases.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_sweep.py"
+      - "packages/neuros-mechint/examples/12_representation_noise_sweep.py"
   workflow_dispatch:
 
 permissions:
@@ -44,7 +45,8 @@ jobs:
           python -m py_compile \
             packages/neuros-mechint/src/neuros_mechint/representations/cases.py \
             packages/neuros-mechint/src/neuros_mechint/representations/synthetic.py \
-            packages/neuros-mechint/src/neuros_mechint/representations/sweep.py
+            packages/neuros-mechint/src/neuros_mechint/representations/sweep.py \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py
       - name: Exercise representation authority adversary
         shell: bash
         run: |
@@ -54,3 +56,69 @@ jobs:
             packages/neuros-mechint/tests/test_mechint_representation_authority.py \
             packages/neuros-mechint/tests/test_mechint_representation_cases.py \
             packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+      - name: Exercise controlled multi-seed sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/representation-sweep.json"
+          python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            --noise-levels 0.0,0.35,0.75 \
+            --seeds 0,1,2 \
+            --components 3 \
+            --ae-epochs 3 \
+            --model-seed 17 > "${OUT}"
+          python - "${OUT}" <<'PY'
+          import json
+          import math
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["schema"] == "neuros.representation.controlled_noise_sweep.v1"
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["noise_levels"] == [0.0, 0.35, 0.75]
+          assert payload["seeds"] == [0, 1, 2]
+          assert payload["method_ids"] == ["pca", "autoencoder", "tphate"]
+          assert len(payload["records"]) == 27
+          assert len(payload["summaries"]) == 9
+
+          records = payload["records"]
+          pca = [r for r in records if r["method_id"] == "pca"]
+          ae = [r for r in records if r["method_id"] == "autoencoder"]
+          tphate = [r for r in records if r["method_id"] == "tphate"]
+          assert len(pca) == len(ae) == len(tphate) == 9
+          assert all(r["status"] == "ok" for r in pca + ae)
+          assert all(r["status"] == "unavailable" for r in tphate)
+          assert all(r["metrics"] == {} for r in tphate)
+          assert all(r["error_type"] == "TPHATEUnavailableError" for r in tphate)
+
+          summaries = {
+              (row["method_id"], row["noise_std"]): row
+              for row in payload["summaries"]
+          }
+          for method_id in ("pca", "autoencoder"):
+              for noise in (0.0, 0.35, 0.75):
+                  row = summaries[(method_id, noise)]
+                  assert row["total_cases"] == 3
+                  assert row["ok_cases"] == 3
+                  assert row["failure_rate"] == 0.0
+                  value = row["metric_mean"]["reference_pairwise_distance_rank"]
+                  assert math.isfinite(value)
+                  assert math.isfinite(row["metric_sem"]["reference_pairwise_distance_rank"])
+          for noise in (0.0, 0.35, 0.75):
+              row = summaries[("tphate", noise)]
+              assert row["total_cases"] == 3
+              assert row["unavailable_cases"] == 3
+              assert row["failure_rate"] == 1.0
+
+          diagnostics = {
+              method: {
+                  str(noise): summaries[(method, noise)]["metric_mean"].get(
+                      "reference_pairwise_distance_rank"
+                  )
+                  for noise in (0.0, 0.35, 0.75)
+              }
+              for method in ("pca", "autoencoder")
+          }
+          print("SWEEP_DIAGNOSTICS=" + json.dumps(diagnostics, sort_keys=True))
+          PY
