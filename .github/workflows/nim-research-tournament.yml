@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/research-tournament-authority-v1
+      - feat/nim-live-calibration
     paths:
       - ".github/workflows/nim-research-tournament.yml"
       - "packages/neuros-research/**"
