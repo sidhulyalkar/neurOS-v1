@@ -46,13 +46,21 @@ def _public_context() -> dict[str, Any]:
             "which frozen representation families later generalize best, without using OOD "
             "truth as model-selection feedback."
         ),
-        "current_candidate_families": [
+        "research_targets": [
             "actions/state controls",
             "V-JEPA frozen features",
             "V-JEPA 2.1 denser temporal features",
             "train-only PCA and segment-aware diffusion neural geometry",
             "ridge/readout variants",
             "representation fusion and specialist selection",
+        ],
+        "proposal_family_enum": [
+            "representation",
+            "temporal_alignment",
+            "neural_geometry",
+            "readout",
+            "fusion",
+            "generalization",
         ],
         "frozen_rules": [
             "training and validation may be used for candidate development",
@@ -125,9 +133,27 @@ def _generator_prompt(context: dict[str, Any]) -> str:
         "support uses </<= and rejection uses >/>=. Use derived temporal_shift_drop and "
         "complementarity_score instead of ambiguous raw null/correlation wording. Do not use "
         "G2/G3/G4 outcomes or unseen-level truth as a development metric. Do not change any "
-        "dataset/evaluation/split authority.\n\n"
+        "dataset/evaluation/split authority. The family field MUST be exactly one value from "
+        "proposal_family_enum, never a research target label.\n\n"
         f"PUBLIC_CONTEXT={canonical_json(context)}\n\n"
         f"OUTPUT_SCHEMA_EXAMPLE={canonical_json(schema)}"
+    )
+
+
+def _repair_prompt(
+    context: dict[str, Any],
+    previous_payload: dict[str, Any],
+    validation_error: str,
+) -> str:
+    return (
+        "Your previous candidate JSON failed neurOS deterministic validation. Correct the JSON "
+        "without weakening any rule. Preserve exactly five candidate IDs and preserve the scientific "
+        "intent where possible. The family field MUST be one of proposal_family_enum exactly. "
+        "All metrics and directional predicates must obey metric_registry. Do not explain the repair; "
+        "return only the corrected JSON object.\n\n"
+        f"VALIDATION_ERROR={validation_error}\n\n"
+        f"PUBLIC_CONTEXT={canonical_json(context)}\n\n"
+        f"PREVIOUS_PAYLOAD={canonical_json(previous_payload)}"
     )
 
 
@@ -316,13 +342,34 @@ def main() -> None:
         temperature=0.25,
     )
     calls.append(generator_call)
-    proposals = parse_semantic_proposals(
-        generator_payload,
-        allowed_payload_classes=dispatch.allowed_payload_classes,
-        allowed_development_metrics=_ALLOWED_DEVELOPMENT_METRICS,
-        min_candidates=5,
-        max_candidates=5,
-    )
+
+    proposals = None
+    validation_error = ""
+    for repair_index in range(3):
+        try:
+            proposals = parse_semantic_proposals(
+                generator_payload,
+                allowed_payload_classes=dispatch.allowed_payload_classes,
+                allowed_development_metrics=_ALLOWED_DEVELOPMENT_METRICS,
+                min_candidates=5,
+                max_candidates=5,
+            )
+            break
+        except (KeyError, TypeError, ValueError) as exc:
+            validation_error = f"{type(exc).__name__}: {exc}"
+            if repair_index == 2:
+                raise
+            generator_payload, repair_call = client.chat_json(
+                role=f"generator_repair_{repair_index + 1}",
+                model=role_models["generator"],
+                system_prompt=_SYSTEM_PROMPT,
+                user_prompt=_repair_prompt(context, generator_payload, validation_error),
+                max_tokens=args.max_tokens,
+                temperature=0.0,
+            )
+            calls.append(repair_call)
+    if proposals is None:
+        raise RuntimeError(f"semantic proposal validation failed: {validation_error}")
     proposal_rows = [proposal.to_dict() for proposal in proposals]
     candidate_ids = {proposal.candidate_id for proposal in proposals}
 
@@ -374,6 +421,9 @@ def main() -> None:
         "public_context": context,
         "public_context_sha256": context_bundle["context_sha256"],
         "dispatch_policy": dispatch.to_dict(),
+        "proposal_validation_repairs": sum(
+            1 for call in calls if call.role.startswith("generator_repair_")
+        ),
         "proposals": [
             {**proposal.to_dict(), "fingerprint": proposal.fingerprint} for proposal in proposals
         ],
