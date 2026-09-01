@@ -7,6 +7,7 @@ on:
       - "docs/RESEARCH_TOURNAMENT.md"
       - "packages/neuros-research/**"
       - "pyproject.toml"
+      - "release/package-policy.json"
   push:
     branches:
       - main
@@ -15,6 +16,7 @@ on:
       - "docs/RESEARCH_TOURNAMENT.md"
       - "packages/neuros-research/**"
       - "pyproject.toml"
+      - "release/package-policy.json"
   workflow_dispatch:
 
 permissions:
@@ -48,10 +50,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q packages/neuros-research/src
+          python -m compileall -q \
+            packages/neuros-research/src \
+            packages/neuros-research/examples
           python -m ruff check packages/neuros-research
       - name: Test authority contracts
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q packages/neuros-research/tests
+      - name: Exercise Algonauts packet contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          packet_hash="$(python packages/neuros-research/examples/01_algonauts_packet.py)"
+          test "${#packet_hash}" -eq 64
+          case "${packet_hash}" in
+            (*[!0-9a-f]*) exit 1 ;;
+          esac
+          echo "ALGONAUTS_PACKET_SHA256=${packet_hash}"
