@@ -63,8 +63,10 @@ class PrecomputedTemporalSSLRepresentation:
                 raise ValueError(
                     f"external embedding {sequence_id!r} must be 2-D [time, latent]"
                 )
-            if array.dtype.kind not in "iufc" or array.dtype.kind == "b":
-                raise TypeError("external embeddings must be numeric and non-boolean")
+            if array.dtype.kind not in "iuf":
+                raise TypeError(
+                    "external embeddings must contain real numeric, non-boolean values"
+                )
             if not np.all(np.isfinite(array)):
                 raise ValueError("external embeddings must contain only finite values")
             array.setflags(write=False)
