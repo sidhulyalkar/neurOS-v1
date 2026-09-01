@@ -13,6 +13,7 @@ from .contracts import (
     RepresentationUnavailableError,
     SequenceBatch,
 )
+from .controlled import build_controlled_temporal_manifold, latent_trajectory, observations
 from .external import PrecomputedTemporalSSLRepresentation
 from .metrics import (
     aggregate_geometry_metrics,
@@ -22,6 +23,13 @@ from .metrics import (
     temporal_continuity_ratio,
 )
 from .pca import PCARepresentation
+from .sweep import (
+    CaseMethodEvidence,
+    MethodSweepSummary,
+    RepresentationSweepResult,
+    SweepCase,
+    build_representation_sweep,
+)
 from .tphate import (
     TPHATEEmbeddingError,
     TPHATERepresentation,
@@ -32,9 +40,11 @@ from .tphate import (
 
 __all__ = [
     "AutoencoderRepresentation",
+    "CaseMethodEvidence",
     "FitRegime",
     "MethodOutcome",
     "MethodStatus",
+    "MethodSweepSummary",
     "PCARepresentation",
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",
@@ -42,8 +52,10 @@ __all__ = [
     "RepresentationEmbedding",
     "RepresentationError",
     "RepresentationMethod",
+    "RepresentationSweepResult",
     "RepresentationUnavailableError",
     "SequenceBatch",
+    "SweepCase",
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
@@ -51,7 +63,11 @@ __all__ = [
     "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
+    "build_controlled_temporal_manifold",
+    "build_representation_sweep",
+    "latent_trajectory",
     "local_neighborhood_preservation",
+    "observations",
     "pairwise_distance_rank_preservation",
     "temporal_continuity_ratio",
 ]

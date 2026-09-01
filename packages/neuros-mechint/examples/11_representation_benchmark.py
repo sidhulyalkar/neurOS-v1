@@ -24,63 +24,8 @@ from neuros_mechint.representations import (
     RepresentationBenchmark,
     SequenceBatch,
     TPHATERepresentation,
+    build_controlled_temporal_manifold,
 )
-
-
-def _latent_trajectory(n: int, phase: float) -> np.ndarray:
-    t = np.linspace(0.0, 4.0 * np.pi, n, endpoint=False) + phase
-    return np.column_stack(
-        [
-            np.cos(t),
-            np.sin(t),
-            0.35 * np.sin(2.0 * t),
-        ]
-    )
-
-
-def _observations(
-    latent: np.ndarray,
-    *,
-    rng: np.random.Generator,
-    mixing: np.ndarray,
-    noise: float,
-) -> np.ndarray:
-    nonlinear = np.column_stack(
-        [
-            latent,
-            latent[:, 0] * latent[:, 1],
-            latent[:, 0] ** 2 - latent[:, 1] ** 2,
-            np.sin(1.5 * latent[:, 2]),
-        ]
-    )
-    return nonlinear @ mixing + rng.normal(scale=noise, size=(latent.shape[0], mixing.shape[1]))
-
-
-def _build_data(noise: float, seed: int) -> tuple[SequenceBatch, SequenceBatch, SequenceBatch]:
-    rng = np.random.default_rng(seed)
-    mixing = rng.normal(size=(6, 24))
-    train_latent = _latent_trajectory(160, phase=0.0)
-    eval_latent = _latent_trajectory(140, phase=0.37)
-    train = SequenceBatch(
-        sequences=(
-            _observations(train_latent, rng=rng, mixing=mixing, noise=noise),
-        ),
-        sequence_ids=("train",),
-        metadata={"generator": "controlled_temporal_manifold", "noise_std": noise},
-    )
-    evaluation = SequenceBatch(
-        sequences=(
-            _observations(eval_latent, rng=rng, mixing=mixing, noise=noise),
-        ),
-        sequence_ids=("eval",),
-        metadata={"generator": "controlled_temporal_manifold", "noise_std": noise},
-    )
-    reference = SequenceBatch(
-        sequences=(eval_latent,),
-        sequence_ids=("eval",),
-        metadata={"authority": "known_clean_latent_geometry"},
-    )
-    return train, evaluation, reference
 
 
 def _ssl_method(args: argparse.Namespace, evaluation: SequenceBatch):
@@ -160,7 +105,7 @@ def main() -> int:
     if not np.isfinite(args.noise) or args.noise < 0:
         raise ValueError("--noise must be finite and nonnegative")
 
-    train, evaluation, reference = _build_data(args.noise, args.seed)
+    train, evaluation, reference = build_controlled_temporal_manifold(args.noise, args.seed)
     methods = [
         PCARepresentation(args.components),
         AutoencoderRepresentation(

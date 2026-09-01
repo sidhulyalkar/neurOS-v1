@@ -93,6 +93,8 @@ jobs:
           import os
           from pathlib import Path
 
+          from neuros.research._canonical import canonical_sha256
+
           path = Path("artifacts/nim-research/tournament.json")
           raw = path.read_text(encoding="utf-8")
           key = os.environ["NVIDIA_API_KEY"]
@@ -101,17 +103,47 @@ jobs:
           payload = json.loads(raw)
           if payload.get("kind") != "neuros_nim_research_tournament":
               raise SystemExit("unexpected tournament artifact kind")
+          if payload.get("schema_version") != 2 or payload.get("semantic_contract_version") != 1:
+              raise SystemExit("unexpected tournament semantic schema")
           if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
               raise SystemExit("tournament artifact source revision mismatch")
-          if len(payload.get("proposals", [])) != 5:
+          proposals = payload.get("proposals", [])
+          if len(proposals) != 5:
               raise SystemExit("expected exactly five validated proposals")
-          queue = payload.get("synthesis", {}).get("priority_queue", [])
-          proposal_ids = {row["candidate_id"] for row in payload["proposals"]}
-          if not queue or not set(queue).issubset(proposal_ids):
-              raise SystemExit("priority queue is not bound to validated proposal identities")
+          proposal_ids = {row["candidate_id"] for row in proposals}
+          reviews = payload.get("critic", {}).get("reviews", [])
+          if {row.get("candidate_id") for row in reviews} != proposal_ids:
+              raise SystemExit("critic review identities do not match proposals")
+          advanced_ids = {
+              row["candidate_id"] for row in reviews if row.get("verdict") == "advance"
+          }
+          synthesis = payload.get("synthesis", {})
+          queue = synthesis.get("priority_queue", [])
+          rounds = synthesis.get("rounds", [])
+          if not set(queue).issubset(advanced_ids):
+              raise SystemExit("priority queue contains a non-advanced candidate")
+          if advanced_ids and not queue:
+              raise SystemExit("advanced candidates exist but synthesis queue is empty")
+          if not advanced_ids and (queue or rounds):
+              raise SystemExit("empty-advance tournament must not manufacture an execution queue")
           if payload.get("scientific_boundary", "").find("not ExperimentEvidence") < 0:
               raise SystemExit("scientific authority boundary is missing")
-          print("NIM artifact contract verified")
+          repairs = payload.get("validation_repairs")
+          if not isinstance(repairs, dict) or set(repairs) != {
+              "generator", "critic", "synthesizer"
+          }:
+              raise SystemExit("validation repair accounting is missing")
+          if any(not isinstance(value, int) or value < 0 or value > 2 for value in repairs.values()):
+              raise SystemExit("validation repair accounting is invalid")
+          fingerprint = payload.get("fingerprint")
+          unsigned = dict(payload)
+          unsigned.pop("fingerprint", None)
+          if fingerprint != canonical_sha256(unsigned):
+              raise SystemExit("tournament fingerprint mismatch")
+          print(
+              "NIM artifact contract verified: "
+              f"validated={len(proposals)} advanced={len(advanced_ids)} queued={len(queue)}"
+          )
           PY
           sha256sum -c artifacts/nim-research/SHA256SUMS
 
@@ -130,13 +162,18 @@ jobs:
           print()
           print(f"- Artifact: `{payload['fingerprint']}`")
           print(f"- Source: `{payload['source_revision']}`")
+          print(f"- Validation repairs: `{payload['validation_repairs']}`")
           print("- Models:")
           for role, model in payload["selected_models"].items():
               print(f"  - {role}: `{model}`")
-          print("- Proposed development queue:")
-          by_id = {row["candidate_id"]: row for row in payload["proposals"]}
-          for candidate_id in payload["synthesis"]["priority_queue"]:
-              print(f"  - `{candidate_id}`: {by_id[candidate_id]['title']}")
+          queue = payload["synthesis"]["priority_queue"]
+          if queue:
+              print("- Proposed development queue:")
+              by_id = {row["candidate_id"]: row for row in payload["proposals"]}
+              for candidate_id in queue:
+                  print(f"  - `{candidate_id}`: {by_id[candidate_id]['title']}")
+          else:
+              print("- Proposed development queue: none; no candidate passed adversarial review")
           print()
           print(
               "**Boundary:** this is proposal material only. No OOD truth was used and no "
