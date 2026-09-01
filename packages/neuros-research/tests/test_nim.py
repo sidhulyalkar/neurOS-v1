@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 import neuros.research.nim as nim
+import pytest
 
 
 ALLOWED_PAYLOADS = ("source_code", "schemas", "aggregate_metrics", "public_metadata")
