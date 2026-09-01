@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import importlib
 import json
 
-import neuros.research.nim as nim
 import pytest
 
+nim = importlib.import_module("neuros.research.nim")
 
 ALLOWED_PAYLOADS = ("source_code", "schemas", "aggregate_metrics", "public_metadata")
 ALLOWED_METRICS = (
