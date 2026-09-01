@@ -14,6 +14,7 @@ members = [
     "packages/neuros-mechint",
     "packages/neuros-neurofm",
     "packages/neuros-sourceweigher",
+    "packages/neuros-research",
     "packages/orion",
 ]
 
