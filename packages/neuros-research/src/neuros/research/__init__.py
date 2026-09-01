@@ -14,14 +14,27 @@ from .evidence import AdversarialCheck, ExperimentEvidence, MetricObservation
 from .insight import InsightCard
 from .ledger import EvidenceLedger, LedgerEvent
 from .registry import ResearchRegistry
+from .semantics import (
+    ALGORITHMIC_METRIC_REGISTRY,
+    DecisionCriterion,
+    ExecutionBinding,
+    MetricSpec,
+    SemanticResearchProposal,
+    materialize_g1_packet,
+    metric_registry_payload,
+    parse_semantic_proposals,
+)
 
 __all__ = [
+    "ALGORITHMIC_METRIC_REGISTRY",
     "AdversarialCheck",
     "AlgonautsAuthoritySpec",
     "DatasetAuthority",
+    "DecisionCriterion",
     "EvaluationAuthority",
     "EvidenceArbiter",
     "EvidenceLedger",
+    "ExecutionBinding",
     "ExperimentEvidence",
     "ExperimentPacket",
     "ExternalDispatchPolicy",
@@ -30,8 +43,13 @@ __all__ = [
     "LedgerEvent",
     "MetricGate",
     "MetricObservation",
+    "MetricSpec",
     "PromotionDecision",
     "PromotionPolicy",
     "ResearchAgent",
     "ResearchRegistry",
+    "SemanticResearchProposal",
+    "materialize_g1_packet",
+    "metric_registry_payload",
+    "parse_semantic_proposals",
 ]
