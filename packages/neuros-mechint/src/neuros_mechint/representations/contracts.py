@@ -16,6 +16,13 @@ class FitRegime(str, Enum):
     EXTERNAL_PRETRAINED = "external_pretrained"
 
 
+class EvaluationScope(str, Enum):
+    """How one method consumes a declared evaluation batch."""
+
+    BATCH_TRANSFORM = "batch_transform"
+    SEQUENCE_LOCAL = "sequence_local"
+
+
 class MethodStatus(str, Enum):
     OK = "ok"
     FAILED = "failed"
@@ -28,6 +35,19 @@ class RepresentationError(RuntimeError):
 
 class RepresentationUnavailableError(RepresentationError):
     """Optional external representation capability is unavailable."""
+
+
+def _strict_metric_value(value: Any, *, name: str) -> float:
+    """Accept only explicit finite real scientific metric scalars."""
+
+    if isinstance(value, bool) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise TypeError(f"{name} must be a finite real number")
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        raise ValueError(f"{name} must be a finite real number")
+    return numeric
 
 
 def _freeze_value(value: Any) -> Any:
@@ -202,10 +222,10 @@ class MethodOutcome:
                 if value is None:
                     metric_values[key] = None
                 else:
-                    numeric = float(value)
-                    if not np.isfinite(numeric):
-                        raise ValueError("metric values must be finite or None")
-                    metric_values[key] = numeric
+                    metric_values[key] = _strict_metric_value(
+                        value,
+                        name=f"metric {key!r}",
+                    )
         object.__setattr__(self, "fit_regime", regime)
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
@@ -241,6 +261,7 @@ class RepresentationBenchmarkResult:
 class RepresentationMethod(Protocol):
     method_id: str
     fit_regime: FitRegime
+    evaluation_scope: EvaluationScope
 
     def embed(self, train: SequenceBatch, evaluation: SequenceBatch) -> RepresentationEmbedding:
         ...

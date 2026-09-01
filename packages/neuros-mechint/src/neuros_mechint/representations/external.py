@@ -7,7 +7,13 @@ from typing import Any
 
 import numpy as np
 
-from .contracts import FitRegime, RepresentationEmbedding, SequenceBatch, _freeze_metadata
+from .contracts import (
+    EvaluationScope,
+    FitRegime,
+    RepresentationEmbedding,
+    SequenceBatch,
+    _freeze_metadata,
+)
 
 _ALLOWED_LINEAGE_STATUS = {
     "disjoint_verified",
@@ -28,6 +34,7 @@ class PrecomputedTemporalSSLRepresentation:
     """
 
     fit_regime = FitRegime.EXTERNAL_PRETRAINED
+    evaluation_scope = EvaluationScope.BATCH_TRANSFORM
 
     def __init__(
         self,

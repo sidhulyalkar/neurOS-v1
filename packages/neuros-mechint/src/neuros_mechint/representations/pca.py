@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .contracts import FitRegime, RepresentationEmbedding, SequenceBatch
+from .contracts import EvaluationScope, FitRegime, RepresentationEmbedding, SequenceBatch
 
 
 def _positive_int(value: int, *, name: str) -> int:
@@ -19,6 +19,7 @@ class PCARepresentation:
     """SVD PCA fit only from declared training observations."""
 
     fit_regime = FitRegime.TRAIN_ONLY_INDUCTIVE
+    evaluation_scope = EvaluationScope.BATCH_TRANSFORM
 
     def __init__(self, n_components: int = 2, *, method_id: str = "pca") -> None:
         self.n_components = _positive_int(n_components, name="n_components")
