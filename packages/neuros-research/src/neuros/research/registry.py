@@ -22,7 +22,9 @@ class ResearchRegistry:
 
     @property
     def ledger(self) -> EvidenceLedger:
-        return self._ledger
+        """Return a verified detached snapshot; semantic ledger writes remain registry-owned."""
+
+        return EvidenceLedger(self._ledger.events)
 
     @property
     def experiment_ids(self) -> tuple[str, ...]:
