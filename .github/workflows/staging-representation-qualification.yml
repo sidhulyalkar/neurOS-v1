@@ -9,6 +9,7 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
+      - "packages/neuros-mechint/examples/11_representation_benchmark.py"
       - "packages/neuros-mechint/pyproject.toml"
   workflow_dispatch:
 
@@ -43,6 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m compileall -q packages/neuros-mechint/src/neuros_mechint/representations
+          python -m py_compile packages/neuros-mechint/examples/11_representation_benchmark.py
       - name: Exercise representation authority
         shell: bash
         run: |
@@ -50,3 +52,47 @@ jobs:
           python -m pytest -q \
             packages/neuros-mechint/tests/test_mechint_representations.py \
             packages/neuros-mechint/tests/test_mechint_representation_authority.py
+      - name: Exercise controlled reference-manifold benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/representation-benchmark.json"
+          python packages/neuros-mechint/examples/11_representation_benchmark.py \
+            --noise 0.35 \
+            --seed 7 \
+            --components 3 \
+            --ae-epochs 4 > "${OUT}"
+          python - "${OUT}" <<'PY'
+          import json
+          import math
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["benchmark_metadata"]["ranking_policy"] == "none"
+          assert payload["benchmark_metadata"]["claim_scope"] == "representation_geometry"
+          assert payload["benchmark_metadata"]["reference_geometry"] == "provided"
+          assert "winner" not in payload
+          methods = payload["methods"]
+          assert set(methods) == {"pca", "autoencoder", "tphate"}
+          for method_id in ("pca", "autoencoder"):
+              outcome = methods[method_id]
+              assert outcome["status"] == "ok", (method_id, outcome)
+              metrics = outcome["metrics"]
+              required = {
+                  "local_knn_preservation",
+                  "pairwise_distance_rank",
+                  "temporal_continuity_ratio",
+                  "reference_local_knn_preservation",
+                  "reference_pairwise_distance_rank",
+              }
+              assert required <= set(metrics), (method_id, metrics)
+              for key in required:
+                  value = metrics[key]
+                  assert value is None or math.isfinite(value), (method_id, key, value)
+          assert methods["pca"]["fit_regime"] == "train_only_inductive"
+          assert methods["autoencoder"]["fit_regime"] == "train_only_inductive"
+          assert methods["tphate"]["fit_regime"] == "transductive_target_observed"
+          assert methods["tphate"]["status"] == "unavailable"
+          assert methods["tphate"]["error_type"] == "TPHATEUnavailableError"
+          PY
