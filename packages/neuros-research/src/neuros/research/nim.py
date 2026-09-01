@@ -145,7 +145,7 @@ class ResearchProposal:
         *,
         allowed_payload_classes: tuple[str, ...],
         allowed_development_metrics: tuple[str, ...],
-    ) -> "ResearchProposal":
+    ) -> ResearchProposal:
         proposal = cls(
             candidate_id=str(payload["candidate_id"]),
             title=str(payload["title"]),
@@ -353,9 +353,6 @@ class NvidiaNimClient:
             "temperature": float(temperature),
             "max_tokens": int(max_tokens),
             "stream": False,
-            # Nemotron 3 Super defaults to reasoning mode. For this machine-validated
-            # proposal channel we explicitly request final-answer generation so the
-            # token budget is spent on the JSON contract rather than an opaque trace.
             "chat_template_kwargs": {"enable_thinking": False},
         }
         response = self._request("chat/completions", payload=request_payload)
