@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   nim-proposal-tournament:
-    name: Bounded NVIDIA NIM proposal tournament
+    name: Evidence-informed NVIDIA NIM proposal tournament
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -42,8 +42,6 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: packages/neuros-research/pyproject.toml
 
       - name: Require NVIDIA API credential
         shell: bash
@@ -72,13 +70,27 @@ jobs:
           python -m pytest -q packages/neuros-research/tests
           packet_hash="$(python packages/neuros-research/examples/01_algonauts_packet.py)"
           test "${#packet_hash}" -eq 64
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Run live NVIDIA NIM tournament
+          from neuros.research.reviewed_context import load_reviewed_aggregate_context
+
+          path = Path(
+              "packages/neuros-research/evidence/controlled_representation_noise_sweep_v2.json"
+          )
+          payload = load_reviewed_aggregate_context(path)
+          assert payload["review_fingerprint"] == (
+              "46169bc5770bc7c6d56867c5c6eb044b367edafaedc09e24498a4658be3dc6bc"
+          )
+          print("reviewed aggregate evidence verified before network dispatch")
+          PY
+
+      - name: Run live evidence-informed NVIDIA NIM tournament
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifacts/nim-research
-          python packages/neuros-research/examples/02_nim_algonauts_tournament.py \
+          python packages/neuros-research/examples/03_nim_evidence_tournament.py \
             --output artifacts/nim-research/tournament.json \
             --max-tokens 4000
           sha256sum artifacts/nim-research/tournament.json \
@@ -107,6 +119,25 @@ jobs:
               raise SystemExit("unexpected tournament semantic schema")
           if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
               raise SystemExit("tournament artifact source revision mismatch")
+
+          public_context = payload.get("public_context")
+          if not isinstance(public_context, dict):
+              raise SystemExit("tournament public context is missing")
+          if payload.get("public_context_sha256") != canonical_sha256(public_context):
+              raise SystemExit("public context fingerprint mismatch")
+          reviewed = public_context.get("reviewed_prior_evidence")
+          if not isinstance(reviewed, dict):
+              raise SystemExit("reviewed aggregate evidence is missing from public context")
+          if reviewed.get("review_fingerprint") != (
+              "46169bc5770bc7c6d56867c5c6eb044b367edafaedc09e24498a4658be3dc6bc"
+          ):
+              raise SystemExit("unexpected reviewed aggregate evidence identity")
+          policy = reviewed.get("model_context_policy", {})
+          if policy.get("payload_class") != "aggregate_metrics" or policy.get("context_only") is not True:
+              raise SystemExit("reviewed evidence dispatch policy mismatch")
+          if policy.get("may_not_be_used_as_scientific_promotion") is not True:
+              raise SystemExit("reviewed evidence promotion boundary is missing")
+
           proposals = payload.get("proposals", [])
           if len(proposals) != 5:
               raise SystemExit("expected exactly five validated proposals")
@@ -158,10 +189,13 @@ jobs:
           payload = json.loads(
               Path("artifacts/nim-research/tournament.json").read_text(encoding="utf-8")
           )
+          reviewed = payload["public_context"]["reviewed_prior_evidence"]
           print("## NVIDIA NIM research tournament")
           print()
           print(f"- Artifact: `{payload['fingerprint']}`")
           print(f"- Source: `{payload['source_revision']}`")
+          print(f"- Reviewed evidence: `{reviewed['review_fingerprint']}`")
+          print(f"- Prior scientific evidence: `{reviewed['scientific_fingerprint']}`")
           print(f"- Validation repairs: `{payload['validation_repairs']}`")
           print("- Models:")
           for role, model in payload["selected_models"].items():
@@ -176,8 +210,8 @@ jobs:
               print("- Proposed development queue: none; no candidate passed adversarial review")
           print()
           print(
-              "**Boundary:** this is proposal material only. No OOD truth was used and no "
-              "candidate was scientifically promoted."
+              "**Boundary:** reviewed synthetic aggregate evidence informed hypothesis generation "
+              "only. No OOD truth was used and no candidate was scientifically promoted."
           )
           PY
 
