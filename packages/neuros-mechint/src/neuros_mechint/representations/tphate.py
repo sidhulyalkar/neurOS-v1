@@ -185,6 +185,16 @@ class TPHATERepresentation:
             )
         return embedding
 
+    def embed_sequence(
+        self,
+        train: SequenceBatch,
+        evaluation: SequenceBatch,
+    ) -> RepresentationEmbedding:
+        """Embed exactly one trajectory for sequence-level failure preservation."""
+        if len(evaluation.sequences) != 1:
+            raise ValueError("embed_sequence requires exactly one evaluation sequence")
+        return self.embed(train, evaluation)
+
     def embed(
         self,
         train: SequenceBatch,

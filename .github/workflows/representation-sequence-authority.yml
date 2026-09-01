@@ -1,0 +1,95 @@
+name: Representation Sequence Authority
+
+on:
+  push:
+    paths:
+      - ".github/workflows/representation-sequence-authority.yml"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/sequence_authority.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/tphate.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/external.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/__init__.py"
+      - "packages/neuros-mechint/tests/test_mechint_sequence_authority.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: representation-sequence-authority-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sequence-authority:
+    name: Method x sequence failure-preserving authority
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install sequence authority surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e "packages/neuros-mechint[dev]"
+          python -m pip check
+
+      - name: Qualify sequence authority adversaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q packages/neuros-mechint/src/neuros_mechint/representations
+          python -m ruff check \
+            packages/neuros-mechint/src/neuros_mechint/representations/sequence_authority.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/tphate.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/external.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/__init__.py \
+            packages/neuros-mechint/tests/test_mechint_sequence_authority.py
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_sequence_authority.py
+
+      - name: Prove normal CI keeps T-PHATE external
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import importlib.util
+
+          if importlib.util.find_spec("tphate") is not None:
+              raise SystemExit("normal sequence-authority CI must not install upstream T-PHATE")
+          print("TPHATE remains an explicit user-installed external dependency")
+          PY
+
+      - name: Write authority summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Representation sequence authority"
+            echo
+            echo "- Source: ${GITHUB_SHA}"
+            echo "- Method × evaluation-sequence Cartesian completeness: qualified"
+            echo "- Native per-sequence partial-failure preservation: qualified"
+            echo "- T-PHATE successful sibling survives another sequence failure: qualified"
+            echo "- Missing precomputed SSL sibling remains a local sequence failure: qualified"
+            echo "- Batch-only failure policy: conservative all-sequence failure evidence"
+            echo "- Normal CI T-PHATE installation: prohibited"
+            echo
+            echo "**Boundary:** this qualifies evidence preservation and execution semantics. It does not establish T-PHATE efficacy, temporal-prior superiority, decoder superiority, BCI benefit, or biological truth."
+          } >> "${GITHUB_STEP_SUMMARY}"

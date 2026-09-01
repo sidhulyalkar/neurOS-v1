@@ -47,9 +47,7 @@ class PrecomputedTemporalSSLRepresentation:
         if not isinstance(method_id, str) or not method_id.strip():
             raise ValueError("method_id must be a nonblank string")
         if pretraining_lineage_status not in _ALLOWED_LINEAGE_STATUS:
-            raise ValueError(
-                "pretraining_lineage_status must be an explicit audit status"
-            )
+            raise ValueError("pretraining_lineage_status must be an explicit audit status")
         if not isinstance(embeddings, Mapping) or not embeddings:
             raise ValueError("embeddings must be a nonempty sequence-ID mapping")
 
@@ -91,6 +89,16 @@ class PrecomputedTemporalSSLRepresentation:
         self.pretraining_lineage_status = pretraining_lineage_status
         self.metadata = _freeze_metadata(metadata)
 
+    def embed_sequence(
+        self,
+        train: SequenceBatch,
+        evaluation: SequenceBatch,
+    ) -> RepresentationEmbedding:
+        """Bind exactly one external sequence so missing siblings remain local failures."""
+        if len(evaluation.sequences) != 1:
+            raise ValueError("embed_sequence requires exactly one evaluation sequence")
+        return self.embed(train, evaluation)
+
     def embed(
         self,
         train: SequenceBatch,
@@ -104,9 +112,7 @@ class PrecomputedTemporalSSLRepresentation:
             strict=True,
         ):
             if sequence_id not in self._embeddings:
-                raise KeyError(
-                    f"external representation is missing sequence {sequence_id!r}"
-                )
+                raise KeyError(f"external representation is missing sequence {sequence_id!r}")
             embedding = self._embeddings[sequence_id]
             if embedding.shape[0] != source.shape[0]:
                 raise ValueError(

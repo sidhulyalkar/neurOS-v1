@@ -23,6 +23,11 @@ from .metrics import (
     temporal_continuity_ratio,
 )
 from .pca import PCARepresentation
+from .sequence_authority import (
+    SequenceMethodOutcome,
+    SequenceRepresentationBenchmarkResult,
+    run_sequencewise_representation_benchmark,
+)
 from .sweep import (
     CaseMethodEvidence,
     MethodSweepSummary,
@@ -59,6 +64,8 @@ __all__ = [
     "RepresentationSweepResult",
     "RepresentationUnavailableError",
     "SequenceBatch",
+    "SequenceMethodOutcome",
+    "SequenceRepresentationBenchmarkResult",
     "SweepCase",
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
@@ -71,5 +78,6 @@ __all__ = [
     "local_neighborhood_preservation",
     "observations",
     "pairwise_distance_rank_preservation",
+    "run_sequencewise_representation_benchmark",
     "temporal_continuity_ratio",
 ]
