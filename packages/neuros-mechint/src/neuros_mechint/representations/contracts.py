@@ -32,7 +32,12 @@ class RepresentationUnavailableError(RepresentationError):
 
 def _freeze_value(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return MappingProxyType({str(key): _freeze_value(item) for key, item in value.items()})
+        frozen: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("metadata keys must be nonblank strings")
+            frozen[key] = _freeze_value(item)
+        return MappingProxyType(frozen)
     if isinstance(value, tuple):
         return tuple(_freeze_value(item) for item in value)
     if isinstance(value, list):
@@ -67,8 +72,8 @@ def _validated_array(value: Any, *, name: str, min_rows: int) -> np.ndarray:
         raise ValueError(f"{name} must contain at least {min_rows} timepoints")
     if array.shape[1] < 1:
         raise ValueError(f"{name} must contain at least one feature")
-    if array.dtype.kind not in "iufc" or array.dtype.kind == "b":
-        raise TypeError(f"{name} must contain numeric, non-boolean values")
+    if array.dtype.kind not in "iuf":
+        raise TypeError(f"{name} must contain real numeric, non-boolean values")
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must contain only finite values")
     array.setflags(write=False)
