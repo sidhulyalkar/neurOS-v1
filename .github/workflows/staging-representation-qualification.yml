@@ -75,17 +75,17 @@ jobs:
           assert "winner" not in payload
           methods = payload["methods"]
           assert set(methods) == {"pca", "autoencoder", "tphate"}
+          required = {
+              "local_knn_preservation",
+              "pairwise_distance_rank",
+              "temporal_continuity_ratio",
+              "reference_local_knn_preservation",
+              "reference_pairwise_distance_rank",
+          }
           for method_id in ("pca", "autoencoder"):
               outcome = methods[method_id]
               assert outcome["status"] == "ok", (method_id, outcome)
               metrics = outcome["metrics"]
-              required = {
-                  "local_knn_preservation",
-                  "pairwise_distance_rank",
-                  "temporal_continuity_ratio",
-                  "reference_local_knn_preservation",
-                  "reference_pairwise_distance_rank",
-              }
               assert required <= set(metrics), (method_id, metrics)
               for key in required:
                   value = metrics[key]
@@ -95,4 +95,12 @@ jobs:
           assert methods["tphate"]["fit_regime"] == "transductive_target_observed"
           assert methods["tphate"]["status"] == "unavailable"
           assert methods["tphate"]["error_type"] == "TPHATEUnavailableError"
+          diagnostics = {
+              method_id: {
+                  key: methods[method_id]["metrics"].get(key)
+                  for key in sorted(required)
+              }
+              for method_id in ("pca", "autoencoder")
+          }
+          print("REPRESENTATION_DIAGNOSTICS=" + json.dumps(diagnostics, sort_keys=True))
           PY
