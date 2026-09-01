@@ -13,6 +13,23 @@ from .contracts import FitRegime, RepresentationMethod, _freeze_metadata
 from .synthetic import make_controlled_temporal_manifold
 
 
+def _strict_nonnegative_real(value: float, *, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise TypeError(f"{name} must be a finite nonnegative real")
+    numeric = float(value)
+    if not np.isfinite(numeric) or numeric < 0:
+        raise ValueError(f"{name} must be a finite nonnegative real")
+    return numeric
+
+
+def _strict_int(value: int, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError(f"{name} must be an integer")
+    return int(value)
+
+
 @dataclass(frozen=True, slots=True)
 class SweepCaseRecord:
     """Compact case evidence for one method × sequence × noise × seed point."""
@@ -29,13 +46,8 @@ class SweepCaseRecord:
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        noise = float(self.noise_std)
-        if not np.isfinite(noise) or noise < 0:
-            raise ValueError("noise_std must be finite and nonnegative")
-        if isinstance(self.seed, bool) or not isinstance(
-            self.seed, (int, np.integer)
-        ):
-            raise TypeError("seed must be an integer")
+        noise = _strict_nonnegative_real(self.noise_std, name="noise_std")
+        seed = _strict_int(self.seed, name="seed")
         if not isinstance(self.method_id, str) or not self.method_id.strip():
             raise ValueError("method_id must be a nonblank string")
         if not isinstance(self.sequence_id, str) or not self.sequence_id.strip():
@@ -72,7 +84,7 @@ class SweepCaseRecord:
                 )
 
         object.__setattr__(self, "noise_std", noise)
-        object.__setattr__(self, "seed", int(self.seed))
+        object.__setattr__(self, "seed", seed)
         object.__setattr__(self, "fit_regime", regime)
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
@@ -114,9 +126,7 @@ class NoiseLevelSummary:
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        noise = float(self.noise_std)
-        if not np.isfinite(noise) or noise < 0:
-            raise ValueError("noise_std must be finite and nonnegative")
+        noise = _strict_nonnegative_real(self.noise_std, name="noise_std")
         counts = (
             self.total_cases,
             self.ok_cases,
@@ -134,6 +144,8 @@ class NoiseLevelSummary:
             raise ValueError("summary case counts are invalid")
         if sum(counts[1:]) != counts[0]:
             raise ValueError("summary status counts must equal total_cases")
+        if not isinstance(self.method_id, str) or not self.method_id.strip():
+            raise ValueError("method_id must be a nonblank string")
         object.__setattr__(self, "noise_std", noise)
         object.__setattr__(self, "fit_regime", FitRegime(self.fit_regime))
         object.__setattr__(self, "total_cases", counts[0])
@@ -141,9 +153,15 @@ class NoiseLevelSummary:
         object.__setattr__(self, "failed_cases", counts[2])
         object.__setattr__(self, "unavailable_cases", counts[3])
         object.__setattr__(self, "nonconverged_cases", counts[4])
-        object.__setattr__(self, "metric_mean", _finite_metric_mapping(self.metric_mean))
-        object.__setattr__(self, "metric_std", _finite_metric_mapping(self.metric_std))
-        object.__setattr__(self, "metric_sem", _finite_metric_mapping(self.metric_sem))
+        object.__setattr__(
+            self, "metric_mean", _finite_metric_mapping(self.metric_mean)
+        )
+        object.__setattr__(
+            self, "metric_std", _finite_metric_mapping(self.metric_std)
+        )
+        object.__setattr__(
+            self, "metric_sem", _finite_metric_mapping(self.metric_sem)
+        )
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
     @property
@@ -163,17 +181,16 @@ class ControlledNoiseSweepResult:
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
-        noise_levels = tuple(float(value) for value in self.noise_levels)
-        seeds = tuple(int(value) for value in self.seeds)
+        noise_levels = tuple(
+            _strict_nonnegative_real(value, name="noise level")
+            for value in self.noise_levels
+        )
+        seeds = tuple(_strict_int(value, name="seed") for value in self.seeds)
         method_ids = tuple(self.method_ids)
         sequence_ids = tuple(self.evaluation_sequence_ids)
         records = tuple(self.records)
-        if not noise_levels or any(
-            not np.isfinite(value) or value < 0 for value in noise_levels
-        ):
-            raise ValueError(
-                "noise_levels must be finite, nonnegative, and nonempty"
-            )
+        if not noise_levels:
+            raise ValueError("noise_levels must be nonempty")
         if len(set(noise_levels)) != len(noise_levels):
             raise ValueError("noise_levels must be unique")
         if not seeds or len(set(seeds)) != len(seeds):
@@ -183,6 +200,22 @@ class ControlledNoiseSweepResult:
         if not sequence_ids or len(set(sequence_ids)) != len(sequence_ids):
             raise ValueError(
                 "evaluation_sequence_ids must be nonempty and unique"
+            )
+        if any(
+            not isinstance(value, str) or not value.strip() for value in method_ids
+        ):
+            raise ValueError("method_ids must contain only nonblank strings")
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in sequence_ids
+        ):
+            raise ValueError(
+                "evaluation_sequence_ids must contain only nonblank strings"
+            )
+        if len(sequence_ids) != 1:
+            raise ValueError(
+                "controlled seed-level sweep authority currently requires exactly one "
+                "evaluation trajectory per seed"
             )
 
         expected = {
@@ -227,7 +260,7 @@ class ControlledNoiseSweepResult:
         method_id: str,
         noise_std: float,
     ) -> tuple[SweepCaseRecord, ...]:
-        noise_std = float(noise_std)
+        noise_std = _strict_nonnegative_real(noise_std, name="noise_std")
         if method_id not in self.method_ids:
             raise KeyError(method_id)
         if noise_std not in self.noise_levels:
@@ -297,30 +330,19 @@ class ControlledNoiseSweepResult:
 
 
 def _validated_noise_levels(values: Iterable[float]) -> tuple[float, ...]:
-    output: list[float] = []
-    for value in values:
-        if isinstance(value, bool) or not isinstance(
-            value, (int, float, np.integer, np.floating)
-        ):
-            raise TypeError("noise levels must be finite nonnegative reals")
-        numeric = float(value)
-        if not np.isfinite(numeric) or numeric < 0:
-            raise ValueError("noise levels must be finite nonnegative reals")
-        output.append(numeric)
+    output = tuple(
+        _strict_nonnegative_real(value, name="noise level") for value in values
+    )
     if not output or len(set(output)) != len(output):
         raise ValueError("noise levels must be nonempty and unique")
-    return tuple(output)
+    return output
 
 
 def _validated_seeds(values: Iterable[int]) -> tuple[int, ...]:
-    output: list[int] = []
-    for value in values:
-        if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
-            raise TypeError("seeds must be integers")
-        output.append(int(value))
+    output = tuple(_strict_int(value, name="seed") for value in values)
     if not output or len(set(output)) != len(output):
         raise ValueError("seeds must be nonempty and unique")
-    return tuple(output)
+    return output
 
 
 def run_controlled_noise_sweep(
@@ -350,8 +372,7 @@ def run_controlled_noise_sweep(
                 raise ValueError("method_factory must return at least one method")
             method_ids = tuple(method.method_id for method in methods)
             regimes = {
-                method.method_id: FitRegime(method.fit_regime)
-                for method in methods
+                method.method_id: FitRegime(method.fit_regime) for method in methods
             }
             if declared_method_ids is None:
                 declared_method_ids = method_ids
