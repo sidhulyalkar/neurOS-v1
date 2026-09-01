@@ -38,7 +38,11 @@ def make_packet(*, experiment_id: str = "exp-vjepa-001") -> ExperimentPacket:
             split_fingerprint=digest("b"),
             metric_names=("pearson", "rsa_spearman", "runtime_seconds"),
             evaluation_domains=("validation", "g2_ood", "geometry", "operational"),
-            forbidden_feedback=("hidden_test_targets", "private_leaderboard", "g2_ood_for_model_selection"),
+            forbidden_feedback=(
+                "hidden_test_targets",
+                "private_leaderboard",
+                "g2_ood_for_model_selection",
+            ),
         ),
         agent=ResearchAgent(
             agent_id="sol-representation-scout-01",
@@ -259,7 +263,7 @@ def test_registry_requires_explicit_parent_lineage() -> None:
     assert registry.experiment_ids == ("parent", "child")
 
 
-def test_registry_preserves_packet_evidence_decision_and_insight_chain() -> None:
+def test_registry_owns_adjudication_and_insight_chain() -> None:
     from neuros.research import ResearchRegistry
 
     packet = make_packet()
@@ -268,7 +272,13 @@ def test_registry_preserves_packet_evidence_decision_and_insight_chain() -> None
         policy_id="g2",
         metric_gates=(MetricGate("pearson", "g2_ood", "ge", threshold=0.1),),
     )
-    decision = EvidenceArbiter().evaluate(packet, evidence, policy)
+
+    registry = ResearchRegistry()
+    registry.register_packet(packet)
+    registry.attach_evidence(evidence)
+    decision = registry.adjudicate(packet.experiment_id, policy)
+    assert decision.state == "promoted"
+
     insight = InsightCard.from_promoted(
         insight_id="share-1",
         packet=packet,
@@ -277,13 +287,71 @@ def test_registry_preserves_packet_evidence_decision_and_insight_chain() -> None
         hypothesis="Dense temporal tokens survived the frozen G2 gate.",
         evidence_summary=("G2 gate passed.",),
     )
-
-    registry = ResearchRegistry()
-    registry.register_packet(packet)
-    registry.attach_evidence(evidence)
-    registry.attach_decision(decision)
     registry.publish_insight(insight)
 
     assert len(registry.ledger.events) == 4
     registry.ledger.verify()
     assert registry.fingerprint == registry.ledger.head_hash
+
+
+def test_registry_baseline_adjudication_uses_registered_evidence() -> None:
+    from neuros.research import ResearchRegistry
+
+    baseline_packet = make_packet(experiment_id="baseline")
+    candidate_packet = make_packet(experiment_id="candidate")
+    baseline_evidence = make_evidence(baseline_packet, pearson=0.20)
+    candidate_evidence = make_evidence(candidate_packet, pearson=0.23)
+    policy = PromotionPolicy(
+        policy_id="delta-gate",
+        metric_gates=(
+            MetricGate(
+                "pearson",
+                "g2_ood",
+                "ge",
+                threshold=0.15,
+                min_delta_from_baseline=0.02,
+            ),
+        ),
+    )
+
+    registry = ResearchRegistry()
+    registry.register_packet(baseline_packet)
+    registry.register_packet(candidate_packet)
+    registry.attach_evidence(baseline_evidence)
+    registry.attach_evidence(candidate_evidence)
+    decision = registry.adjudicate(
+        candidate_packet.experiment_id,
+        policy,
+        baseline_experiment_id=baseline_packet.experiment_id,
+    )
+    assert decision.state == "promoted"
+
+
+def test_registry_cannot_adjudicate_against_missing_baseline_evidence() -> None:
+    from neuros.research import ResearchRegistry
+
+    baseline_packet = make_packet(experiment_id="baseline")
+    candidate_packet = make_packet(experiment_id="candidate")
+    candidate_evidence = make_evidence(candidate_packet, pearson=0.23)
+    policy = PromotionPolicy(
+        policy_id="delta-gate",
+        metric_gates=(
+            MetricGate(
+                "pearson",
+                "g2_ood",
+                "ge",
+                min_delta_from_baseline=0.02,
+            ),
+        ),
+    )
+
+    registry = ResearchRegistry()
+    registry.register_packet(baseline_packet)
+    registry.register_packet(candidate_packet)
+    registry.attach_evidence(candidate_evidence)
+    with pytest.raises(ValueError, match="baseline"):
+        registry.adjudicate(
+            candidate_packet.experiment_id,
+            policy,
+            baseline_experiment_id=baseline_packet.experiment_id,
+        )
