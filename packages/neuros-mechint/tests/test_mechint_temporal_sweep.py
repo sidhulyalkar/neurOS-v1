@@ -15,6 +15,8 @@ from neuros_mechint.representations.temporal_ablation import (
 )
 from neuros_mechint.representations.temporal_sweep import (
     ControlledTemporalAblationResult,
+    TemporalAblationRecord,
+    TemporalAblationSummary,
     run_controlled_temporal_ablation,
 )
 
@@ -212,4 +214,59 @@ def test_temporal_sweep_rejects_method_authority_drift_across_points():
             corruptions=("iid_gaussian",),
             corruption_scales=(0.0, 0.5),
             seeds=(0,),
+        )
+
+
+def test_temporal_record_rejects_dict_coercible_non_mapping_metrics():
+    with pytest.raises(TypeError, match="mapping"):
+        TemporalAblationRecord(
+            corruption=TemporalCorruption.IID_GAUSSIAN,
+            corruption_scale=0.0,
+            seed=0,
+            method_id="fake",
+            sequence_id="eval",
+            fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+            evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+            status=CaseStatus.OK,
+            metrics=[("score", 1.0)],
+        )
+    with pytest.raises(TypeError, match="mapping"):
+        TemporalAblationRecord(
+            corruption=TemporalCorruption.IID_GAUSSIAN,
+            corruption_scale=0.0,
+            seed=0,
+            method_id="fake",
+            sequence_id="eval",
+            fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+            evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+            status=CaseStatus.OK,
+            metrics=[],
+        )
+
+
+def test_temporal_summary_rejects_dict_coercible_non_mapping_containers():
+    common = dict(
+        method_id="fake",
+        corruption=TemporalCorruption.IID_GAUSSIAN,
+        corruption_scale=0.0,
+        fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+        evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+        total_cases=1,
+        ok_cases=1,
+        failed_cases=0,
+        unavailable_cases=0,
+        nonconverged_cases=0,
+        metric_std={"score": None},
+        metric_sem={"score": None},
+        metric_n={"score": 1},
+    )
+    with pytest.raises(TypeError, match="mapping"):
+        TemporalAblationSummary(
+            **common,
+            metric_mean=[("score", 1.0)],
+        )
+    with pytest.raises(TypeError, match="metric_n must be a mapping"):
+        TemporalAblationSummary(
+            **{**common, "metric_n": [("score", 1)]},
+            metric_mean={"score": 1.0},
         )

@@ -42,8 +42,10 @@ def _strict_int(value: int, *, name: str) -> int:
 def _metric_mapping(
     values: Mapping[str, float | None],
 ) -> Mapping[str, float | None]:
+    if not isinstance(values, Mapping):
+        raise TypeError("scientific metrics must be a mapping")
     output: dict[str, float | None] = {}
-    for key, value in dict(values).items():
+    for key, value in values.items():
         if not isinstance(key, str) or not key.strip():
             raise ValueError("metric IDs must be nonblank strings")
         output[key] = (
@@ -83,7 +85,7 @@ class TemporalAblationRecord:
         regime = FitRegime(self.fit_regime)
         scope = EvaluationScope(self.evaluation_scope)
         status = CaseStatus(self.status)
-        metrics = _metric_mapping(self.metrics or {})
+        metrics = _metric_mapping({} if self.metrics is None else self.metrics)
         if status is CaseStatus.OK:
             if self.error_type is not None or self.error_message is not None:
                 raise ValueError("successful records cannot carry error evidence")
@@ -151,8 +153,10 @@ class TemporalAblationSummary:
         if set(std) != set(mean) or set(sem) != set(mean):
             raise ValueError("summary metric schemas must match exactly")
 
+        if not isinstance(self.metric_n, Mapping):
+            raise TypeError("metric_n must be a mapping")
         metric_n: dict[str, int] = {}
-        for key, value in dict(self.metric_n).items():
+        for key, value in self.metric_n.items():
             if key not in mean:
                 raise ValueError(
                     "metric_n keys must exactly match metric means"
