@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from neuros_mechint.representations import (
+    EvaluationScope,
     FitRegime,
     PCARepresentation,
     RepresentationEmbedding,
@@ -73,7 +74,9 @@ def test_sweep_summary_reports_seed_uncertainty_and_denominator() -> None:
     summary = result.summary("pca", 0.2)
     assert summary.total_cases == 4
     assert summary.ok_cases == 4
-    assert summary.failure_rate == 0.0
+    assert summary.non_ok_rate == 0.0
+    assert summary.failed_rate == 0.0
+    assert summary.metric_n["reference_pairwise_distance_rank"] == 4
     assert summary.metadata["declared_seed_count"] == 4
     assert summary.metric_mean["reference_pairwise_distance_rank"] is not None
     assert summary.metric_std["reference_pairwise_distance_rank"] is not None
@@ -84,6 +87,7 @@ def test_unavailable_method_stays_in_every_sweep_point() -> None:
     class UnavailableMethod:
         method_id = "unavailable"
         fit_regime = FitRegime.TRANSDUCTIVE_TARGET_OBSERVED
+        evaluation_scope = EvaluationScope.SEQUENCE_LOCAL
 
         def embed(self, train, evaluation):
             raise RepresentationUnavailableError("optional dependency absent")
@@ -105,7 +109,9 @@ def test_unavailable_method_stays_in_every_sweep_point() -> None:
         assert summary.total_cases == 2
         assert summary.ok_cases == 0
         assert summary.unavailable_cases == 2
-        assert summary.failure_rate == 1.0
+        assert summary.non_ok_rate == 1.0
+        assert summary.failed_rate == 0.0
+        assert summary.unavailable_rate == 1.0
 
 
 def test_method_factory_identity_cannot_drift_across_points() -> None:
@@ -113,6 +119,7 @@ def test_method_factory_identity_cannot_drift_across_points() -> None:
 
     class Identity:
         fit_regime = FitRegime.EXTERNAL_PRETRAINED
+        evaluation_scope = EvaluationScope.SEQUENCE_LOCAL
 
         def __init__(self, method_id):
             self.method_id = method_id
@@ -146,6 +153,7 @@ def test_sweep_result_rejects_missing_grid_record() -> None:
         method_id="pca",
         sequence_id="eval",
         fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+        evaluation_scope=EvaluationScope.BATCH_TRANSFORM,
         status=CaseStatus.OK,
         metrics={"score": 1.0},
     )
@@ -157,3 +165,90 @@ def test_sweep_result_rejects_missing_grid_record() -> None:
             evaluation_sequence_ids=("eval",),
             records=(record,),
         )
+
+
+
+def test_sweep_metric_values_reject_bool_and_text_coercion() -> None:
+    for value in (True, "0.5"):
+        with pytest.raises(TypeError, match="finite real"):
+            SweepCaseRecord(
+                noise_std=0.0,
+                seed=1,
+                method_id="pca",
+                sequence_id="eval",
+                fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+                evaluation_scope=EvaluationScope.BATCH_TRANSFORM,
+                status=CaseStatus.OK,
+                metrics={"score": value},
+            )
+
+
+def test_method_factory_evaluation_scope_cannot_drift_across_points() -> None:
+    calls = 0
+
+    class ScopedIdentity:
+        method_id = "scoped"
+        fit_regime = FitRegime.EXTERNAL_PRETRAINED
+
+        def __init__(self, scope):
+            self.evaluation_scope = scope
+
+        def embed(self, train, evaluation):
+            source = evaluation.sequences[0]
+            return RepresentationEmbedding(
+                method_id=self.method_id,
+                sequences=(source[:, :2],),
+                sequence_ids=evaluation.sequence_ids,
+                fit_regime=self.fit_regime,
+            )
+
+    def factory():
+        nonlocal calls
+        calls += 1
+        scope = (
+            EvaluationScope.SEQUENCE_LOCAL
+            if calls == 1
+            else EvaluationScope.BATCH_TRANSFORM
+        )
+        return (ScopedIdentity(scope),)
+
+    with pytest.raises(ValueError, match="evaluation scopes"):
+        run_controlled_noise_sweep(
+            factory,
+            noise_levels=(0.0, 0.1),
+            seeds=(1,),
+        )
+
+
+def test_sweep_summary_rejects_metric_schema_drift() -> None:
+    records = (
+        SweepCaseRecord(
+            noise_std=0.0,
+            seed=1,
+            method_id="x",
+            sequence_id="eval",
+            fit_regime=FitRegime.EXTERNAL_PRETRAINED,
+            evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+            status=CaseStatus.OK,
+            metrics={"a": 1.0},
+        ),
+        SweepCaseRecord(
+            noise_std=0.0,
+            seed=2,
+            method_id="x",
+            sequence_id="eval",
+            fit_regime=FitRegime.EXTERNAL_PRETRAINED,
+            evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+            status=CaseStatus.OK,
+            metrics={"b": 1.0},
+        ),
+    )
+    result = ControlledNoiseSweepResult(
+        noise_levels=(0.0,),
+        seeds=(1, 2),
+        method_ids=("x",),
+        evaluation_sequence_ids=("eval",),
+        records=records,
+    )
+    with pytest.raises(ValueError, match="identical metric schema"):
+        result.summary("x", 0.0)

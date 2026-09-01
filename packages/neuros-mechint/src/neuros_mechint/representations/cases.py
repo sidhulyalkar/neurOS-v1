@@ -10,11 +10,13 @@ from typing import Any
 import numpy as np
 
 from .contracts import (
+    EvaluationScope,
     FitRegime,
     RepresentationMethod,
     RepresentationUnavailableError,
     SequenceBatch,
     _freeze_metadata,
+    _strict_metric_value,
     _validated_array,
 )
 from .metrics import aggregate_geometry_metrics, aggregate_reference_metrics
@@ -41,6 +43,7 @@ class RepresentationCaseOutcome:
     method_id: str
     sequence_id: str
     fit_regime: FitRegime
+    evaluation_scope: EvaluationScope
     status: CaseStatus
     embedding: np.ndarray | None = None
     metrics: Mapping[str, float | None] | None = None
@@ -54,6 +57,7 @@ class RepresentationCaseOutcome:
         if not isinstance(self.sequence_id, str) or not self.sequence_id.strip():
             raise ValueError("sequence_id must be a nonblank string")
         regime = FitRegime(self.fit_regime)
+        evaluation_scope = EvaluationScope(self.evaluation_scope)
         status = CaseStatus(self.status)
 
         if status is CaseStatus.OK:
@@ -85,12 +89,13 @@ class RepresentationCaseOutcome:
                 if value is None:
                     metric_values[key] = None
                 else:
-                    numeric = float(value)
-                    if not np.isfinite(numeric):
-                        raise ValueError("metric values must be finite or None")
-                    metric_values[key] = numeric
+                    metric_values[key] = _strict_metric_value(
+                        value,
+                        name=f"metric {key!r}",
+                    )
 
         object.__setattr__(self, "fit_regime", regime)
+        object.__setattr__(self, "evaluation_scope", evaluation_scope)
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "embedding", embedding)
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
@@ -103,12 +108,14 @@ class MethodCaseSummary:
 
     method_id: str
     fit_regime: FitRegime
+    evaluation_scope: EvaluationScope
     total_cases: int
     ok_cases: int
     failed_cases: int
     unavailable_cases: int
     nonconverged_cases: int
     metrics: Mapping[str, float | None]
+    metric_n: Mapping[str, int]
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -141,23 +148,59 @@ class MethodCaseSummary:
             if value is None:
                 metric_values[key] = None
             else:
-                numeric = float(value)
-                if not np.isfinite(numeric):
-                    raise ValueError("summary metric values must be finite or None")
-                metric_values[key] = numeric
+                metric_values[key] = _strict_metric_value(
+                    value,
+                    name=f"summary metric {key!r}",
+                )
+
+        metric_n: dict[str, int] = {}
+        for key, value in dict(self.metric_n).items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("metric_n IDs must be nonblank strings")
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                raise TypeError("metric_n values must be integers")
+            numeric = int(value)
+            if numeric < 0 or numeric > counts[1]:
+                raise ValueError("metric_n values must be between zero and ok_cases")
+            metric_n[key] = numeric
+        if set(metric_n) != set(metric_values):
+            raise ValueError("metric_n keys must exactly match summary metric keys")
 
         object.__setattr__(self, "fit_regime", FitRegime(self.fit_regime))
+        object.__setattr__(
+            self,
+            "evaluation_scope",
+            EvaluationScope(self.evaluation_scope),
+        )
         object.__setattr__(self, "total_cases", counts[0])
         object.__setattr__(self, "ok_cases", counts[1])
         object.__setattr__(self, "failed_cases", counts[2])
         object.__setattr__(self, "unavailable_cases", counts[3])
         object.__setattr__(self, "nonconverged_cases", counts[4])
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
+        object.__setattr__(self, "metric_n", MappingProxyType(metric_n))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
     @property
-    def failure_rate(self) -> float:
+    def non_ok_rate(self) -> float:
         return float((self.total_cases - self.ok_cases) / self.total_cases)
+
+    @property
+    def failed_rate(self) -> float:
+        return float(self.failed_cases / self.total_cases)
+
+    @property
+    def unavailable_rate(self) -> float:
+        return float(self.unavailable_cases / self.total_cases)
+
+    @property
+    def nonconverged_rate(self) -> float:
+        return float(self.nonconverged_cases / self.total_cases)
+
+    @property
+    def failure_rate(self) -> float:
+        """Deprecated compatibility alias for the broader non-ok rate."""
+        return self.non_ok_rate
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,14 +218,20 @@ class CasePreservingRepresentationResult:
         evaluation_ids = tuple(self.evaluation_sequence_ids)
         method_ids = tuple(self.method_ids)
         cases = tuple(self.cases)
+        if not train_ids:
+            raise ValueError("train_sequence_ids cannot be empty")
         if not evaluation_ids:
             raise ValueError("evaluation_sequence_ids cannot be empty")
         if not method_ids:
             raise ValueError("method_ids cannot be empty")
+        if len(set(train_ids)) != len(train_ids):
+            raise ValueError("train sequence IDs must be unique")
         if len(set(evaluation_ids)) != len(evaluation_ids):
             raise ValueError("evaluation sequence IDs must be unique")
         if len(set(method_ids)) != len(method_ids):
             raise ValueError("method IDs must be unique")
+        if any(not isinstance(value, str) or not value.strip() for value in train_ids):
+            raise ValueError("train sequence IDs must be nonblank strings")
         if any(not isinstance(value, str) or not value.strip() for value in evaluation_ids):
             raise ValueError("evaluation sequence IDs must be nonblank strings")
         if any(not isinstance(value, str) or not value.strip() for value in method_ids):
@@ -195,6 +244,7 @@ class CasePreservingRepresentationResult:
         }
         seen: set[tuple[str, str]] = set()
         regimes: dict[str, FitRegime] = {}
+        scopes: dict[str, EvaluationScope] = {}
         for case in cases:
             key = (case.method_id, case.sequence_id)
             if key in seen:
@@ -203,6 +253,9 @@ class CasePreservingRepresentationResult:
             existing = regimes.setdefault(case.method_id, case.fit_regime)
             if existing is not case.fit_regime:
                 raise ValueError("all cases for a method must share one fit regime")
+            existing_scope = scopes.setdefault(case.method_id, case.evaluation_scope)
+            if existing_scope is not case.evaluation_scope:
+                raise ValueError("all cases for a method must share one evaluation scope")
         missing = expected - seen
         extra = seen - expected
         if missing or extra:
@@ -233,34 +286,45 @@ class CasePreservingRepresentationResult:
     def summary_for_method(self, method_id: str) -> MethodCaseSummary:
         cases = self.cases_for_method(method_id)
         regime = cases[0].fit_regime
+        evaluation_scope = cases[0].evaluation_scope
         counts = {status: 0 for status in CaseStatus}
         metric_values: dict[str, list[float]] = {}
-        metric_ids: set[str] = set()
+        metric_schema: tuple[str, ...] | None = None
         for case in cases:
             counts[case.status] += 1
             if case.status is not CaseStatus.OK:
                 continue
-            metric_ids.update(case.metrics)
+            case_schema = tuple(sorted(case.metrics))
+            if metric_schema is None:
+                metric_schema = case_schema
+            elif case_schema != metric_schema:
+                raise ValueError(
+                    "successful cases for one method must expose an identical metric schema"
+                )
             for key, value in case.metrics.items():
                 if value is not None:
-                    metric_values.setdefault(key, []).append(float(value))
+                    metric_values.setdefault(key, []).append(value)
+        metric_schema = metric_schema or ()
         aggregated = {
             key: float(np.mean(metric_values[key])) if metric_values.get(key) else None
-            for key in sorted(metric_ids)
+            for key in metric_schema
         }
+        metric_n = {key: len(metric_values.get(key, ())) for key in metric_schema}
         total = len(cases)
         ok = counts[CaseStatus.OK]
         return MethodCaseSummary(
             method_id=method_id,
             fit_regime=regime,
+            evaluation_scope=evaluation_scope,
             total_cases=total,
             ok_cases=ok,
             failed_cases=counts[CaseStatus.FAILED],
             unavailable_cases=counts[CaseStatus.UNAVAILABLE],
             nonconverged_cases=counts[CaseStatus.NONCONVERGED],
             metrics=aggregated,
+            metric_n=metric_n,
             metadata={
-                "aggregation_basis": "successful_cases_with_explicit_denominator",
+                "aggregation_basis": "successful_cases_with_per_metric_denominator",
                 "successful_metric_cases": ok,
                 "declared_total_cases": total,
             },
@@ -290,6 +354,14 @@ class CasePreservingRepresentationBenchmark:
             raise ValueError("every method must expose a nonblank method_id")
         if len(set(ids)) != len(ids):
             raise ValueError("representation method IDs must be unique")
+        for method in methods:
+            try:
+                EvaluationScope(method.evaluation_scope)
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"representation method {method.method_id!r} must declare a valid "
+                    "evaluation_scope"
+                ) from exc
         self.methods = methods
         self.neighborhood_k = _positive_int(neighborhood_k, name="neighborhood_k")
 
@@ -354,6 +426,7 @@ class CasePreservingRepresentationBenchmark:
             method_id=method.method_id,
             sequence_id=sequence_id,
             fit_regime=method.fit_regime,
+            evaluation_scope=method.evaluation_scope,
             status=status,
             error_type=type(exc).__name__,
             error_message=str(exc),
@@ -374,62 +447,40 @@ class CasePreservingRepresentationBenchmark:
                 )
             if len(embedding.sequences) != len(evaluation.sequences):
                 raise ValueError("representation output changed evaluation sequence count")
-        except RepresentationUnavailableError as exc:
-            return [
-                self._failure_case(method, sequence_id, CaseStatus.UNAVAILABLE, exc)
-                for sequence_id in evaluation.sequence_ids
-            ]
-        except RepresentationNonconvergenceError as exc:
-            return [
-                self._failure_case(method, sequence_id, CaseStatus.NONCONVERGED, exc)
-                for sequence_id in evaluation.sequence_ids
-            ]
-        except Exception as exc:
-            return [
-                self._failure_case(method, sequence_id, CaseStatus.FAILED, exc)
-                for sequence_id in evaluation.sequence_ids
-            ]
-
-        cases: list[RepresentationCaseOutcome] = []
-        for index, (sequence_id, source, latent) in enumerate(
-            zip(
-                evaluation.sequence_ids,
-                evaluation.sequences,
-                embedding.sequences,
-                strict=True,
-            )
-        ):
-            try:
+            for source, latent in zip(evaluation.sequences, embedding.sequences, strict=True):
                 if source.shape[0] != latent.shape[0]:
                     raise ValueError(
                         "representation output changed the evaluation timepoint count"
                     )
-                reference_sequence = (
-                    None if reference is None else reference.sequences[index]
+        except RepresentationUnavailableError as exc:
+            return [self._failure_case(method, sequence_id, CaseStatus.UNAVAILABLE, exc) for sequence_id in evaluation.sequence_ids]
+        except RepresentationNonconvergenceError as exc:
+            return [self._failure_case(method, sequence_id, CaseStatus.NONCONVERGED, exc) for sequence_id in evaluation.sequence_ids]
+        except Exception as exc:
+            return [self._failure_case(method, sequence_id, CaseStatus.FAILED, exc) for sequence_id in evaluation.sequence_ids]
+
+        cases: list[RepresentationCaseOutcome] = []
+        for index, (sequence_id, source, latent) in enumerate(
+            zip(evaluation.sequence_ids, evaluation.sequences, embedding.sequences, strict=True)
+        ):
+            reference_sequence = None if reference is None else reference.sequences[index]
+            metrics = self._metrics(source, latent, reference_sequence)
+            cases.append(
+                RepresentationCaseOutcome(
+                    method_id=method.method_id,
+                    sequence_id=sequence_id,
+                    fit_regime=method.fit_regime,
+                    evaluation_scope=method.evaluation_scope,
+                    status=CaseStatus.OK,
+                    embedding=latent,
+                    metrics=metrics,
+                    metadata={
+                        "metric_scope": "trajectory_local_rigid_transform_invariant",
+                        "embedding_metadata": dict(embedding.metadata),
+                        "evaluation_scope": EvaluationScope(method.evaluation_scope).value,
+                    },
                 )
-                cases.append(
-                    RepresentationCaseOutcome(
-                        method_id=method.method_id,
-                        sequence_id=sequence_id,
-                        fit_regime=method.fit_regime,
-                        status=CaseStatus.OK,
-                        embedding=latent,
-                        metrics=self._metrics(source, latent, reference_sequence),
-                        metadata={
-                            "metric_scope": (
-                                "trajectory_local_rigid_transform_invariant"
-                            ),
-                            "embedding_metadata": dict(embedding.metadata),
-                            "execution_scope": (
-                                "single_train_fit_full_evaluation_transform"
-                            ),
-                        },
-                    )
-                )
-            except Exception as exc:
-                cases.append(
-                    self._failure_case(method, sequence_id, CaseStatus.FAILED, exc)
-                )
+            )
         return cases
 
     def _sequence_local_cases(
@@ -444,10 +495,7 @@ class CasePreservingRepresentationBenchmark:
             evaluation_case = self._single_batch(evaluation, index)
             try:
                 embedding = method.embed(train, evaluation_case)
-                if (
-                    embedding.sequence_ids != (sequence_id,)
-                    or len(embedding.sequences) != 1
-                ):
+                if embedding.sequence_ids != (sequence_id,) or len(embedding.sequences) != 1:
                     raise ValueError(
                         "sequence-local representation output identity does not match case"
                     )
@@ -457,44 +505,34 @@ class CasePreservingRepresentationBenchmark:
                     raise ValueError(
                         "representation output changed the evaluation timepoint count"
                     )
-                reference_sequence = (
-                    None if reference is None else reference.sequences[index]
-                )
-                cases.append(
-                    RepresentationCaseOutcome(
-                        method_id=method.method_id,
-                        sequence_id=sequence_id,
-                        fit_regime=method.fit_regime,
-                        status=CaseStatus.OK,
-                        embedding=latent,
-                        metrics=self._metrics(source, latent, reference_sequence),
-                        metadata={
-                            "metric_scope": (
-                                "trajectory_local_rigid_transform_invariant"
-                            ),
-                            "embedding_metadata": dict(embedding.metadata),
-                            "execution_scope": (
-                                "preserved_sequence_local_fit_or_lookup"
-                            ),
-                        },
-                    )
-                )
             except RepresentationUnavailableError as exc:
-                cases.append(
-                    self._failure_case(
-                        method, sequence_id, CaseStatus.UNAVAILABLE, exc
-                    )
-                )
+                cases.append(self._failure_case(method, sequence_id, CaseStatus.UNAVAILABLE, exc))
+                continue
             except RepresentationNonconvergenceError as exc:
-                cases.append(
-                    self._failure_case(
-                        method, sequence_id, CaseStatus.NONCONVERGED, exc
-                    )
-                )
+                cases.append(self._failure_case(method, sequence_id, CaseStatus.NONCONVERGED, exc))
+                continue
             except Exception as exc:
-                cases.append(
-                    self._failure_case(method, sequence_id, CaseStatus.FAILED, exc)
+                cases.append(self._failure_case(method, sequence_id, CaseStatus.FAILED, exc))
+                continue
+
+            reference_sequence = None if reference is None else reference.sequences[index]
+            metrics = self._metrics(source, latent, reference_sequence)
+            cases.append(
+                RepresentationCaseOutcome(
+                    method_id=method.method_id,
+                    sequence_id=sequence_id,
+                    fit_regime=method.fit_regime,
+                    evaluation_scope=method.evaluation_scope,
+                    status=CaseStatus.OK,
+                    embedding=latent,
+                    metrics=metrics,
+                    metadata={
+                        "metric_scope": "trajectory_local_rigid_transform_invariant",
+                        "embedding_metadata": dict(embedding.metadata),
+                        "evaluation_scope": EvaluationScope(method.evaluation_scope).value,
+                    },
                 )
+            )
         return cases
 
     def run(
@@ -510,19 +548,13 @@ class CasePreservingRepresentationBenchmark:
 
         cases: list[RepresentationCaseOutcome] = []
         for method in self.methods:
-            regime = FitRegime(method.fit_regime)
-            if regime is FitRegime.TRAIN_ONLY_INDUCTIVE:
-                cases.extend(
-                    self._batch_inductive_cases(
-                        method, train, evaluation, reference
-                    )
-                )
-            else:
-                cases.extend(
-                    self._sequence_local_cases(
-                        method, train, evaluation, reference
-                    )
-                )
+            scope = EvaluationScope(method.evaluation_scope)
+            if scope is EvaluationScope.BATCH_TRANSFORM:
+                cases.extend(self._batch_inductive_cases(method, train, evaluation, reference))
+            elif scope is EvaluationScope.SEQUENCE_LOCAL:
+                cases.extend(self._sequence_local_cases(method, train, evaluation, reference))
+            else:  # pragma: no cover
+                raise ValueError(f"unsupported evaluation scope {scope!r}")
 
         return CasePreservingRepresentationResult(
             train_sequence_ids=train.sequence_ids,
@@ -535,6 +567,9 @@ class CasePreservingRepresentationBenchmark:
                 "claim_scope": "representation_geometry",
                 "case_authority": (
                     "complete_method_x_sequence_cartesian_product"
+                ),
+                "evaluation_scope_authority": (
+                    "explicit_method_declared_batch_or_sequence_local"
                 ),
                 "reference_geometry": (
                     "provided" if reference is not None else "none"

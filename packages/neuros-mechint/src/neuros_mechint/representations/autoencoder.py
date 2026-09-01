@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from .contracts import FitRegime, RepresentationEmbedding, SequenceBatch
+from .contracts import EvaluationScope, FitRegime, RepresentationEmbedding, SequenceBatch
 from .pca import _positive_int
 
 
@@ -32,6 +32,7 @@ class AutoencoderRepresentation:
     """Small deterministic CPU autoencoder fit only on declared train samples."""
 
     fit_regime = FitRegime.TRAIN_ONLY_INDUCTIVE
+    evaluation_scope = EvaluationScope.BATCH_TRANSFORM
 
     def __init__(
         self,

@@ -9,7 +9,13 @@ from typing import Any
 import numpy as np
 
 from .cases import CasePreservingRepresentationBenchmark, CaseStatus
-from .contracts import FitRegime, RepresentationMethod, _freeze_metadata
+from .contracts import (
+    EvaluationScope,
+    FitRegime,
+    RepresentationMethod,
+    _freeze_metadata,
+    _strict_metric_value,
+)
 from .synthetic import make_controlled_temporal_manifold
 
 
@@ -39,6 +45,7 @@ class SweepCaseRecord:
     method_id: str
     sequence_id: str
     fit_regime: FitRegime
+    evaluation_scope: EvaluationScope
     status: CaseStatus
     metrics: Mapping[str, float | None] | None = None
     error_type: str | None = None
@@ -54,6 +61,7 @@ class SweepCaseRecord:
             raise ValueError("sequence_id must be a nonblank string")
         status = CaseStatus(self.status)
         regime = FitRegime(self.fit_regime)
+        evaluation_scope = EvaluationScope(self.evaluation_scope)
 
         metric_values: dict[str, float | None] = {}
         if self.metrics is not None:
@@ -63,10 +71,10 @@ class SweepCaseRecord:
                 if value is None:
                     metric_values[key] = None
                 else:
-                    numeric = float(value)
-                    if not np.isfinite(numeric):
-                        raise ValueError("metric values must be finite or None")
-                    metric_values[key] = numeric
+                    metric_values[key] = _strict_metric_value(
+                        value,
+                        name=f"metric {key!r}",
+                    )
 
         if status is CaseStatus.OK:
             if self.error_type is not None or self.error_message is not None:
@@ -86,6 +94,7 @@ class SweepCaseRecord:
         object.__setattr__(self, "noise_std", noise)
         object.__setattr__(self, "seed", seed)
         object.__setattr__(self, "fit_regime", regime)
+        object.__setattr__(self, "evaluation_scope", evaluation_scope)
         object.__setattr__(self, "status", status)
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
@@ -101,10 +110,10 @@ def _finite_metric_mapping(
         if value is None:
             output[key] = None
         else:
-            numeric = float(value)
-            if not np.isfinite(numeric):
-                raise ValueError("metric summary values must be finite or None")
-            output[key] = numeric
+            output[key] = _strict_metric_value(
+                value,
+                name=f"metric summary {key!r}",
+            )
     return MappingProxyType(output)
 
 
@@ -114,6 +123,7 @@ class NoiseLevelSummary:
 
     method_id: str
     fit_regime: FitRegime
+    evaluation_scope: EvaluationScope
     noise_std: float
     total_cases: int
     ok_cases: int
@@ -123,6 +133,7 @@ class NoiseLevelSummary:
     metric_mean: Mapping[str, float | None]
     metric_std: Mapping[str, float | None]
     metric_sem: Mapping[str, float | None]
+    metric_n: Mapping[str, int]
     metadata: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -148,6 +159,11 @@ class NoiseLevelSummary:
             raise ValueError("method_id must be a nonblank string")
         object.__setattr__(self, "noise_std", noise)
         object.__setattr__(self, "fit_regime", FitRegime(self.fit_regime))
+        object.__setattr__(
+            self,
+            "evaluation_scope",
+            EvaluationScope(self.evaluation_scope),
+        )
         object.__setattr__(self, "total_cases", counts[0])
         object.__setattr__(self, "ok_cases", counts[1])
         object.__setattr__(self, "failed_cases", counts[2])
@@ -162,11 +178,46 @@ class NoiseLevelSummary:
         object.__setattr__(
             self, "metric_sem", _finite_metric_mapping(self.metric_sem)
         )
+        metric_n: dict[str, int] = {}
+        for key, value in dict(self.metric_n).items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("metric_n IDs must be nonblank strings")
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+                raise TypeError("metric_n values must be integers")
+            numeric = int(value)
+            if numeric < 0 or numeric > self.ok_cases:
+                raise ValueError("metric_n values must be between zero and ok_cases")
+            metric_n[key] = numeric
+        expected_metric_keys = set(self.metric_mean)
+        if set(self.metric_std) != expected_metric_keys:
+            raise ValueError("metric_std keys must exactly match metric_mean keys")
+        if set(self.metric_sem) != expected_metric_keys:
+            raise ValueError("metric_sem keys must exactly match metric_mean keys")
+        if set(metric_n) != expected_metric_keys:
+            raise ValueError("metric_n keys must exactly match metric_mean keys")
+        object.__setattr__(self, "metric_n", MappingProxyType(metric_n))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
     @property
-    def failure_rate(self) -> float:
+    def non_ok_rate(self) -> float:
         return float((self.total_cases - self.ok_cases) / self.total_cases)
+
+    @property
+    def failed_rate(self) -> float:
+        return float(self.failed_cases / self.total_cases)
+
+    @property
+    def unavailable_rate(self) -> float:
+        return float(self.unavailable_cases / self.total_cases)
+
+    @property
+    def nonconverged_rate(self) -> float:
+        return float(self.nonconverged_cases / self.total_cases)
+
+    @property
+    def failure_rate(self) -> float:
+        """Deprecated compatibility alias for the broader non-ok rate."""
+        return self.non_ok_rate
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +278,7 @@ class ControlledNoiseSweepResult:
         }
         seen: set[tuple[float, int, str, str]] = set()
         regimes: dict[str, FitRegime] = {}
+        scopes: dict[str, EvaluationScope] = {}
         for record in records:
             key = (
                 record.noise_std,
@@ -240,6 +292,9 @@ class ControlledNoiseSweepResult:
             existing = regimes.setdefault(record.method_id, record.fit_regime)
             if existing is not record.fit_regime:
                 raise ValueError("fit regime changed across sweep points")
+            existing_scope = scopes.setdefault(record.method_id, record.evaluation_scope)
+            if existing_scope is not record.evaluation_scope:
+                raise ValueError("evaluation scope changed across sweep points")
         missing = expected - seen
         extra = seen - expected
         if missing or extra:
@@ -275,21 +330,29 @@ class ControlledNoiseSweepResult:
         records = self.records_for(method_id, noise_std)
         counts = {status: 0 for status in CaseStatus}
         values: dict[str, list[float]] = {}
-        metric_ids: set[str] = set()
+        metric_schema: tuple[str, ...] | None = None
         for record in records:
             counts[record.status] += 1
             if record.status is not CaseStatus.OK:
                 continue
-            metric_ids.update(record.metrics)
+            record_schema = tuple(sorted(record.metrics))
+            if metric_schema is None:
+                metric_schema = record_schema
+            elif record_schema != metric_schema:
+                raise ValueError(
+                    "successful sweep records must expose an identical metric schema"
+                )
             for key, value in record.metrics.items():
                 if value is not None:
-                    values.setdefault(key, []).append(float(value))
+                    values.setdefault(key, []).append(value)
 
         means: dict[str, float | None] = {}
         stds: dict[str, float | None] = {}
         sems: dict[str, float | None] = {}
-        for key in sorted(metric_ids):
+        metric_n: dict[str, int] = {}
+        for key in metric_schema or ():
             samples = np.asarray(values.get(key, ()), dtype=float)
+            metric_n[key] = int(samples.size)
             if samples.size == 0:
                 means[key] = stds[key] = sems[key] = None
                 continue
@@ -305,6 +368,7 @@ class ControlledNoiseSweepResult:
         return NoiseLevelSummary(
             method_id=method_id,
             fit_regime=records[0].fit_regime,
+            evaluation_scope=records[0].evaluation_scope,
             noise_std=noise_std,
             total_cases=len(records),
             ok_cases=counts[CaseStatus.OK],
@@ -314,6 +378,7 @@ class ControlledNoiseSweepResult:
             metric_mean=means,
             metric_std=stds,
             metric_sem=sems,
+            metric_n=metric_n,
             metadata={
                 "uncertainty_unit": "independent_controlled_seed",
                 "declared_seed_count": len(self.seeds),
@@ -359,6 +424,7 @@ def run_controlled_noise_sweep(
     records: list[SweepCaseRecord] = []
     declared_method_ids: tuple[str, ...] | None = None
     declared_regimes: dict[str, FitRegime] | None = None
+    declared_scopes: dict[str, EvaluationScope] | None = None
     evaluation_ids: tuple[str, ...] | None = None
 
     for noise_std in noise_levels:
@@ -374,13 +440,22 @@ def run_controlled_noise_sweep(
             regimes = {
                 method.method_id: FitRegime(method.fit_regime) for method in methods
             }
+            scopes = {
+                method.method_id: EvaluationScope(method.evaluation_scope)
+                for method in methods
+            }
             if declared_method_ids is None:
                 declared_method_ids = method_ids
                 declared_regimes = regimes
-            elif method_ids != declared_method_ids or regimes != declared_regimes:
+                declared_scopes = scopes
+            elif (
+                method_ids != declared_method_ids
+                or regimes != declared_regimes
+                or scopes != declared_scopes
+            ):
                 raise ValueError(
-                    "method_factory must return the same ordered method IDs and fit "
-                    "regimes at every sweep point"
+                    "method_factory must return the same ordered method IDs, fit "
+                    "regimes, and evaluation scopes at every sweep point"
                 )
             if evaluation_ids is None:
                 evaluation_ids = data.evaluation.sequence_ids
@@ -403,6 +478,7 @@ def run_controlled_noise_sweep(
                         method_id=case.method_id,
                         sequence_id=case.sequence_id,
                         fit_regime=case.fit_regime,
+                        evaluation_scope=case.evaluation_scope,
                         status=case.status,
                         metrics=case.metrics,
                         error_type=case.error_type,
@@ -423,7 +499,7 @@ def run_controlled_noise_sweep(
         evaluation_sequence_ids=evaluation_ids,
         records=tuple(records),
         metadata={
-            "schema": "neuros.representation.controlled_noise_sweep.v1",
+            "schema": "neuros.representation.controlled_noise_sweep.v2",
             "ranking_policy": "none",
             "claim_scope": "representation_geometry",
             "uncertainty_unit": "independent_controlled_seed",

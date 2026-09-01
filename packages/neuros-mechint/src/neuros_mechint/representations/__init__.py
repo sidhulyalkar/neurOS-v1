@@ -11,6 +11,7 @@ from .cases import (
     RepresentationNonconvergenceError,
 )
 from .contracts import (
+    EvaluationScope,
     FitRegime,
     MethodOutcome,
     MethodStatus,
@@ -56,6 +57,7 @@ __all__ = [
     "CaseStatus",
     "ControlledNoiseSweepResult",
     "ControlledTemporalManifold",
+    "EvaluationScope",
     "FitRegime",
     "MethodCaseSummary",
     "MethodOutcome",
