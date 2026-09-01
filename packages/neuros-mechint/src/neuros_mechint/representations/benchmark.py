@@ -11,7 +11,7 @@ from .contracts import (
     RepresentationUnavailableError,
     SequenceBatch,
 )
-from .metrics import aggregate_geometry_metrics
+from .metrics import aggregate_geometry_metrics, aggregate_reference_metrics
 from .pca import _positive_int
 
 
@@ -44,9 +44,25 @@ class RepresentationBenchmark:
         self,
         train: SequenceBatch,
         evaluation: SequenceBatch,
+        *,
+        reference: SequenceBatch | None = None,
     ) -> RepresentationBenchmarkResult:
         if train.feature_count != evaluation.feature_count:
             raise ValueError("train and evaluation feature dimensions must match")
+        if reference is not None:
+            if reference.sequence_ids != evaluation.sequence_ids:
+                raise ValueError(
+                    "reference sequence identity must exactly match evaluation identity"
+                )
+            for source, reference_sequence in zip(
+                evaluation.sequences,
+                reference.sequences,
+                strict=True,
+            ):
+                if source.shape[0] != reference_sequence.shape[0]:
+                    raise ValueError(
+                        "reference and evaluation sequences must have matching timepoints"
+                    )
 
         outcomes: list[MethodOutcome] = []
         for method in self.methods:
@@ -70,6 +86,14 @@ class RepresentationBenchmark:
                     embedding.sequences,
                     k=self.neighborhood_k,
                 )
+                if reference is not None:
+                    metrics.update(
+                        aggregate_reference_metrics(
+                            reference.sequences,
+                            embedding.sequences,
+                            k=self.neighborhood_k,
+                        )
+                    )
                 outcomes.append(
                     MethodOutcome(
                         method_id=method.method_id,
@@ -111,5 +135,6 @@ class RepresentationBenchmark:
                 "neighborhood_k": self.neighborhood_k,
                 "ranking_policy": "none",
                 "claim_scope": "representation_geometry",
+                "reference_geometry": "provided" if reference is not None else "none",
             },
         )
