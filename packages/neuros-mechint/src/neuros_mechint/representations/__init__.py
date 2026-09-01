@@ -47,6 +47,12 @@ from .synthetic import (
     make_controlled_temporal_manifold,
 )
 from .temporal_ablation import TemporalOrderInterventionRepresentation
+from .temporal_sweep import (
+    ControlledTemporalAblationResult,
+    TemporalAblationRecord,
+    TemporalAblationSummary,
+    run_controlled_temporal_ablation,
+)
 from .tphate import (
     TPHATEEmbeddingError,
     TPHATERepresentation,
@@ -61,6 +67,7 @@ __all__ = [
     "CasePreservingRepresentationResult",
     "CaseStatus",
     "ControlledNoiseSweepResult",
+    "ControlledTemporalAblationResult",
     "ControlledTemporalManifold",
     "EvaluationScope",
     "FitRegime",
@@ -83,6 +90,8 @@ __all__ = [
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
+    "TemporalAblationRecord",
+    "TemporalAblationSummary",
     "TemporalCorruption",
     "TemporalOrderInterventionRepresentation",
     "UPSTREAM_LICENSE_NOTICE",
@@ -95,5 +104,6 @@ __all__ = [
     "make_controlled_temporal_manifold",
     "pairwise_distance_rank_preservation",
     "run_controlled_noise_sweep",
+    "run_controlled_temporal_ablation",
     "temporal_continuity_ratio",
 ]
