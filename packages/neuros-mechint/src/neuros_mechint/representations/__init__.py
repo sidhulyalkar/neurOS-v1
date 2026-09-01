@@ -2,6 +2,14 @@
 
 from .autoencoder import AutoencoderRepresentation
 from .benchmark import RepresentationBenchmark
+from .cases import (
+    CasePreservingRepresentationBenchmark,
+    CasePreservingRepresentationResult,
+    CaseStatus,
+    MethodCaseSummary,
+    RepresentationCaseOutcome,
+    RepresentationNonconvergenceError,
+)
 from .contracts import (
     FitRegime,
     MethodOutcome,
@@ -32,16 +40,22 @@ from .tphate import (
 
 __all__ = [
     "AutoencoderRepresentation",
+    "CasePreservingRepresentationBenchmark",
+    "CasePreservingRepresentationResult",
+    "CaseStatus",
     "FitRegime",
+    "MethodCaseSummary",
     "MethodOutcome",
     "MethodStatus",
     "PCARepresentation",
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",
     "RepresentationBenchmarkResult",
+    "RepresentationCaseOutcome",
     "RepresentationEmbedding",
     "RepresentationError",
     "RepresentationMethod",
+    "RepresentationNonconvergenceError",
     "RepresentationUnavailableError",
     "SequenceBatch",
     "TPHATEEmbeddingError",
