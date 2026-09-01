@@ -8,6 +8,7 @@ on:
       - ".github/workflows/staging-representation-temporal-ablation.yml"
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_temporal_ablation*.py"
+      - "packages/neuros-mechint/tests/test_mechint_temporal_sweep.py"
   workflow_dispatch:
 
 permissions:
@@ -58,8 +59,10 @@ jobs:
           python -m py_compile \
             packages/neuros-mechint/src/neuros_mechint/representations/temporal_ablation.py \
             packages/neuros-mechint/src/neuros_mechint/representations/corruptions.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/temporal_sweep.py \
             packages/neuros-mechint/tests/test_mechint_temporal_ablation.py \
-            packages/neuros-mechint/tests/test_mechint_temporal_ablation_provenance.py
+            packages/neuros-mechint/tests/test_mechint_temporal_ablation_provenance.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py
       - name: Exercise temporal ablation adversaries
         shell: bash
         run: |
@@ -67,5 +70,28 @@ jobs:
           python -m pytest -q \
             packages/neuros-mechint/tests/test_mechint_temporal_ablation.py \
             packages/neuros-mechint/tests/test_mechint_temporal_ablation_provenance.py \
+            packages/neuros-mechint/tests/test_mechint_temporal_sweep.py \
             packages/neuros-mechint/tests/test_mechint_representation_cases.py \
             packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+      - name: Exercise public temporal-ablation API
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from neuros_mechint.representations import (
+              ControlledTemporalAblationResult,
+              TemporalAblationRecord,
+              TemporalAblationSummary,
+              TemporalCorruption,
+              TemporalOrderInterventionRepresentation,
+              make_controlled_corruption_manifold,
+              run_controlled_temporal_ablation,
+          )
+          assert ControlledTemporalAblationResult
+          assert TemporalAblationRecord
+          assert TemporalAblationSummary
+          assert TemporalCorruption
+          assert TemporalOrderInterventionRepresentation
+          assert make_controlled_corruption_manifold
+          assert run_controlled_temporal_ablation
+          PY
