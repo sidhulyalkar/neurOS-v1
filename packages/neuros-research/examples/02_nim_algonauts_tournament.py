@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -140,17 +141,15 @@ def _generator_prompt(context: dict[str, Any]) -> str:
     )
 
 
-def _repair_prompt(
-    context: dict[str, Any],
-    previous_payload: dict[str, Any],
-    validation_error: str,
+def _generator_repair_prompt(
+    context: dict[str, Any], previous_payload: dict[str, Any], validation_error: str
 ) -> str:
     return (
         "Your previous candidate JSON failed neurOS deterministic validation. Correct the JSON "
-        "without weakening any rule. Preserve exactly five candidate IDs and preserve the scientific "
+        "without weakening any rule. Preserve exactly five candidate IDs and preserve scientific "
         "intent where possible. The family field MUST be one of proposal_family_enum exactly. "
-        "All metrics and directional predicates must obey metric_registry. Do not explain the repair; "
-        "return only the corrected JSON object.\n\n"
+        "All metrics and directional predicates must obey metric_registry. Do not explain the "
+        "repair; return only the corrected JSON object.\n\n"
         f"VALIDATION_ERROR={validation_error}\n\n"
         f"PUBLIC_CONTEXT={canonical_json(context)}\n\n"
         f"PREVIOUS_PAYLOAD={canonical_json(previous_payload)}"
@@ -170,16 +169,34 @@ def _critic_prompt(context: dict[str, Any], proposals: list[dict[str, Any]]) -> 
         ]
     }
     return (
-        "Critique every candidate exactly once. The typed predicates already passed deterministic "
-        "direction checks, but you must still compare each scientific statement and rationale "
-        "against those predicates. Mark revise if the prose hypothesis and machine criteria test "
-        "different claims. Mark reject for leakage or an unresolvable confound. An advance verdict "
-        "must have an empty risk_flags list and empty revision. Prefer matched controls that isolate "
-        "representation geometry, temporal density, and error complementarity. Verdicts remain "
-        "planning advice, never scientific promotion.\n\n"
+        "Critique every candidate exactly once. Compare each scientific statement and rationale "
+        "against its typed predicates. Mark revise if prose and machine criteria test different "
+        "claims. Mark reject for leakage or an unresolvable confound. Every review MUST contain "
+        "a non-empty critical_test. An advance verdict MUST have an empty risk_flags list and "
+        "empty revision. A revise verdict MUST have a concrete non-empty revision. Prefer matched "
+        "controls that isolate representation geometry, temporal density, and error complementarity. "
+        "Verdicts remain planning advice, never scientific promotion.\n\n"
         f"PUBLIC_CONTEXT={canonical_json(context)}\n\n"
         f"SEMANTICALLY_VALIDATED_PROPOSALS={canonical_json(proposals)}\n\n"
         f"OUTPUT_SCHEMA_EXAMPLE={canonical_json(schema)}"
+    )
+
+
+def _critic_repair_prompt(
+    proposals: list[dict[str, Any]],
+    previous_payload: dict[str, Any],
+    validation_error: str,
+) -> str:
+    return (
+        "Your previous critic JSON failed neurOS deterministic validation. Correct only the "
+        "review structure needed to satisfy the frozen critic contract. Review every candidate "
+        "exactly once. Preserve candidate IDs. Every review needs a non-empty critical_test. "
+        "advance => risk_flags=[] and revision=''. revise => revision MUST be concrete and "
+        "non-empty. reject may retain risk flags but cannot invent a candidate. Return only the "
+        "corrected JSON object.\n\n"
+        f"VALIDATION_ERROR={validation_error}\n\n"
+        f"VALIDATED_PROPOSALS={canonical_json(proposals)}\n\n"
+        f"PREVIOUS_PAYLOAD={canonical_json(previous_payload)}"
     )
 
 
@@ -202,15 +219,31 @@ def _synthesis_prompt(
     }
     return (
         "Create a maximum 2-round development-only execution queue using ONLY candidate IDs "
-        "whose critic verdict is advance. Do not include revise/reject candidates. Prioritize "
-        "low-cost controls, falsification strength, and experiments whose outcomes decide whether "
-        "later work is worth running. Do not rewrite any typed criterion and do not claim any "
-        "candidate is scientifically promoted.\n\n"
+        "whose critic verdict is advance. Do not include revise/reject candidates. Every queued "
+        "candidate must appear in exactly one round, and the queue and union of round IDs must "
+        "match exactly. Each round needs a non-empty reason and stopping_rule must be non-empty. "
+        "Prioritize low-cost controls and falsification strength. Do not rewrite typed criteria "
+        "and do not claim scientific promotion.\n\n"
         f"PUBLIC_CONTEXT={canonical_json(context)}\n\n"
         f"ADVANCED_IDS={canonical_json(sorted(advanced_ids))}\n\n"
         f"VALIDATED_PROPOSALS={canonical_json(proposals)}\n\n"
         f"CRITIC_REVIEWS={canonical_json(reviews)}\n\n"
         f"OUTPUT_SCHEMA_EXAMPLE={canonical_json(schema)}"
+    )
+
+
+def _synthesis_repair_prompt(
+    advanced_ids: set[str], previous_payload: dict[str, Any], validation_error: str
+) -> str:
+    return (
+        "Your previous synthesis JSON failed neurOS deterministic validation. Correct the "
+        "structure without changing candidate eligibility. Use ONLY IDs in ADVANCED_IDS. Use "
+        "one or two rounds. Every queued ID must occur in exactly one round; priority_queue and "
+        "the union of round candidate_ids must match exactly. Each round needs a non-empty reason "
+        "and stopping_rule must be non-empty. Return only corrected JSON.\n\n"
+        f"VALIDATION_ERROR={validation_error}\n\n"
+        f"ADVANCED_IDS={canonical_json(sorted(advanced_ids))}\n\n"
+        f"PREVIOUS_PAYLOAD={canonical_json(previous_payload)}"
     )
 
 
@@ -287,11 +320,7 @@ def _validate_synthesis(payload: dict[str, Any], advanced_ids: set[str]) -> dict
         if not reason:
             raise ValueError("synthesis round reason must be non-empty")
         normalized_rounds.append(
-            {
-                "round": int(row.get("round")),
-                "candidate_ids": list(ids),
-                "reason": reason,
-            }
+            {"round": int(row.get("round")), "candidate_ids": list(ids), "reason": reason}
         )
     if set(normalized_queue) != queued_in_rounds:
         raise ValueError("priority_queue and synthesis rounds must contain the same candidates")
@@ -303,6 +332,39 @@ def _validate_synthesis(payload: dict[str, Any], advanced_ids: set[str]) -> dict
         "rounds": normalized_rounds,
         "stopping_rule": stopping_rule,
     }
+
+
+def _validate_with_repairs(
+    *,
+    client: NvidiaNimClient,
+    role: str,
+    model: str,
+    system_prompt: str,
+    initial_payload: dict[str, Any],
+    validator: Callable[[dict[str, Any]], Any],
+    repair_prompt: Callable[[dict[str, Any], str], str],
+    max_tokens: int,
+    max_repairs: int = 2,
+) -> tuple[Any, list[Any]]:
+    payload = initial_payload
+    repairs = []
+    for repair_index in range(max_repairs + 1):
+        try:
+            return validator(payload), repairs
+        except (KeyError, TypeError, ValueError) as exc:
+            if repair_index == max_repairs:
+                raise
+            validation_error = f"{type(exc).__name__}: {exc}"
+            payload, record = client.chat_json(
+                role=f"{role}_repair_{repair_index + 1}",
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=repair_prompt(payload, validation_error),
+                max_tokens=max_tokens,
+                temperature=0.0,
+            )
+            repairs.append(record)
+    raise RuntimeError("unreachable validation repair state")
 
 
 def main() -> None:
@@ -342,34 +404,23 @@ def main() -> None:
         temperature=0.25,
     )
     calls.append(generator_call)
-
-    proposals = None
-    validation_error = ""
-    for repair_index in range(3):
-        try:
-            proposals = parse_semantic_proposals(
-                generator_payload,
-                allowed_payload_classes=dispatch.allowed_payload_classes,
-                allowed_development_metrics=_ALLOWED_DEVELOPMENT_METRICS,
-                min_candidates=5,
-                max_candidates=5,
-            )
-            break
-        except (KeyError, TypeError, ValueError) as exc:
-            validation_error = f"{type(exc).__name__}: {exc}"
-            if repair_index == 2:
-                raise
-            generator_payload, repair_call = client.chat_json(
-                role=f"generator_repair_{repair_index + 1}",
-                model=role_models["generator"],
-                system_prompt=_SYSTEM_PROMPT,
-                user_prompt=_repair_prompt(context, generator_payload, validation_error),
-                max_tokens=args.max_tokens,
-                temperature=0.0,
-            )
-            calls.append(repair_call)
-    if proposals is None:
-        raise RuntimeError(f"semantic proposal validation failed: {validation_error}")
+    proposals, generator_repairs = _validate_with_repairs(
+        client=client,
+        role="generator",
+        model=role_models["generator"],
+        system_prompt=_SYSTEM_PROMPT,
+        initial_payload=generator_payload,
+        validator=lambda payload: parse_semantic_proposals(
+            payload,
+            allowed_payload_classes=dispatch.allowed_payload_classes,
+            allowed_development_metrics=_ALLOWED_DEVELOPMENT_METRICS,
+            min_candidates=5,
+            max_candidates=5,
+        ),
+        repair_prompt=lambda payload, error: _generator_repair_prompt(context, payload, error),
+        max_tokens=args.max_tokens,
+    )
+    calls.extend(generator_repairs)
     proposal_rows = [proposal.to_dict() for proposal in proposals]
     candidate_ids = {proposal.candidate_id for proposal in proposals}
 
@@ -382,11 +433,22 @@ def main() -> None:
         temperature=0.05,
     )
     calls.append(critic_call)
-    reviews = _validate_reviews(critic_payload, candidate_ids)
+    reviews, critic_repairs = _validate_with_repairs(
+        client=client,
+        role="critic",
+        model=role_models["critic"],
+        system_prompt=_CRITIC_SYSTEM_PROMPT,
+        initial_payload=critic_payload,
+        validator=lambda payload: _validate_reviews(payload, candidate_ids),
+        repair_prompt=lambda payload, error: _critic_repair_prompt(proposal_rows, payload, error),
+        max_tokens=args.max_tokens,
+    )
+    calls.extend(critic_repairs)
     advanced_ids = {
         row["candidate_id"] for row in reviews["reviews"] if row["verdict"] == "advance"
     }
 
+    synthesis_repairs = []
     if advanced_ids:
         synthesis_payload, synthesis_call = client.chat_json(
             role="synthesizer",
@@ -397,7 +459,19 @@ def main() -> None:
             temperature=0.05,
         )
         calls.append(synthesis_call)
-        synthesis = _validate_synthesis(synthesis_payload, advanced_ids)
+        synthesis, synthesis_repairs = _validate_with_repairs(
+            client=client,
+            role="synthesizer",
+            model=role_models["synthesizer"],
+            system_prompt=_SYNTHESIS_SYSTEM_PROMPT,
+            initial_payload=synthesis_payload,
+            validator=lambda payload: _validate_synthesis(payload, advanced_ids),
+            repair_prompt=lambda payload, error: _synthesis_repair_prompt(
+                advanced_ids, payload, error
+            ),
+            max_tokens=args.max_tokens,
+        )
+        calls.extend(synthesis_repairs)
     else:
         synthesis = _validate_synthesis({}, advanced_ids)
 
@@ -421,9 +495,11 @@ def main() -> None:
         "public_context": context,
         "public_context_sha256": context_bundle["context_sha256"],
         "dispatch_policy": dispatch.to_dict(),
-        "proposal_validation_repairs": sum(
-            1 for call in calls if call.role.startswith("generator_repair_")
-        ),
+        "validation_repairs": {
+            "generator": len(generator_repairs),
+            "critic": len(critic_repairs),
+            "synthesizer": len(synthesis_repairs),
+        },
         "proposals": [
             {**proposal.to_dict(), "fingerprint": proposal.fingerprint} for proposal in proposals
         ],
@@ -444,6 +520,7 @@ def main() -> None:
 
     print(f"NIM_TOURNAMENT_SHA256={result['fingerprint']}")
     print("NIM_MODELS=" + ",".join(role_models.values()))
+    print("NIM_REPAIRS=" + canonical_json(result["validation_repairs"]))
     print(f"NIM_ADVANCED={len(advanced_ids)}")
     print("NIM_PRIORITY_QUEUE=" + ",".join(synthesis["priority_queue"]))
 
