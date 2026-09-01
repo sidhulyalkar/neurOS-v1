@@ -24,9 +24,19 @@ promotion decisions, and experiment history explicit and machine-verifiable.
   scalar.
 - `EvidenceArbiter`: deterministic evaluator that can promote only evidence matching
   the exact packet/evaluation authority.
+- `ResearchRegistry`: ordered experiment DAG that owns adjudication. Callers may attach
+  packet-bound evidence, but cannot inject a caller-constructed promotion decision.
 - `InsightCard`: compact, lineage-bound cross-pollination artifact that can be shared
-  between otherwise independent research agents.
+  between otherwise independent research agents only after registry-owned promotion.
 - `EvidenceLedger`: append-only SHA-256 hash chain for packet/evidence/decision history.
+
+## Fail-closed runtime vocabulary
+
+Python type annotations are not treated as runtime authority. Dataset access classes,
+optimization boundaries, agent kinds, information regimes, claim ceilings, evidence
+states, adversarial-check states, promotion comparators, and decision states are all
+validated at object construction. Unknown values fail rather than entering the ledger
+under an apparently typed contract.
 
 ## Scientific boundary
 
