@@ -132,3 +132,28 @@ def aggregate_geometry_metrics(
         "pairwise_distance_rank": float(np.mean(rank)) if rank else None,
         "temporal_continuity_ratio": float(np.mean(continuity)) if continuity else None,
     }
+
+
+def aggregate_reference_metrics(
+    references: tuple[np.ndarray, ...],
+    embeddings: tuple[np.ndarray, ...],
+    *,
+    k: int = 5,
+) -> dict[str, float | None]:
+    """Compare embeddings to known clean/reference trajectory geometry."""
+
+    if len(references) != len(embeddings) or not references:
+        raise ValueError("references and embeddings must be aligned and nonempty")
+    neighborhood: list[float] = []
+    rank: list[float] = []
+    for reference, embedding in zip(references, embeddings, strict=True):
+        neighborhood.append(
+            local_neighborhood_preservation(reference, embedding, k=k)
+        )
+        rank_value = pairwise_distance_rank_preservation(reference, embedding)
+        if rank_value is not None:
+            rank.append(rank_value)
+    return {
+        "reference_local_knn_preservation": float(np.mean(neighborhood)),
+        "reference_pairwise_distance_rank": float(np.mean(rank)) if rank else None,
+    }
