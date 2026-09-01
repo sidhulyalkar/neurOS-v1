@@ -53,7 +53,7 @@ class InsightCard:
         evidence_summary: tuple[str, ...],
         failure_modes: tuple[str, ...] = (),
         suggested_next_tests: tuple[str, ...] = (),
-    ) -> "InsightCard":
+    ) -> InsightCard:
         if decision.state != "promoted":
             raise ValueError("insight cards may only be published from promoted evidence")
         if decision.experiment_id != packet.experiment_id:
