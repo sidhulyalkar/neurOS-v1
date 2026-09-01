@@ -30,6 +30,17 @@ from .metrics import (
     temporal_continuity_ratio,
 )
 from .pca import PCARepresentation
+from .sweep import (
+    ControlledNoiseSweepResult,
+    NoiseLevelSummary,
+    SweepCaseRecord,
+    run_controlled_noise_sweep,
+)
+from .synthetic import (
+    ControlledTemporalManifold,
+    latent_trajectory,
+    make_controlled_temporal_manifold,
+)
 from .tphate import (
     TPHATEEmbeddingError,
     TPHATERepresentation,
@@ -43,10 +54,13 @@ __all__ = [
     "CasePreservingRepresentationBenchmark",
     "CasePreservingRepresentationResult",
     "CaseStatus",
+    "ControlledNoiseSweepResult",
+    "ControlledTemporalManifold",
     "FitRegime",
     "MethodCaseSummary",
     "MethodOutcome",
     "MethodStatus",
+    "NoiseLevelSummary",
     "PCARepresentation",
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",
@@ -58,6 +72,7 @@ __all__ = [
     "RepresentationNonconvergenceError",
     "RepresentationUnavailableError",
     "SequenceBatch",
+    "SweepCaseRecord",
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
@@ -65,7 +80,10 @@ __all__ = [
     "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
+    "latent_trajectory",
     "local_neighborhood_preservation",
+    "make_controlled_temporal_manifold",
     "pairwise_distance_rank_preservation",
+    "run_controlled_noise_sweep",
     "temporal_continuity_ratio",
 ]
