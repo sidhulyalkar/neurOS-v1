@@ -123,10 +123,21 @@ class TPHATERepresentation:
         version = str(getattr(module, "__version__", "unknown"))
         return estimator, version
 
-    def _embed_one(self, estimator_type: Any, sequence_id: str, sequence: np.ndarray) -> np.ndarray:
-        n_pca = self.n_pca
-        if n_pca is not None and n_pca >= min(sequence.shape):
-            n_pca = None
+    def _effective_n_pca(self, sequence: np.ndarray) -> int | None:
+        if self.n_pca is None:
+            return None
+        if self.n_pca >= min(sequence.shape):
+            return None
+        return self.n_pca
+
+    def _embed_one(
+        self,
+        estimator_type: Any,
+        sequence_id: str,
+        sequence: np.ndarray,
+        *,
+        effective_n_pca: int | None,
+    ) -> np.ndarray:
         estimator = estimator_type(
             n_components=self.n_components,
             knn=self.knn,
@@ -134,7 +145,7 @@ class TPHATERepresentation:
             n_landmark=None,
             t=self.t,
             gamma=self.gamma,
-            n_pca=n_pca,
+            n_pca=effective_n_pca,
             mds_solver=self.mds_solver,
             knn_dist=self.knn_dist,
             mds_dist=self.mds_dist,
@@ -182,8 +193,21 @@ class TPHATERepresentation:
         if train.feature_count != evaluation.feature_count:
             raise ValueError("train and evaluation feature dimensions must match")
         estimator_type, version = self._load_upstream()
+        effective_n_pca = {
+            sequence_id: self._effective_n_pca(sequence)
+            for sequence_id, sequence in zip(
+                evaluation.sequence_ids,
+                evaluation.sequences,
+                strict=True,
+            )
+        }
         embedded = tuple(
-            self._embed_one(estimator_type, sequence_id, sequence)
+            self._embed_one(
+                estimator_type,
+                sequence_id,
+                sequence,
+                effective_n_pca=effective_n_pca[sequence_id],
+            )
             for sequence_id, sequence in zip(
                 evaluation.sequence_ids,
                 evaluation.sequences,
@@ -201,6 +225,9 @@ class TPHATERepresentation:
                 "upstream_repository": UPSTREAM_REPOSITORY,
                 "license_boundary": "upstream_yale_noncommercial_review_required",
                 "n_components": self.n_components,
+                "requested_n_pca": self.n_pca,
+                "effective_n_pca_by_sequence": effective_n_pca,
+                "n_pca_policy": "disable_when_not_strictly_below_sequence_shape",
                 "target_specific_fit_observations": evaluation.sample_count,
                 "fit_sequence_count": len(evaluation.sequences),
                 "coordinate_frame": "per_sequence_unaligned_mds",
