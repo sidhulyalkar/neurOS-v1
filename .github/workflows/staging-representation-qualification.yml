@@ -8,6 +8,7 @@ on:
       - ".github/workflows/staging-representation-qualification.yml"
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
       - "packages/neuros-mechint/pyproject.toml"
   workflow_dispatch:
 
@@ -46,4 +47,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q packages/neuros-mechint/tests/test_mechint_representations.py
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_representation_authority.py
