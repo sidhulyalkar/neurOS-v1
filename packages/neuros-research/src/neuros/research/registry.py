@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .arbiter import PromotionDecision
+from .arbiter import EvidenceArbiter, PromotionDecision, PromotionPolicy
 from .contracts import ExperimentPacket
 from .evidence import ExperimentEvidence
 from .insight import InsightCard
@@ -18,6 +18,7 @@ class ResearchRegistry:
         self._decisions: dict[str, PromotionDecision] = {}
         self._insights: dict[str, InsightCard] = {}
         self._ledger = EvidenceLedger()
+        self._arbiter = EvidenceArbiter()
 
     @property
     def ledger(self) -> EvidenceLedger:
@@ -60,19 +61,42 @@ class ResearchRegistry:
         self._evidence[evidence.experiment_id] = evidence
         self._ledger.append("evidence_attached", evidence.experiment_id, evidence.to_dict())
 
-    def attach_decision(self, decision: PromotionDecision) -> None:
-        packet = self._packets.get(decision.experiment_id)
-        evidence = self._evidence.get(decision.experiment_id)
+    def adjudicate(
+        self,
+        experiment_id: str,
+        policy: PromotionPolicy,
+        *,
+        baseline_experiment_id: str | None = None,
+    ) -> PromotionDecision:
+        """Evaluate and attach a decision using the registry-owned deterministic arbiter."""
+
+        packet = self._packets.get(experiment_id)
+        evidence = self._evidence.get(experiment_id)
         if packet is None or evidence is None:
-            raise ValueError("decision requires registered packet and attached evidence")
-        if decision.experiment_id in self._decisions:
-            raise ValueError(f"decision already attached for {decision.experiment_id!r}")
-        if decision.packet_fingerprint != packet.fingerprint:
-            raise ValueError("decision packet fingerprint does not match registered packet")
-        if decision.evidence_fingerprint != evidence.fingerprint:
-            raise ValueError("decision evidence fingerprint does not match attached evidence")
-        self._decisions[decision.experiment_id] = decision
-        self._ledger.append("decision_attached", decision.experiment_id, decision.to_dict())
+            raise ValueError("adjudication requires registered packet and attached evidence")
+        if experiment_id in self._decisions:
+            raise ValueError(f"decision already attached for {experiment_id!r}")
+
+        baseline_packet = None
+        baseline_evidence = None
+        if baseline_experiment_id is not None:
+            baseline_packet = self._packets.get(baseline_experiment_id)
+            baseline_evidence = self._evidence.get(baseline_experiment_id)
+            if baseline_packet is None or baseline_evidence is None:
+                raise ValueError(
+                    "baseline adjudication requires registered baseline packet and evidence"
+                )
+
+        decision = self._arbiter.evaluate(
+            packet,
+            evidence,
+            policy,
+            baseline_packet=baseline_packet,
+            baseline=baseline_evidence,
+        )
+        self._decisions[experiment_id] = decision
+        self._ledger.append("decision_attached", experiment_id, decision.to_dict())
+        return decision
 
     def publish_insight(self, insight: InsightCard) -> None:
         if insight.insight_id in self._insights:
