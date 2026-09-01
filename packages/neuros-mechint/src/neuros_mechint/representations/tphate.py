@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from .contracts import (
+    EvaluationScope,
     FitRegime,
     RepresentationEmbedding,
     RepresentationError,
@@ -47,6 +48,7 @@ class TPHATERepresentation:
     """
 
     fit_regime = FitRegime.TRANSDUCTIVE_TARGET_OBSERVED
+    evaluation_scope = EvaluationScope.SEQUENCE_LOCAL
 
     def __init__(
         self,

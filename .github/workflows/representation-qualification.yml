@@ -8,7 +8,10 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_cases.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_sweep.py"
       - "packages/neuros-mechint/examples/11_representation_benchmark.py"
+      - "packages/neuros-mechint/examples/12_representation_noise_sweep.py"
       - "packages/neuros-mechint/pyproject.toml"
   push:
     branches:
@@ -19,7 +22,10 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_cases.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_sweep.py"
       - "packages/neuros-mechint/examples/11_representation_benchmark.py"
+      - "packages/neuros-mechint/examples/12_representation_noise_sweep.py"
       - "packages/neuros-mechint/pyproject.toml"
   workflow_dispatch:
 
@@ -30,11 +36,19 @@ jobs:
   representation-contracts:
     name: Representation contracts / Python 3.11
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Require exact clean qualification source
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="${{ github.event.pull_request.head.sha || github.sha }}"
+          test "$(git rev-parse HEAD)" = "${EXPECTED}"
+          test -z "$(git status --porcelain)"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
@@ -50,19 +64,23 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
           python -m pip install -e "packages/neuros-mechint"
           python -m pip check
-      - name: Compile representation modules and example
+      - name: Compile representation modules and examples
         shell: bash
         run: |
           set -euo pipefail
           python -m compileall -q packages/neuros-mechint/src/neuros_mechint/representations
-          python -m py_compile packages/neuros-mechint/examples/11_representation_benchmark.py
+          python -m py_compile \
+            packages/neuros-mechint/examples/11_representation_benchmark.py \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py
       - name: Exercise representation authority
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q \
             packages/neuros-mechint/tests/test_mechint_representations.py \
-            packages/neuros-mechint/tests/test_mechint_representation_authority.py
+            packages/neuros-mechint/tests/test_mechint_representation_authority.py \
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
       - name: Exercise controlled reference-manifold benchmark
         shell: bash
         run: |
@@ -110,13 +128,60 @@ jobs:
           assert tphate["status"] == "unavailable"
           assert tphate["error_type"] == "TPHATEUnavailableError"
           assert "Non-Commercial License" in tphate["error_message"]
+          PY
+      - name: Exercise failure-preserving multi-seed evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/representation-sweep-v2.json"
+          python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            --noise-levels 0.0,0.35 \
+            --seeds 0,1 \
+            --components 3 \
+            --ae-epochs 2 \
+            --model-seed 17 > "${OUT}"
+          python - "${OUT}" <<'PY'
+          import json
+          import math
+          import pathlib
+          import sys
 
-          diagnostics = {
-              method_id: {
-                  key: methods[method_id]["metrics"].get(key)
-                  for key in sorted(required)
-              }
-              for method_id in ("pca", "autoencoder")
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["schema"] == "neuros.representation.controlled_noise_sweep.v2"
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["noise_levels"] == [0.0, 0.35]
+          assert payload["seeds"] == [0, 1]
+          assert payload["method_ids"] == ["pca", "autoencoder", "tphate"]
+          assert len(payload["records"]) == 12
+          assert len(payload["summaries"]) == 6
+
+          summaries = {
+              (row["method_id"], row["noise_std"]): row
+              for row in payload["summaries"]
           }
-          print("REPRESENTATION_DIAGNOSTICS=" + json.dumps(diagnostics, sort_keys=True))
+          for method_id in ("pca", "autoencoder"):
+              for noise in (0.0, 0.35):
+                  row = summaries[(method_id, noise)]
+                  assert row["evaluation_scope"] == "batch_transform"
+                  assert row["total_cases"] == 2
+                  assert row["ok_cases"] == 2
+                  assert row["non_ok_rate"] == 0.0
+                  assert row["failed_rate"] == 0.0
+                  assert row["unavailable_rate"] == 0.0
+                  assert row["nonconverged_rate"] == 0.0
+                  assert "failure_rate" not in row
+                  assert row["metric_n"]["reference_pairwise_distance_rank"] == 2
+                  assert math.isfinite(
+                      row["metric_mean"]["reference_pairwise_distance_rank"]
+                  )
+          for noise in (0.0, 0.35):
+              row = summaries[("tphate", noise)]
+              assert row["evaluation_scope"] == "sequence_local"
+              assert row["total_cases"] == 2
+              assert row["unavailable_cases"] == 2
+              assert row["non_ok_rate"] == 1.0
+              assert row["unavailable_rate"] == 1.0
+              assert row["failed_rate"] == 0.0
+              assert row["nonconverged_rate"] == 0.0
+              assert row["metric_n"] == {}
           PY

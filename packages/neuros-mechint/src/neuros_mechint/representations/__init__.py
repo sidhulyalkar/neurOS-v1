@@ -2,7 +2,16 @@
 
 from .autoencoder import AutoencoderRepresentation
 from .benchmark import RepresentationBenchmark
+from .cases import (
+    CasePreservingRepresentationBenchmark,
+    CasePreservingRepresentationResult,
+    CaseStatus,
+    MethodCaseSummary,
+    RepresentationCaseOutcome,
+    RepresentationNonconvergenceError,
+)
 from .contracts import (
+    EvaluationScope,
     FitRegime,
     MethodOutcome,
     MethodStatus,
@@ -22,6 +31,17 @@ from .metrics import (
     temporal_continuity_ratio,
 )
 from .pca import PCARepresentation
+from .sweep import (
+    ControlledNoiseSweepResult,
+    NoiseLevelSummary,
+    SweepCaseRecord,
+    run_controlled_noise_sweep,
+)
+from .synthetic import (
+    ControlledTemporalManifold,
+    latent_trajectory,
+    make_controlled_temporal_manifold,
+)
 from .tphate import (
     TPHATEEmbeddingError,
     TPHATERepresentation,
@@ -32,18 +52,29 @@ from .tphate import (
 
 __all__ = [
     "AutoencoderRepresentation",
+    "CasePreservingRepresentationBenchmark",
+    "CasePreservingRepresentationResult",
+    "CaseStatus",
+    "ControlledNoiseSweepResult",
+    "ControlledTemporalManifold",
+    "EvaluationScope",
     "FitRegime",
+    "MethodCaseSummary",
     "MethodOutcome",
     "MethodStatus",
+    "NoiseLevelSummary",
     "PCARepresentation",
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",
     "RepresentationBenchmarkResult",
+    "RepresentationCaseOutcome",
     "RepresentationEmbedding",
     "RepresentationError",
     "RepresentationMethod",
+    "RepresentationNonconvergenceError",
     "RepresentationUnavailableError",
     "SequenceBatch",
+    "SweepCaseRecord",
     "TPHATEEmbeddingError",
     "TPHATERepresentation",
     "TPHATEUnavailableError",
@@ -51,7 +82,10 @@ __all__ = [
     "UPSTREAM_REPOSITORY",
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
+    "latent_trajectory",
     "local_neighborhood_preservation",
+    "make_controlled_temporal_manifold",
     "pairwise_distance_rank_preservation",
+    "run_controlled_noise_sweep",
     "temporal_continuity_ratio",
 ]
