@@ -8,6 +8,7 @@ on:
       - ".github/workflows/staging-representation-cases.yml"
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representation_cases.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_sweep.py"
   workflow_dispatch:
 
 permissions:
@@ -36,16 +37,20 @@ jobs:
           python -m pip install -e "packages/neuros-core[test]"
           python -m pip install -e packages/neuros-mechint
           python -m pip check
-      - name: Compile case authority
+      - name: Compile case and sweep authority
         shell: bash
         run: |
           set -euo pipefail
-          python -m py_compile packages/neuros-mechint/src/neuros_mechint/representations/cases.py
-      - name: Exercise case authority adversary
+          python -m py_compile \
+            packages/neuros-mechint/src/neuros_mechint/representations/cases.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/synthetic.py \
+            packages/neuros-mechint/src/neuros_mechint/representations/sweep.py
+      - name: Exercise representation authority adversary
         shell: bash
         run: |
           set -euo pipefail
           python -m pytest -q \
             packages/neuros-mechint/tests/test_mechint_representations.py \
             packages/neuros-mechint/tests/test_mechint_representation_authority.py \
-            packages/neuros-mechint/tests/test_mechint_representation_cases.py
+            packages/neuros-mechint/tests/test_mechint_representation_cases.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
