@@ -44,7 +44,10 @@ DatasetAuthority + EvaluationAuthority
           ExperimentEvidence
                   |
                   v
-           EvidenceArbiter
+          ResearchRegistry
+                  |
+                  v
+       registry-owned arbiter
                   |
           +-------+-------+
           |               |
@@ -79,6 +82,26 @@ An `ExperimentPacket` binds:
 
 Evidence that does not cryptographically bind to that packet is non-evaluable.
 
+The state vocabulary itself is runtime authority. Python `Literal` annotations are not
+trusted as validation: unknown access classes, optimization boundaries, agent kinds,
+information regimes, claim ceilings, evidence/check states, metric comparators, or
+decision states fail closed at construction.
+
+### The registry owns promotion decisions
+
+A caller can register a packet and attach evidence that matches the packet and
+evaluation fingerprints. It cannot attach an arbitrary caller-constructed promotion
+decision.
+
+`ResearchRegistry.adjudicate(...)` resolves the exact registered packet/evidence pair,
+optionally resolves a separately registered baseline packet/evidence pair, invokes the
+registry-owned deterministic `EvidenceArbiter`, stores the resulting decision, and
+hash-chains that decision into the ledger.
+
+This closes an important trust seam: a creative agent may propose a policy or produce
+evidence, but it cannot simply declare itself promoted and inject that declaration into
+research memory.
+
 ### Failures remain evidence
 
 Failed or unavailable executions are explicit `ExperimentEvidence` states. They cannot
@@ -98,13 +121,19 @@ A promotion policy can independently require, for example:
 - temporal-shift-null survival;
 - runtime/storage constraints.
 
-A candidate either satisfies the frozen evidence vector or it does not.
+A candidate either satisfies the frozen evidence vector or it does not. Metric names and
+evaluation domains requested by the promotion policy must themselves have been declared
+by the packet's evaluation authority.
+
+Baseline deltas are legal only when the baseline is represented by its own registered,
+packet-bound evidence under the same dataset and evaluation authorities.
 
 ### Cross-pollination is lineage-bound
 
 Agents should first explore independently. Only promoted evidence may be distilled into
 an `InsightCard`. The card binds its originating packet, evidence, and promotion
-decision. A child experiment that uses an insight declares the parent experiment ID.
+decision. A child experiment that uses an insight declares the parent experiment ID,
+and the registry requires those parents to exist before the child can enter the DAG.
 
 This preserves epistemic diversity while making knowledge transfer inspectable.
 
@@ -145,6 +174,11 @@ For one authorized subject compare low-cost actions/state, frozen V-JEPA control
 V-JEPA 2.1 candidates, and the Yale-inspired segment-aware neural-geometry track under
 the same unseen-level referee.
 
+The evaluation identity must include scientifically material temporal alignment. For the
+current Mario path that includes the SPM-HRF semantics, HRF oversampling, and TR sample
+time convention. Geometry artifacts must not be treated as tournament-compatible until
+that authority is serialized completely.
+
 ### A4 — G3/G4
 
 Only promoted candidates advance to Mario→Shinobi and held-out-subject tests. Cross-game
@@ -157,6 +191,10 @@ which representation family will transfer best. Then test that rule prospectivel
 OOD evidence. If successful, this becomes a scientifically meaningful screening tool,
 not merely another diagnostic plot.
 
+This is the most important prospective research hypothesis in the first Algonauts
+program because it tests whether neural geometry can reduce expensive representation
+search without opening the OOD target used to validate the claim.
+
 ## Phased implementation
 
 ### v0.1 — authority substrate
@@ -165,12 +203,17 @@ Implemented in `neuros-research`:
 
 - immutable research contracts;
 - deterministic full SHA-256 identities;
+- runtime-validated state vocabularies;
 - failure-preserving evidence;
 - vector promotion policies;
-- pure deterministic arbiter;
+- deterministic arbiter;
+- registry-owned adjudication;
 - promoted-only insight cards;
+- explicit experiment-parent lineage;
 - append-only hash-chained evidence ledger;
-- external-dispatch policy.
+- external-dispatch policy;
+- an Algonauts-style packet example with temporal alignment bound into evaluation
+  metadata.
 
 ### v0.2 — executor adapters
 
@@ -178,7 +221,8 @@ Next:
 
 - subprocess/local Python executor adapter;
 - generic artifact-directory verifier;
-- `algonaut-a-mario` evidence adapter;
+- `algonaut-a-mario` evidence adapter after its complete G2 temporal authority is
+  serialized;
 - deterministic registry CLI;
 - experiment-packet JSON schema export.
 
