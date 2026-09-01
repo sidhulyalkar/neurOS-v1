@@ -27,6 +27,36 @@ ClaimCeiling = Literal[
     "causal_hypothesis",
 ]
 
+_DATA_ACCESS = frozenset({"public", "authorized_restricted", "synthetic"})
+_OPTIMIZATION_BOUNDARIES = frozenset({"none", "train_only", "train_validation"})
+_INFORMATION_REGIMES = frozenset(
+    {
+        "train_only_inductive",
+        "external_pretrained",
+        "transductive_unlabeled",
+        "evaluation_only",
+        "simulation_only",
+    }
+)
+_AGENT_KINDS = frozenset({"human", "frontier_model", "local_model", "deterministic_program"})
+_CLAIM_CEILINGS = frozenset(
+    {
+        "software_only",
+        "descriptive",
+        "predictive_id",
+        "predictive_ood",
+        "cross_domain_transfer",
+        "causal_hypothesis",
+    }
+)
+
+
+def _require_choice(value: str, *, allowed: frozenset[str], name: str) -> str:
+    normalized = require_nonempty(value, name=name)
+    if normalized not in allowed:
+        raise ValueError(f"unsupported {name}: {normalized!r}")
+    return normalized
+
 
 def _unique_strings(values: tuple[str, ...], *, name: str, allow_empty: bool = False) -> tuple[str, ...]:
     normalized = tuple(require_nonempty(value, name=name) for value in values)
@@ -53,6 +83,11 @@ class DatasetAuthority:
             self,
             "source_fingerprint",
             require_sha256(self.source_fingerprint, name="source_fingerprint"),
+        )
+        object.__setattr__(
+            self,
+            "access",
+            _require_choice(str(self.access), allowed=_DATA_ACCESS, name="dataset access"),
         )
         object.__setattr__(
             self,
@@ -109,6 +144,15 @@ class EvaluationAuthority:
         )
         object.__setattr__(
             self,
+            "optimization_boundary",
+            _require_choice(
+                str(self.optimization_boundary),
+                allowed=_OPTIMIZATION_BOUNDARIES,
+                name="optimization boundary",
+            ),
+        )
+        object.__setattr__(
+            self,
             "forbidden_feedback",
             _unique_strings(self.forbidden_feedback, name="forbidden_feedback", allow_empty=True),
         )
@@ -146,6 +190,11 @@ class ResearchAgent:
     def __post_init__(self) -> None:
         for name in ("agent_id", "provider", "model", "version", "role"):
             object.__setattr__(self, name, require_nonempty(getattr(self, name), name=name))
+        object.__setattr__(
+            self,
+            "kind",
+            _require_choice(str(self.kind), allowed=_AGENT_KINDS, name="agent kind"),
+        )
         if self.prompt_sha256 is not None:
             object.__setattr__(
                 self,
@@ -298,10 +347,19 @@ class ExperimentPacket:
         if len(set(normalized_seeds)) != len(normalized_seeds):
             raise ValueError("seeds must be unique")
         object.__setattr__(self, "seeds", normalized_seeds)
-        regimes = tuple(self.information_regimes)
+
+        regimes = tuple(str(regime) for regime in self.information_regimes)
         if not regimes or len(set(regimes)) != len(regimes):
             raise ValueError("information_regimes must be non-empty and unique")
+        unsupported_regimes = sorted(set(regimes) - _INFORMATION_REGIMES)
+        if unsupported_regimes:
+            raise ValueError(f"unsupported information regimes: {unsupported_regimes}")
         object.__setattr__(self, "information_regimes", regimes)
+        object.__setattr__(
+            self,
+            "claim_ceiling",
+            _require_choice(str(self.claim_ceiling), allowed=_CLAIM_CEILINGS, name="claim ceiling"),
+        )
         if self.representation_fingerprint is not None:
             object.__setattr__(
                 self,
