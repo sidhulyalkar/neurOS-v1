@@ -27,15 +27,20 @@ promotion authority.
 
 ## Live tournament
 
-`.github/workflows/nim-research-tournament.yml` runs only on the research-authority
-feature branch or by explicit workflow dispatch. It:
+`.github/workflows/nim-research-tournament.yml` runs on the research-authority branch,
+the isolated `feat/nim-live-calibration` branch, or by explicit workflow dispatch. The
+calibration branch exists only to qualify the external-provider path without spawning
+the research PR's full monorepo workflow fan-out.
+
+The workflow:
 
 1. checks out and verifies the exact clean source revision;
 2. qualifies the local `neuros-research` contracts before any network request;
 3. requires one of `NVIDIA_API_KEY`, `NVIDIA_NIM_API_KEY`, or `NVAPI_KEY`;
 4. queries NVIDIA's `/v1/models` endpoint;
-5. selects up to three approved NVIDIA Nemotron reasoning models;
-6. runs generator, adversarial-critic, and program-synthesis roles;
+5. admits only the explicitly qualified hosted `nvidia/nemotron-3-super-120b-a12b`
+   model for the first calibration;
+6. runs generator, adversarial-critic, and program-synthesis roles as separate calls;
 7. structurally validates every proposed experiment against the frozen dispatch and
    development-metric menus;
 8. fingerprints prompts, requests, responses, public context, candidates, and the
