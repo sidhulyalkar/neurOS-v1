@@ -23,6 +23,10 @@ from .metrics import (
     temporal_continuity_ratio,
 )
 from .pca import PCARepresentation
+from .predictive import (
+    LagPredictiveAutoencoderRepresentation,
+    build_lagged_training_pairs,
+)
 from .sequence_authority import (
     SequenceMethodOutcome,
     SequenceRepresentationBenchmarkResult,
@@ -50,6 +54,7 @@ __all__ = [
     "AutoencoderRepresentation",
     "CaseMethodEvidence",
     "FitRegime",
+    "LagPredictiveAutoencoderRepresentation",
     "MethodOutcome",
     "MethodStatus",
     "MethodSweepSummary",
@@ -73,6 +78,7 @@ __all__ = [
     "aggregate_geometry_metrics",
     "aggregate_reference_metrics",
     "build_controlled_temporal_manifold",
+    "build_lagged_training_pairs",
     "build_representation_sweep",
     "latent_trajectory",
     "local_neighborhood_preservation",
