@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, Weak};
@@ -15,8 +14,6 @@ use tracing::{debug, instrument};
 
 use crate::error::{Result, RuntimeError};
 use crate::manifest::{DatasetManifest, MANIFEST_FILE, Record};
-
-const SOURCE_HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Default)]
 pub struct StreamSelector {
@@ -308,6 +305,16 @@ impl Dataset {
         let declared_source_sha256 = descriptor.record.source_sha256.clone();
         let (region, verified_source_sha256) =
             self.map_source(&path, declared_source_sha256.as_deref())?;
+        let mapped_size = u64::try_from(region.mmap.len()).map_err(|_| {
+            RuntimeError::Validation("mapped source size does not fit in u64".into())
+        })?;
+        if mapped_size < required_end {
+            return Err(RuntimeError::SourceTooShort {
+                path,
+                actual: mapped_size,
+                required: required_end,
+            });
+        }
         let source_verification_state = if verified_source_sha256.is_some() {
             SourceVerificationState::VerifiedAtOpen
         } else {
@@ -320,7 +327,7 @@ impl Dataset {
             start_frame: descriptor.start_frame,
             length_frames: descriptor.length_frames,
             frame_elements: descriptor.frame_elements,
-            source_size_bytes: metadata.len(),
+            source_size_bytes: mapped_size,
             manifest_sha256: self.manifest_sha256.clone(),
             declared_source_sha256,
             verified_source_sha256,
@@ -333,27 +340,27 @@ impl Dataset {
         path: &Path,
         expected_sha256: Option<&str>,
     ) -> Result<(Arc<MappedRegion>, Option<String>)> {
-        {
+        let cached_region = {
             let cache = self
                 .mmap_cache
                 .lock()
                 .map_err(|_| RuntimeError::Validation("mmap cache lock was poisoned".into()))?;
-            if let Some(region) = cache.get(path).and_then(Weak::upgrade) {
-                let verified = Self::ensure_source_verified(path, &region, expected_sha256)?;
-                return Ok((region, verified));
-            }
+            cache.get(path).and_then(Weak::upgrade)
+        };
+        if let Some(region) = cached_region {
+            let verified = Self::ensure_source_verified(path, &region, expected_sha256)?;
+            return Ok((region, verified));
         }
 
-        let mut file = File::open(path).map_err(|source| RuntimeError::io(path, source))?;
-        let verified_source_sha256 = match expected_sha256 {
-            Some(expected) => Some(Self::verify_file_sha256(path, &mut file, expected)?),
-            None => None,
-        };
-
+        let file = File::open(path).map_err(|source| RuntimeError::io(path, source))?;
         // SAFETY: this is a read-only mapping of a live File. memmap2 owns the mapping
         // independently after creation, and WindowHandle/Arrow buffers retain the Arc.
         let mmap = unsafe { MmapOptions::new().map(&file) }
             .map_err(|source| RuntimeError::io(path, source))?;
+        let verified_source_sha256 = match expected_sha256 {
+            Some(expected) => Some(Self::verify_mapped_sha256(path, &mmap, expected)?),
+            None => None,
+        };
         let region = Arc::new(MappedRegion {
             mmap,
             verified_source_sha256: Mutex::new(verified_source_sha256.clone()),
@@ -390,25 +397,13 @@ impl Dataset {
             return Ok(Some(actual.clone()));
         }
 
-        let mut file = File::open(path).map_err(|source| RuntimeError::io(path, source))?;
-        let actual = Self::verify_file_sha256(path, &mut file, expected)?;
+        let actual = Self::verify_mapped_sha256(path, &region.mmap, expected)?;
         *state = Some(actual.clone());
         Ok(Some(actual))
     }
 
-    fn verify_file_sha256(path: &Path, file: &mut File, expected: &str) -> Result<String> {
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; SOURCE_HASH_BUFFER_BYTES];
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|source| RuntimeError::io(path, source))?;
-            if read == 0 {
-                break;
-            }
-            hasher.update(&buffer[..read]);
-        }
-        let actual = format!("{:x}", hasher.finalize());
+    fn verify_mapped_sha256(path: &Path, mmap: &Mmap, expected: &str) -> Result<String> {
+        let actual = format!("{:x}", Sha256::digest(mmap.as_ref()));
         if actual != expected {
             return Err(RuntimeError::SourceHashMismatch {
                 path: path.to_path_buf(),
@@ -671,6 +666,65 @@ mod tests {
             other => panic!("expected source hash mismatch, got {other:?}"),
         }
         assert!(stream.next().is_none());
+    }
+
+    #[test]
+    fn cached_unverified_mapping_is_upgraded_when_hash_is_declared() {
+        let directory = tempdir().unwrap();
+        let data_path = directory.path().join("shared.f32");
+        let mut data = File::create(&data_path).unwrap();
+        for value in 0..24u32 {
+            data.write_all(&(value as f32).to_le_bytes()).unwrap();
+        }
+        drop(data);
+        let actual = format!("{:x}", Sha256::digest(std::fs::read(&data_path).unwrap()));
+
+        let record = |id: &str, source_sha256: Option<String>| Record {
+            id: id.into(),
+            subject: "sub-01".into(),
+            modality: "fmri".into(),
+            path: "shared.f32".into(),
+            source_sha256,
+            offset_bytes: 0,
+            dtype: DType::Float32Le,
+            shape: vec![6, 4],
+            sampling_hz: Some(0.5),
+            clock: None,
+        };
+        let manifest = DatasetManifest {
+            schema_version: 1,
+            dataset_id: "shared-upgrade".into(),
+            records: vec![record("r1", None), record("r2", Some(actual.clone()))],
+        };
+        std::fs::write(
+            directory.path().join(MANIFEST_FILE),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let dataset = Dataset::open(directory.path()).unwrap();
+        let mut stream = dataset
+            .stream(StreamSelector::default(), WindowSpec::new(6, 6).unwrap(), 1)
+            .unwrap();
+
+        let first = stream.next().unwrap().unwrap();
+        assert_eq!(
+            first.source_verification_state(),
+            SourceVerificationState::Unverified
+        );
+        assert_eq!(first.verified_source_sha256(), None);
+
+        let second = stream.next().unwrap().unwrap();
+        assert_eq!(second.declared_source_sha256(), Some(actual.as_str()));
+        assert_eq!(second.verified_source_sha256(), Some(actual.as_str()));
+        assert_eq!(
+            second.source_verification_state(),
+            SourceVerificationState::VerifiedAtOpen
+        );
+        assert!(stream.next().is_none());
+
+        // Keep the first window alive through the upgrade so the second record must
+        // reuse and upgrade the same cached mmap rather than create a fresh mapping.
+        assert_eq!(first.record_id(), "r1");
     }
 
     #[test]
