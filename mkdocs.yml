@@ -79,6 +79,7 @@ nav:
       - Architecture: ARCHITECTURE.md
       - Project Status: PROJECT_STATUS.md
   - Scientific Trust:
+      - Validation Program: VALIDATION.md
       - Neural System Qualification: NEURAL_SYSTEM_QUALIFICATION_V1.md
       - NSQ Runner: NSQ_RUNNER_V1.md
       - Scientific Claims: SCIENTIFIC_CLAIMS.md

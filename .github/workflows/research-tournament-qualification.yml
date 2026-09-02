@@ -1,0 +1,76 @@
+name: Research Tournament Qualification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/research-tournament-qualification.yml"
+      - "docs/RESEARCH_TOURNAMENT.md"
+      - "packages/neuros-research/**"
+      - "pyproject.toml"
+      - "release/package-policy.json"
+  push:
+    branches:
+      - main
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/research-tournament-qualification.yml"
+      - "docs/RESEARCH_TOURNAMENT.md"
+      - "packages/neuros-research/**"
+      - "pyproject.toml"
+      - "release/package-policy.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research-authority:
+    name: Research authority / Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-research[dev]"
+          python -m pip check
+      - name: Compile and lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q \
+            packages/neuros-research/src \
+            packages/neuros-research/examples
+          python -m ruff check packages/neuros-research
+      - name: Test authority contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q packages/neuros-research/tests
+      - name: Exercise Algonauts packet contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          packet_hash="$(python packages/neuros-research/examples/01_algonauts_packet.py)"
+          test "${#packet_hash}" -eq 64
+          case "${packet_hash}" in
+            (*[!0-9a-f]*) exit 1 ;;
+          esac
+          echo "ALGONAUTS_PACKET_SHA256=${packet_hash}"

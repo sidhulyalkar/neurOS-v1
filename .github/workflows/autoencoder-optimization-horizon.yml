@@ -1,0 +1,235 @@
+name: Autoencoder Optimization Horizon
+
+on:
+  push:
+    branches:
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/autoencoder-optimization-horizon.yml"
+      - "packages/neuros-mechint/examples/13_autoencoder_optimization_horizon.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/**"
+      - "packages/neuros-mechint/pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoencoder-optimization-horizon-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  optimization-horizon:
+    name: 350-cell controlled AE optimization study
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU scientific surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e "packages/neuros-mechint[dev]"
+          python -m pip check
+
+      - name: Qualify source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile packages/neuros-mechint/examples/13_autoencoder_optimization_horizon.py
+          python -m ruff check \
+            packages/neuros-mechint/examples/13_autoencoder_optimization_horizon.py \
+            packages/neuros-mechint/src/neuros_mechint/representations
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+
+      - name: Run tiny contract smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python packages/neuros-mechint/examples/13_autoencoder_optimization_horizon.py \
+            --noise 0.35 \
+            --seed 0 --seed 1 \
+            --epochs 1 --epochs 2 \
+            > "${RUNNER_TEMP}/ae-horizon-smoke.json"
+          python - "${RUNNER_TEMP}/ae-horizon-smoke.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["kind"] == "neuros_autoencoder_optimization_horizon"
+          assert payload["schema_version"] == 1
+          assert len(payload["cases"]) == 2
+          assert len(payload["evidence"]) == 6
+          assert len(payload["noise_summaries"]) == 3
+          assert len(payload["optimization_evidence"]) == 4
+          assert len(payload["optimization_summaries"]) == 2
+          assert payload["metadata"]["epoch_grid"] == [1, 2]
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["excluded_methods"] == ["tphate", "temporal_ssl"]
+          assert "winner" not in payload
+          PY
+
+      - name: Run full optimization-horizon study
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/autoencoder-optimization-horizon
+          python packages/neuros-mechint/examples/13_autoencoder_optimization_horizon.py \
+            > artifacts/autoencoder-optimization-horizon/study.json
+          sha256sum artifacts/autoencoder-optimization-horizon/study.json \
+            > artifacts/autoencoder-optimization-horizon/SHA256SUMS
+
+      - name: Verify evidence and scientific identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import copy
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/autoencoder-optimization-horizon/study.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["kind"] == "neuros_autoencoder_optimization_horizon"
+          assert payload["schema_version"] == 1
+          assert payload["metadata"]["source_revision"] == os.environ["GITHUB_SHA"]
+          assert payload["metadata"]["noise_grid"] == [0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]
+          assert payload["metadata"]["seeds"] == list(range(10))
+          assert payload["metadata"]["epoch_grid"] == [4, 16, 64, 256]
+          assert payload["metadata"]["anchor_method"] == "pca"
+          assert payload["metadata"]["independent_variable"] == "autoencoder_training_epochs"
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["excluded_methods"] == ["tphate", "temporal_ssl"]
+          assert "winner" not in payload
+          assert len(payload["cases"]) == 70
+          assert len(payload["evidence"]) == 350
+          assert len(payload["summaries"]) == 5
+          assert len(payload["noise_summaries"]) == 35
+          assert len(payload["optimization_summaries"]) == 28
+
+          method_ids = {"pca", "autoencoder_e4", "autoencoder_e16", "autoencoder_e64", "autoencoder_e256"}
+          expected = {
+              (case["case_id"], method_id)
+              for case in payload["cases"]
+              for method_id in method_ids
+          }
+          actual = {(row["case_id"], row["method_id"]) for row in payload["evidence"]}
+          assert actual == expected
+
+          by_method = {row["method_id"]: row for row in payload["summaries"]}
+          assert set(by_method) == method_ids
+          assert by_method["pca"]["ok_cases"] == 70
+          assert by_method["pca"]["failed_cases"] == 0
+          assert by_method["pca"]["unavailable_cases"] == 0
+
+          ae_ok = {
+              row["method_id"]: row["ok_cases"]
+              for row in payload["summaries"]
+              if row["method_id"].startswith("autoencoder_e")
+          }
+          observed_by_method = {method_id: 0 for method_id in ae_ok}
+          for row in payload["optimization_evidence"]:
+              assert row["method_id"] in observed_by_method
+              assert math.isfinite(row["final_training_loss"])
+              assert row["final_training_loss"] >= 0
+              observed_by_method[row["method_id"]] += 1
+          assert observed_by_method == ae_ok
+
+          for row in payload["optimization_summaries"]:
+              assert row["declared_seeds"] == 10
+              assert row["observed_losses"] + row["missing_losses"] == 10
+              summary = row["final_training_loss"]
+              if row["observed_losses"]:
+                  assert summary["n"] == row["observed_losses"]
+                  for key in ("mean", "std", "sem", "min", "max"):
+                      assert math.isfinite(summary[key])
+              else:
+                  assert summary is None
+
+          scientific = copy.deepcopy(payload)
+          expected_scientific = scientific.pop("scientific_fingerprint")
+          scientific.pop("fingerprint")
+          scientific["kind"] = "neuros_autoencoder_optimization_horizon_scientific"
+          for row in scientific["evidence"]:
+              row.pop("operational")
+          for row in scientific["summaries"]:
+              row.pop("operational_summaries")
+          for row in scientific["noise_summaries"]:
+              row.pop("operational_summaries")
+          encoded = json.dumps(scientific, sort_keys=True, separators=(",", ":"), allow_nan=False)
+          assert expected_scientific == hashlib.sha256(encoded.encode()).hexdigest()
+
+          full_fingerprint = payload["fingerprint"]
+          unsigned = dict(payload)
+          unsigned.pop("fingerprint")
+          encoded_full = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False)
+          assert full_fingerprint == hashlib.sha256(encoded_full.encode()).hexdigest()
+          print(
+              "AE_HORIZON_VERIFIED cases=70 evidence=350 "
+              f"optimization_rows={len(payload['optimization_evidence'])} "
+              f"scientific={expected_scientific} artifact={full_fingerprint}"
+          )
+          PY
+          sha256sum -c artifacts/autoencoder-optimization-horizon/SHA256SUMS
+
+      - name: Write qualification summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f artifacts/autoencoder-optimization-horizon/study.json ]; then
+            echo "AE optimization-horizon artifact was not produced." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("artifacts/autoencoder-optimization-horizon/study.json").read_text())
+          print("## Autoencoder optimization-horizon study")
+          print()
+          print(f"- Source: `{payload['metadata']['source_revision']}`")
+          print(f"- Scientific fingerprint: `{payload['scientific_fingerprint']}`")
+          print(f"- Epoch grid: `{payload['metadata']['epoch_grid']}`")
+          print(f"- Cases: {len(payload['cases'])}")
+          print(f"- Method-case rows: {len(payload['evidence'])}")
+          print(f"- Optimization-loss rows: {len(payload['optimization_evidence'])}")
+          print()
+          print(
+              "**Boundary:** this is a synthetic optimization-horizon control. It tests whether "
+              "the four-epoch autoencoder diagnostic changes as optimization continues. It does "
+              "not establish PCA, autoencoder, T-PHATE, temporal SSL, BCI, or clinical superiority."
+          )
+          PY
+
+      - name: Upload immutable study evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: autoencoder-optimization-horizon-${{ github.sha }}
+          path: artifacts/autoencoder-optimization-horizon/
+          if-no-files-found: warn
+          retention-days: 30

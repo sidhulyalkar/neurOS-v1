@@ -1,0 +1,244 @@
+name: NVIDIA NIM Research Tournament
+
+on:
+  push:
+    branches:
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/nim-research-tournament.yml"
+      - "packages/neuros-research/**"
+      - "docs/RESEARCH_TOURNAMENT.md"
+      - "docs/NVIDIA_NIM_RESEARCH.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nim-research-tournament-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nim-proposal-tournament:
+    name: Evidence-informed NVIDIA NIM proposal tournament
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.NVIDIA_NIM_API_KEY || secrets.NVAPI_KEY }}
+      NVIDIA_NIM_ENDPOINT: https://integrate.api.nvidia.com/v1
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Require NVIDIA API credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "::error::Expected repository secret NVIDIA_API_KEY, NVIDIA_NIM_API_KEY, or NVAPI_KEY."
+            exit 1
+          fi
+          echo "::add-mask::${NVIDIA_API_KEY}"
+
+      - name: Install research authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-research[dev]"
+          python -m pip check
+
+      - name: Qualify local authority before network dispatch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q packages/neuros-research/src packages/neuros-research/examples
+          python -m ruff check packages/neuros-research
+          python -m pytest -q packages/neuros-research/tests
+          packet_hash="$(python packages/neuros-research/examples/01_algonauts_packet.py)"
+          test "${#packet_hash}" -eq 64
+          python - <<'PY'
+          from pathlib import Path
+
+          from neuros.research.reviewed_context import load_reviewed_aggregate_context
+          from neuros.research.semantics import metric_registry_payload
+
+          path = Path(
+              "packages/neuros-research/evidence/controlled_representation_program_v3.json"
+          )
+          payload = load_reviewed_aggregate_context(path)
+          assert payload["evidence_id"] == "controlled-representation-program-v3"
+          assert payload["review_fingerprint"] == (
+              "60ff05842043fd444c27c57d34fb6911361b927a1965d95d9c046ddb91ad703b"
+          )
+          assert payload["scientific_fingerprint"] == (
+              "2635b1f25bf489dd08ad3204d70c70ba9a6d84ce996075d4c087fd459cfaaa89"
+          )
+          registry = metric_registry_payload()
+          assert registry["prospective_geometry_gain_spearman"]["claim_relation"] == (
+              "prospective_prediction"
+          )
+          print("reviewed v3 evidence and prospective prediction semantics verified")
+          PY
+
+      - name: Run live evidence-informed NVIDIA NIM tournament
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nim-research
+          python packages/neuros-research/examples/03_nim_evidence_tournament.py \
+            --output artifacts/nim-research/tournament.json \
+            --max-tokens 4000
+          sha256sum artifacts/nim-research/tournament.json \
+            > artifacts/nim-research/SHA256SUMS
+
+      - name: Verify tournament artifact and secret non-disclosure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          from neuros.research._canonical import canonical_sha256
+
+          path = Path("artifacts/nim-research/tournament.json")
+          raw = path.read_text(encoding="utf-8")
+          key = os.environ["NVIDIA_API_KEY"]
+          if key and key in raw:
+              raise SystemExit("credential material leaked into tournament artifact")
+          payload = json.loads(raw)
+          if payload.get("kind") != "neuros_nim_research_tournament":
+              raise SystemExit("unexpected tournament artifact kind")
+          if payload.get("schema_version") != 2 or payload.get("semantic_contract_version") != 2:
+              raise SystemExit("unexpected tournament semantic schema")
+          if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("tournament artifact source revision mismatch")
+
+          public_context = payload.get("public_context")
+          if not isinstance(public_context, dict):
+              raise SystemExit("tournament public context is missing")
+          if payload.get("public_context_sha256") != canonical_sha256(public_context):
+              raise SystemExit("public context fingerprint mismatch")
+          reviewed = public_context.get("reviewed_prior_evidence")
+          if not isinstance(reviewed, dict):
+              raise SystemExit("reviewed aggregate evidence is missing from public context")
+          if reviewed.get("evidence_id") != "controlled-representation-program-v3":
+              raise SystemExit("unexpected reviewed aggregate evidence ID")
+          if reviewed.get("review_fingerprint") != (
+              "60ff05842043fd444c27c57d34fb6911361b927a1965d95d9c046ddb91ad703b"
+          ):
+              raise SystemExit("unexpected reviewed aggregate evidence identity")
+          if reviewed.get("scientific_fingerprint") != (
+              "2635b1f25bf489dd08ad3204d70c70ba9a6d84ce996075d4c087fd459cfaaa89"
+          ):
+              raise SystemExit("unexpected reviewed scientific evidence identity")
+          policy = reviewed.get("model_context_policy", {})
+          if policy.get("payload_class") != "aggregate_metrics" or policy.get("context_only") is not True:
+              raise SystemExit("reviewed evidence dispatch policy mismatch")
+          if policy.get("may_not_be_used_as_scientific_promotion") is not True:
+              raise SystemExit("reviewed evidence promotion boundary is missing")
+
+          proposals = payload.get("proposals", [])
+          if len(proposals) != 5:
+              raise SystemExit("expected exactly five validated proposals")
+          proposal_ids = {row["candidate_id"] for row in proposals}
+          relations = {row.get("claim_relation") for row in proposals}
+          if "prospective_prediction" not in relations:
+              raise SystemExit("tournament omitted required prospective geometry-screening proposal")
+          reviews = payload.get("critic", {}).get("reviews", [])
+          if {row.get("candidate_id") for row in reviews} != proposal_ids:
+              raise SystemExit("critic review identities do not match proposals")
+          advanced_ids = {
+              row["candidate_id"] for row in reviews if row.get("verdict") == "advance"
+          }
+          synthesis = payload.get("synthesis", {})
+          queue = synthesis.get("priority_queue", [])
+          rounds = synthesis.get("rounds", [])
+          if not set(queue).issubset(advanced_ids):
+              raise SystemExit("priority queue contains a non-advanced candidate")
+          if advanced_ids and not queue:
+              raise SystemExit("advanced candidates exist but synthesis queue is empty")
+          if not advanced_ids and (queue or rounds):
+              raise SystemExit("empty-advance tournament must not manufacture an execution queue")
+          if payload.get("scientific_boundary", "").find("not ExperimentEvidence") < 0:
+              raise SystemExit("scientific authority boundary is missing")
+          repairs = payload.get("validation_repairs")
+          if not isinstance(repairs, dict) or set(repairs) != {
+              "generator", "critic", "synthesizer"
+          }:
+              raise SystemExit("validation repair accounting is missing")
+          if any(not isinstance(value, int) or value < 0 or value > 2 for value in repairs.values()):
+              raise SystemExit("validation repair accounting is invalid")
+          fingerprint = payload.get("fingerprint")
+          unsigned = dict(payload)
+          unsigned.pop("fingerprint", None)
+          if fingerprint != canonical_sha256(unsigned):
+              raise SystemExit("tournament fingerprint mismatch")
+          print(
+              "NIM artifact contract verified: "
+              f"validated={len(proposals)} advanced={len(advanced_ids)} queued={len(queue)}"
+          )
+          PY
+          sha256sum -c artifacts/nim-research/SHA256SUMS
+
+      - name: Write safe run summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/nim-research/tournament.json").read_text(encoding="utf-8")
+          )
+          reviewed = payload["public_context"]["reviewed_prior_evidence"]
+          print("## NVIDIA NIM research tournament")
+          print()
+          print(f"- Artifact: `{payload['fingerprint']}`")
+          print(f"- Source: `{payload['source_revision']}`")
+          print(f"- Semantic contract: v{payload['semantic_contract_version']}")
+          print(f"- Reviewed evidence: `{reviewed['review_fingerprint']}`")
+          print(f"- Prior scientific evidence: `{reviewed['scientific_fingerprint']}`")
+          print(f"- Validation repairs: `{payload['validation_repairs']}`")
+          print("- Models:")
+          for role, model in payload["selected_models"].items():
+              print(f"  - {role}: `{model}`")
+          queue = payload["synthesis"]["priority_queue"]
+          if queue:
+              print("- Proposed development queue:")
+              by_id = {row["candidate_id"]: row for row in payload["proposals"]}
+              for candidate_id in queue:
+                  print(f"  - `{candidate_id}`: {by_id[candidate_id]['title']}")
+          else:
+              print("- Proposed development queue: none; no candidate passed adversarial review")
+          print()
+          print(
+              "**Boundary:** reviewed synthetic aggregate evidence informed hypothesis generation "
+              "only. No OOD truth was used and no candidate was scientifically promoted."
+          )
+          PY
+
+      - name: Upload immutable proposal or failure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nim-research-tournament-${{ github.sha }}
+          path: artifacts/nim-research/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,287 @@
+name: Controlled Representation Noise Sweep
+
+on:
+  push:
+    paths:
+      - ".github/workflows/representation-noise-sweep.yml"
+      - "packages/neuros-mechint/pyproject.toml"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/benchmark.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/controlled.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/sweep.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/__init__.py"
+      - "packages/neuros-mechint/examples/11_representation_benchmark.py"
+      - "packages/neuros-mechint/examples/12_representation_noise_sweep.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_sweep.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: representation-noise-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  controlled-noise-sweep:
+    name: 70-case controlled representation sweep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install controlled representation surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          # This study runs on a CPU runner. Pin the CPU index before installing mechint
+          # so a generic torch dependency cannot pull an unused CUDA runtime fleet.
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e "packages/neuros-mechint[dev]"
+          python -m pip check
+
+      - name: Qualify sweep contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q packages/neuros-mechint/src/neuros_mechint/representations
+          python -m py_compile \
+            packages/neuros-mechint/examples/11_representation_benchmark.py \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py
+          python -m ruff check \
+            packages/neuros-mechint/src/neuros_mechint/representations \
+            packages/neuros-mechint/examples/11_representation_benchmark.py \
+            packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_representation_authority.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py
+
+      - name: Run four-case smoke sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            --noise 0.0 --noise 0.35 \
+            --seed 0 --seed 1 \
+            --ae-epochs 1 \
+            > "${RUNNER_TEMP}/representation-noise-smoke.json"
+          python - "${RUNNER_TEMP}/representation-noise-smoke.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["schema_version"] == 2
+          assert len(payload["cases"]) == 4
+          assert len(payload["evidence"]) == 12
+          assert len(payload["noise_summaries"]) == 6
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["uncertainty_unit"] == "seed"
+          assert payload["metadata"]["operational_domain"] == "separate_from_scientific_metrics"
+          assert all("runtime_seconds" in row["operational"] for row in payload["evidence"])
+          assert "scientific_fingerprint" in payload
+          assert "winner" not in payload
+          PY
+
+      - name: Run full 70-case controlled sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/representation-noise-sweep
+          python packages/neuros-mechint/examples/12_representation_noise_sweep.py \
+            --ae-epochs 4 \
+            > artifacts/representation-noise-sweep/sweep.json
+          sha256sum artifacts/representation-noise-sweep/sweep.json \
+            > artifacts/representation-noise-sweep/SHA256SUMS
+
+      - name: Verify complete evidence grid
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import copy
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/representation-noise-sweep/sweep.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["kind"] == "neuros_controlled_representation_noise_sweep"
+          assert payload["schema_version"] == 2
+          assert payload["metadata"]["source_revision"] == os.environ["GITHUB_SHA"]
+          assert payload["metadata"]["study_version"] == 2
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["claim_scope"] == "controlled_representation_geometry"
+          assert payload["metadata"]["uncertainty_unit"] == "seed"
+          assert payload["metadata"]["operational_domain"] == "separate_from_scientific_metrics"
+          assert "winner" not in payload
+          assert len(payload["cases"]) == 70
+          assert len(payload["evidence"]) == 210
+          assert len(payload["noise_summaries"]) == 21
+
+          expected_pairs = {
+              (case["case_id"], method)
+              for case in payload["cases"]
+              for method in ("pca", "autoencoder", "tphate")
+          }
+          actual_pairs = {(row["case_id"], row["method_id"]) for row in payload["evidence"]}
+          assert actual_pairs == expected_pairs
+
+          noise_grid = payload["metadata"]["noise_grid"]
+          seeds = payload["metadata"]["seeds"]
+          assert noise_grid == [0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]
+          assert seeds == list(range(10))
+          assert {(case["noise_std"], case["seed"]) for case in payload["cases"]} == {
+              (noise, seed) for noise in noise_grid for seed in seeds
+          }
+
+          by_method = {row["method_id"]: row for row in payload["summaries"]}
+          assert set(by_method) == {"pca", "autoencoder", "tphate"}
+          for method in ("pca", "autoencoder"):
+              summary = by_method[method]
+              assert summary["declared_cases"] == 70
+              assert summary["ok_cases"] == 70
+              assert summary["failed_cases"] == 0
+              assert summary["unavailable_cases"] == 0
+              assert summary["operational_summaries"]["runtime_seconds"]["n"] == 70
+              for metric in summary["metric_summaries"].values():
+                  assert metric["n"] == 70
+                  for key in ("mean", "std", "sem", "min", "max"):
+                      assert math.isfinite(metric[key])
+
+          tphate = by_method["tphate"]
+          assert tphate["declared_cases"] == 70
+          assert tphate["ok_cases"] == 0
+          assert tphate["unavailable_cases"] == 70
+          assert tphate["metric_summaries"] == {}
+          assert tphate["operational_summaries"]["runtime_seconds"]["n"] == 70
+
+          noise_summaries = {
+              (row["method_id"], row["noise_std"]): row for row in payload["noise_summaries"]
+          }
+          assert set(noise_summaries) == {
+              (method, noise)
+              for method in ("pca", "autoencoder", "tphate")
+              for noise in noise_grid
+          }
+          for method in ("pca", "autoencoder"):
+              for noise in noise_grid:
+                  row = noise_summaries[(method, noise)]
+                  assert row["declared_seeds"] == 10
+                  assert row["ok_seeds"] == 10
+                  assert row["failed_seeds"] == 0
+                  assert row["unavailable_seeds"] == 0
+                  assert row["operational_summaries"]["runtime_seconds"]["n"] == 10
+                  for metric in row["metric_summaries"].values():
+                      assert metric["n"] == 10
+                      for key in ("mean", "std", "sem", "min", "max"):
+                          assert math.isfinite(metric[key])
+          for noise in noise_grid:
+              row = noise_summaries[("tphate", noise)]
+              assert row["declared_seeds"] == 10
+              assert row["ok_seeds"] == 0
+              assert row["unavailable_seeds"] == 10
+              assert row["metric_summaries"] == {}
+              assert row["operational_summaries"]["runtime_seconds"]["n"] == 10
+
+          for row in payload["evidence"]:
+              runtime = row["operational"]["runtime_seconds"]
+              assert math.isfinite(runtime) and runtime >= 0
+              if row["status"] != "ok":
+                  assert row["metrics"] == {}
+
+          scientific = copy.deepcopy(payload)
+          expected_scientific_fingerprint = scientific.pop("scientific_fingerprint")
+          scientific.pop("fingerprint")
+          scientific["kind"] = "neuros_controlled_representation_noise_sweep_scientific"
+          for row in scientific["evidence"]:
+              row.pop("operational")
+          for row in scientific["summaries"]:
+              row.pop("operational_summaries")
+          for row in scientific["noise_summaries"]:
+              row.pop("operational_summaries")
+          encoded_scientific = json.dumps(
+              scientific,
+              sort_keys=True,
+              separators=(",", ":"),
+              allow_nan=False,
+          )
+          assert expected_scientific_fingerprint == hashlib.sha256(
+              encoded_scientific.encode("utf-8")
+          ).hexdigest()
+
+          fingerprint = payload["fingerprint"]
+          unsigned = dict(payload)
+          unsigned.pop("fingerprint")
+          encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False)
+          assert fingerprint == hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+          print(
+              "CONTROLLED_SWEEP_VERIFIED cases=70 evidence=210 noise_summaries=21 "
+              f"scientific={expected_scientific_fingerprint} artifact={fingerprint}"
+          )
+          PY
+          sha256sum -c artifacts/representation-noise-sweep/SHA256SUMS
+
+      - name: Write qualification summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/representation-noise-sweep/sweep.json").read_text()
+          )
+          print("## Controlled representation noise sweep")
+          print()
+          print(f"- Source: `{payload['metadata']['source_revision']}`")
+          print(f"- Scientific fingerprint: `{payload['scientific_fingerprint']}`")
+          print(f"- Full artifact fingerprint: `{payload['fingerprint']}`")
+          print(f"- Cases: {len(payload['cases'])}")
+          print(f"- Method-case evidence rows: {len(payload['evidence'])}")
+          print(f"- Method × noise summaries: {len(payload['noise_summaries'])}")
+          print("- Uncertainty: sample standard deviation and SEM across 10 declared seeds per noise")
+          for summary in payload["summaries"]:
+              runtime = summary["operational_summaries"]["runtime_seconds"]["mean"]
+              print(
+                  f"- `{summary['method_id']}`: "
+                  f"ok={summary['ok_cases']}/{summary['declared_cases']}, "
+                  f"failed={summary['failed_cases']}, "
+                  f"unavailable={summary['unavailable_cases']}, "
+                  f"mean runtime={runtime:.6f}s"
+              )
+          print()
+          print(
+              "**Boundary:** controlled synthetic geometry only. Runtime is operational and "
+              "excluded from the scientific fingerprint. Known latent reference geometry is not "
+              "biological ground truth, and this sweep does not establish decoder, BCI, or "
+              "clinical superiority."
+          )
+          PY
+
+      - name: Upload immutable sweep evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: representation-noise-sweep-${{ github.sha }}
+          path: artifacts/representation-noise-sweep/
+          if-no-files-found: error
+          retention-days: 30

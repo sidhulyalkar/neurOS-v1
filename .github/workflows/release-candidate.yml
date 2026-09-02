@@ -4,13 +4,23 @@ on:
   pull_request:
     paths:
       - ".github/workflows/release-candidate.yml"
+      - ".github/workflows/reproducible-release-build.yml"
+      - "requirements/release-build-py311.txt"
+      - "packages/neuros-core/**"
+      - "packages/neuros-drivers/**"
+      - "packages/neuros-models/**"
+      - "packages/neuros/**"
       - "packages/*/pyproject.toml"
       - "packages/*/src/neuros/__init__.py"
       - "CITATION.cff"
       - "docs/RELEASE_POLICY.md"
       - "docs/SCIENTIFIC_CLAIMS.md"
+      - "release/package-policy.json"
+      - "scripts/build_reproducible_release.py"
       - "scripts/check_public_contracts.py"
+      - "scripts/check_release_dependency_closure.py"
       - "scripts/check_wheel_ownership.py"
+      - "scripts/list_release_packages.py"
       - "scripts/list_workspace_packages.py"
       - "mkdocs.yml"
   workflow_dispatch:
@@ -21,6 +31,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  RELEASE_SOURCE_REF: ${{ github.event.pull_request.head.ref || github.ref }}
+
 concurrency:
   group: release-candidate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -28,38 +42,100 @@ concurrency:
 jobs:
   build-and-verify:
     name: Build, validate, checksum, and smoke-install release artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ env.RELEASE_SOURCE_SHA }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+
+      - name: Require exact clean release source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${RELEASE_SOURCE_SHA}"
+          git diff --quiet HEAD --
+          git diff --cached --quiet HEAD --
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
-          python-version: "3.11"
+          python-version: "3.11.9"
           cache: pip
-      - name: Install release tooling
+          cache-dependency-path: requirements/release-build-py311.txt
+
+      - name: Install exact hash-pinned release build authority
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine pyyaml mkdocs-material cffconvert
-      - name: Validate public contracts and documentation
+          set -euo pipefail
+          python -m pip install \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement requirements/release-build-py311.txt
+          python -m pip check
+          python - <<'PY'
+          from importlib import metadata
+
+          expected = {
+              "pip": "26.2.1",
+              "build": "1.6.0",
+              "setuptools": "84.0.0",
+              "wheel": "0.48.0",
+              "packaging": "26.3",
+              "pyproject-hooks": "1.2.0",
+          }
+          observed = {name: metadata.version(name) for name in expected}
+          if observed != expected:
+              raise SystemExit(
+                  f"release build authority drift: expected={expected}, observed={observed}"
+              )
+          print(f"release build authority: {observed}")
+          PY
+
+      - name: Bind deterministic archive time to exact release source
         run: |
-          python scripts/check_public_contracts.py
-          cffconvert --validate
-          mkdocs build --strict --site-dir "${RUNNER_TEMP}/neuros-docs"
-      - name: Build all workspace wheels
+          set -euo pipefail
+          epoch="$(git show -s --format=%ct "${RELEASE_SOURCE_SHA}")"
+          test -n "${epoch}"
+          echo "SOURCE_DATE_EPOCH=${epoch}" >> "${GITHUB_ENV}"
+          echo "SOURCE_DATE_EPOCH=${epoch}"
+
+      - name: Build canonical default release wheels
         run: |
           set -euo pipefail
           DIST="${RUNNER_TEMP}/neuros-release"
-          mkdir -p "${DIST}"
-          mapfile -t PACKAGES < <(python scripts/list_workspace_packages.py)
-          for package in "${PACKAGES[@]}"
-          do
-            python -m build --wheel --outdir "${DIST}" "${package}"
-          done
-          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq "${#PACKAGES[@]}"
+          python scripts/build_reproducible_release.py \
+            --repo-root . \
+            --output "${DIST}" \
+            --source-revision "${RELEASE_SOURCE_SHA}" \
+            --source-date-epoch "${SOURCE_DATE_EPOCH}"
+          test "$(find "${DIST}" -maxdepth 1 -name '*.whl' | wc -l)" -eq \
+            "$(python scripts/list_release_packages.py --count)"
+
+      - name: Install release verification tooling after artifact construction
+        run: |
+          python -m pip install twine pyyaml mkdocs-material cffconvert
+
+      - name: Validate public contracts, release policy, and documentation
+        run: |
+          python scripts/check_public_contracts.py
+          python scripts/list_release_packages.py --all --json > "${RUNNER_TEMP}/release-package-policy.json"
+          cffconvert --validate
+          mkdocs build --strict --site-dir "${RUNNER_TEMP}/neuros-docs"
+
+      - name: Validate canonical wheel metadata and ownership
+        run: |
+          set -euo pipefail
+          DIST="${RUNNER_TEMP}/neuros-release"
           python -m twine check "${DIST}"/*.whl
           python scripts/check_wheel_ownership.py "${DIST}" \
             --output "${DIST}/wheel-ownership.json"
+
+      - name: Verify internal default dependency closure
+        run: |
+          set -euo pipefail
+          python scripts/check_release_dependency_closure.py \
+            "${RUNNER_TEMP}/neuros-release" \
+            --output "${RUNNER_TEMP}/neuros-release/release-dependency-closure.json"
+
       - name: Prove component namespace without the SDK
         run: |
           set -euo pipefail
@@ -90,7 +166,8 @@ jobs:
           if not neuros.__spec__ or not neuros.__spec__.submodule_search_locations:
               raise SystemExit("component-only neuros namespace has no search locations")
           PY
-      - name: Generate component and checksum manifests
+
+      - name: Generate self-describing release manifest and checksums
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -100,44 +177,137 @@ jobs:
           import os
           import subprocess
           import sys
+          from email.parser import Parser
           from pathlib import Path
           from zipfile import ZipFile
+          from packaging.utils import canonicalize_name
 
-          expected_count = int(
+          selected_policy = json.loads(
               subprocess.check_output(
-                  [sys.executable, "scripts/list_workspace_packages.py", "--count"],
+                  [sys.executable, "scripts/list_release_packages.py", "--json"],
                   text=True,
-              ).strip()
+              )
           )
+          expected_count = selected_policy["count"]
+          if expected_count <= 0:
+              raise SystemExit("default release package set must not be empty")
+
+          source_policy_path = Path("release/package-policy.json")
+          policy_bytes = source_policy_path.read_bytes()
+          policy_sha = hashlib.sha256(policy_bytes).hexdigest()
           dist = Path(os.environ["RUNNER_TEMP"]) / "neuros-release"
+          bundled_policy_path = dist / "package-policy.json"
+          bundled_policy_path.write_bytes(policy_bytes)
+
+          build_authority_path = dist / "reproducible-build-manifest.json"
+          if not build_authority_path.is_file():
+              raise SystemExit("reproducible build authority manifest is missing")
+          build_authority = json.loads(
+              build_authority_path.read_text(encoding="utf-8")
+          )
+          if build_authority.get("schema") != "neuros.reproducible_release_build.v1":
+              raise SystemExit("unexpected reproducible build authority schema")
+          build_source = build_authority.get("source", {})
+          if build_source.get("revision") != os.environ["RELEASE_SOURCE_SHA"]:
+              raise SystemExit("reproducible build authority source revision drift")
+          if str(build_source.get("source_date_epoch")) != os.environ["SOURCE_DATE_EPOCH"]:
+              raise SystemExit("reproducible build authority timestamp drift")
+          build_authority_sha = hashlib.sha256(
+              build_authority_path.read_bytes()
+          ).hexdigest()
+
           artifacts = []
           for wheel in sorted(dist.glob("*.whl")):
               digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
               with ZipFile(wheel) as archive:
                   metadata_name = next(
-                      name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+                      name
+                      for name in archive.namelist()
+                      if name.endswith(".dist-info/METADATA")
                   )
-                  metadata = archive.read(metadata_name).decode("utf-8", errors="strict")
-              fields = {}
-              for line in metadata.splitlines():
-                  if line.startswith("Name: "):
-                      fields["name"] = line[6:]
-                  elif line.startswith("Version: "):
-                      fields["version"] = line[9:]
-                  if len(fields) == 2:
-                      break
-              if set(fields) != {"name", "version"}:
+                  metadata = archive.read(metadata_name).decode(
+                      "utf-8", errors="strict"
+                  )
+              message = Parser().parsestr(metadata)
+              name = message.get("Name")
+              version = message.get("Version")
+              if not name or not version:
                   raise SystemExit(f"missing package metadata in {wheel.name}")
-              artifacts.append({"file": wheel.name, "sha256": digest, **fields})
+              artifacts.append(
+                  {
+                      "file": wheel.name,
+                      "sha256": digest,
+                      "name": name,
+                      "version": version,
+                  }
+              )
+
           if len(artifacts) != expected_count:
-              raise SystemExit(f"expected {expected_count} wheels, found {len(artifacts)}")
-          if len({item["name"] for item in artifacts}) != expected_count:
+              raise SystemExit(
+                  f"expected {expected_count} wheels, found {len(artifacts)}"
+              )
+          observed_names = {
+              canonicalize_name(item["name"]) for item in artifacts
+          }
+          if len(observed_names) != expected_count:
               raise SystemExit("release contains duplicate distribution names")
+          expected_names = {
+              canonicalize_name(item["distribution"])
+              for item in selected_policy["packages"]
+          }
+          if expected_names != observed_names:
+              raise SystemExit(
+                  "release wheel distributions differ from explicit package policy: "
+                  f"missing={sorted(expected_names - observed_names)}, "
+                  f"foreign={sorted(observed_names - expected_names)}"
+              )
+
+          build_rows = {
+              canonicalize_name(str(item.get("name", ""))): item
+              for item in build_authority.get("artifacts", [])
+          }
+          if set(build_rows) != observed_names:
+              raise SystemExit(
+                  "reproducible build authority distribution set differs from wheels"
+              )
+          for artifact in artifacts:
+              row = build_rows[canonicalize_name(artifact["name"])]
+              if row.get("file") != artifact["file"]:
+                  raise SystemExit(
+                      f"reproducible build filename drift for {artifact['name']}"
+                  )
+              if row.get("sha256") != artifact["sha256"]:
+                  raise SystemExit(
+                      f"reproducible build digest drift for {artifact['name']}"
+                  )
+              if str(row.get("version")) != artifact["version"]:
+                  raise SystemExit(
+                      f"reproducible build version drift for {artifact['name']}"
+                  )
+
+          closure_path = dist / "release-dependency-closure.json"
+          if not closure_path.is_file():
+              raise SystemExit("release dependency closure report is missing")
+          closure_payload = json.loads(closure_path.read_text(encoding="utf-8"))
+          if closure_payload.get("schema") != "neuros.release_dependency_closure.v1":
+              raise SystemExit("unexpected release dependency closure schema")
+          if closure_payload.get("status") != "pass":
+              raise SystemExit("release dependency closure is not passing")
+          closure_names = set(closure_payload.get("distributions", {}))
+          if closure_names != observed_names:
+              raise SystemExit(
+                  "release dependency closure distribution set differs from wheels: "
+                  f"missing={sorted(observed_names - closure_names)}, "
+                  f"foreign={sorted(closure_names - observed_names)}"
+              )
+          closure_sha = hashlib.sha256(closure_path.read_bytes()).hexdigest()
 
           ownership_path = dist / "wheel-ownership.json"
           if not ownership_path.is_file():
               raise SystemExit("wheel ownership manifest is missing")
-          ownership_payload = json.loads(ownership_path.read_text(encoding="utf-8"))
+          ownership_payload = json.loads(
+              ownership_path.read_text(encoding="utf-8")
+          )
           if ownership_payload.get("schema") != "neuros.wheel_ownership.v1":
               raise SystemExit("unexpected wheel ownership schema")
           if ownership_payload.get("status") != "pass":
@@ -145,68 +315,111 @@ jobs:
           ownership_sha = hashlib.sha256(ownership_path.read_bytes()).hexdigest()
 
           manifest = {
-              "schema_version": 1,
-              "git_sha": os.environ["GITHUB_SHA"],
-              "git_ref": os.environ["GITHUB_REF"],
+              "schema_version": 3,
+              "source_revision": os.environ["RELEASE_SOURCE_SHA"],
+              "source_ref": os.environ["RELEASE_SOURCE_REF"],
+              "github_event_sha": os.environ["GITHUB_SHA"],
               "artifact_count": len(artifacts),
               "artifacts": artifacts,
+              "reproducible_build": {
+                  "file": build_authority_path.name,
+                  "sha256": build_authority_sha,
+                  "schema": build_authority["schema"],
+                  "source_date_epoch": build_source["source_date_epoch"],
+                  "python_version": build_authority.get("build_authority", {}).get(
+                      "python_version"
+                  ),
+                  "toolchain": build_authority.get("build_authority", {}).get(
+                      "toolchain", {}
+                  ),
+                  "wheel_canonicalization": build_authority.get(
+                      "build_authority", {}
+                  ).get("wheel_canonicalization"),
+              },
+              "release_dependency_closure": {
+                  "file": closure_path.name,
+                  "sha256": closure_sha,
+                  "schema": closure_payload["schema"],
+                  "python_versions": closure_payload.get("python_versions", []),
+                  "target_environment_count": len(
+                      closure_payload.get("target_environments", [])
+                  ),
+                  "dependency_count": len(
+                      closure_payload.get("dependencies", [])
+                  ),
+              },
+              "release_policy": {
+                  "file": bundled_policy_path.name,
+                  "source_path": str(source_policy_path),
+                  "sha256": policy_sha,
+                  "selected": selected_policy,
+              },
               "wheel_ownership": {
                   "file": ownership_path.name,
                   "sha256": ownership_sha,
                   "schema": ownership_payload["schema"],
               },
           }
-          (dist / "release-manifest.json").write_text(
+          manifest_path = dist / "release-manifest.json"
+          manifest_path.write_text(
               json.dumps(manifest, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
           )
+          manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+
+          checksum_lines = [
+              *(f"{a['sha256']}  {a['file']}\n" for a in artifacts),
+              f"{build_authority_sha}  {build_authority_path.name}\n",
+              f"{closure_sha}  {closure_path.name}\n",
+              f"{ownership_sha}  {ownership_path.name}\n",
+              f"{policy_sha}  {bundled_policy_path.name}\n",
+              f"{manifest_sha}  {manifest_path.name}\n",
+          ]
           (dist / "SHA256SUMS").write_text(
-              "".join(f"{a['sha256']}  {a['file']}\n" for a in artifacts)
-              + f"{ownership_sha}  {ownership_path.name}\n",
-              encoding="utf-8",
+              "".join(checksum_lines), encoding="utf-8"
           )
           PY
+
       - name: Verify checksums before installation
         run: |
           set -euo pipefail
           cd "${RUNNER_TEMP}/neuros-release"
           sha256sum --check SHA256SUMS
-      - name: Smoke-install the public SDK and Arena from this exact wheel set
+
+      - name: Smoke-install the minimal public SDK from this exact wheel set
         run: |
           set -euo pipefail
           DIST="${RUNNER_TEMP}/neuros-release"
           python -m venv "${RUNNER_TEMP}/release-smoke"
           PY="${RUNNER_TEMP}/release-smoke/bin/python"
           NEUROS="${RUNNER_TEMP}/release-smoke/bin/neuros"
-          ARENA="${RUNNER_TEMP}/release-smoke/bin/neuros-arena"
           "${PY}" -m pip install --upgrade pip
 
           CORE_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_core-*.whl' -print -quit)"
           DRIVERS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_drivers-*.whl' -print -quit)"
-          ARENA_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_arena-*.whl' -print -quit)"
           MODELS_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros_models-*.whl' -print -quit)"
           SDK_WHEEL="$(find "${DIST}" -maxdepth 1 -name 'neuros-[0-9]*.whl' -print -quit)"
           test -n "${CORE_WHEEL}"
           test -n "${DRIVERS_WHEEL}"
-          test -n "${ARENA_WHEEL}"
           test -n "${MODELS_WHEEL}"
           test -n "${SDK_WHEEL}"
 
-          # Install internal public-runtime dependencies explicitly from the
-          # artifacts produced by this exact source revision. External
-          # third-party dependencies may resolve normally, but neurOS
-          # components cannot be substituted by stale package-index artifacts.
           "${PY}" -m pip install \
             "${CORE_WHEEL}" \
             "${DRIVERS_WHEEL}" \
             "${MODELS_WHEEL}" \
-            "${SDK_WHEEL}" \
-            "${ARENA_WHEEL}"
+            "${SDK_WHEEL}"
           "${PY}" -m pip check
           "${PY}" - <<'PY'
           import neuros
 
-          required = {"SignalFrame", "Pipeline", "BaseDriver", "BaseModel", "load_plugin"}
+          required = {
+              "SignalFrame",
+              "Pipeline",
+              "BaseDriver",
+              "BaseModel",
+              "load_plugin",
+          }
           missing = sorted(name for name in required if not hasattr(neuros, name))
           if missing:
               raise SystemExit(f"public neuros SDK root is missing exports: {missing}")
@@ -215,23 +428,25 @@ jobs:
           PY
           "${NEUROS}" doctor --json
           "${NEUROS}" compatibility --json
-          "${ARENA}" --preset dual-target-smoke --output "${RUNNER_TEMP}/arena-wheel-smoke.json"
-          test -s "${RUNNER_TEMP}/arena-wheel-smoke.json"
+
       - name: Upload immutable release-candidate bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: neurOS-release-candidate-${{ github.sha }}
+          name: neurOS-release-candidate-${{ env.RELEASE_SOURCE_SHA }}
           path: |
             ${{ runner.temp }}/neuros-release/*.whl
             ${{ runner.temp }}/neuros-release/SHA256SUMS
+            ${{ runner.temp }}/neuros-release/package-policy.json
+            ${{ runner.temp }}/neuros-release/release-dependency-closure.json
             ${{ runner.temp }}/neuros-release/release-manifest.json
+            ${{ runner.temp }}/neuros-release/reproducible-build-manifest.json
             ${{ runner.temp }}/neuros-release/wheel-ownership.json
           if-no-files-found: error
           retention-days: 30
 
   publishing-disabled:
     name: Publishing authority remains intentionally disabled
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Explain publication boundary
         run: |
