@@ -12,6 +12,7 @@ use memmap2::{Mmap, MmapOptions};
 use sha2::{Digest, Sha256};
 use tracing::{debug, instrument};
 
+use crate::content_identity::declared_dataset_content_sha256 as compute_dataset_content_sha256;
 use crate::error::{Result, RuntimeError};
 use crate::manifest::{DatasetManifest, MANIFEST_FILE, Record};
 
@@ -66,6 +67,8 @@ pub struct Dataset {
     manifest: DatasetManifest,
     records: Vec<Arc<Record>>,
     manifest_sha256: String,
+    declared_dataset_content_sha256: Option<String>,
+    verified_dataset_content_sha256: Mutex<Option<String>>,
     mmap_cache: Mutex<HashMap<PathBuf, Weak<MappedRegion>>>,
 }
 
@@ -80,13 +83,17 @@ pub struct WindowHandle {
     region: Arc<MappedRegion>,
     record: Arc<Record>,
     start_frame: usize,
+    end_frame_exclusive: usize,
     length_frames: usize,
     frame_elements: usize,
+    record_byte_end_exclusive: u64,
     source_size_bytes: u64,
     manifest_sha256: String,
     declared_source_sha256: Option<String>,
     verified_source_sha256: Option<String>,
     source_verification_state: SourceVerificationState,
+    declared_dataset_content_sha256: Option<String>,
+    verified_dataset_content_sha256: Option<String>,
 }
 
 enum StreamMessage {
@@ -125,6 +132,7 @@ impl Dataset {
             .map_err(|source| RuntimeError::io(&manifest_path, source))?;
         let manifest: DatasetManifest = serde_json::from_slice(&bytes)?;
         manifest.validate()?;
+        let declared_dataset_content_sha256 = compute_dataset_content_sha256(&manifest)?;
         let records = manifest.records.iter().cloned().map(Arc::new).collect();
         let manifest_sha256 = format!("{:x}", Sha256::digest(&bytes));
 
@@ -133,6 +141,8 @@ impl Dataset {
             manifest,
             records,
             manifest_sha256,
+            declared_dataset_content_sha256,
+            verified_dataset_content_sha256: Mutex::new(None),
             mmap_cache: Mutex::new(HashMap::new()),
         }))
     }
@@ -143,6 +153,62 @@ impl Dataset {
 
     pub fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
+    }
+
+    pub fn declared_dataset_content_sha256(&self) -> Option<&str> {
+        self.declared_dataset_content_sha256.as_deref()
+    }
+
+    pub fn verified_dataset_content_sha256(&self) -> Result<Option<String>> {
+        self.verified_dataset_content_sha256
+            .lock()
+            .map(|value| value.clone())
+            .map_err(|_| {
+                RuntimeError::Validation("dataset verification state lock was poisoned".into())
+            })
+    }
+
+    /// Verify every declared source needed by the canonical dataset content identity.
+    ///
+    /// Returns `Ok(None)` for a partially hashed manifest. No dataset-level verified
+    /// identity is claimed unless every record declares a source SHA-256 and every
+    /// referenced mapped source matches its declaration.
+    pub fn verify_content(&self) -> Result<Option<String>> {
+        let Some(expected_dataset_sha256) = self.declared_dataset_content_sha256.clone() else {
+            return Ok(None);
+        };
+
+        let mut records: Vec<_> = self.records.iter().collect();
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+        for record in records {
+            let expected_source_sha256 = record.source_sha256.as_deref().ok_or_else(|| {
+                RuntimeError::Validation(
+                    "declared dataset content identity requires every record source hash".into(),
+                )
+            })?;
+            let (path, required_end) = self.resolve_record_source(record)?;
+            let (region, verified_source_sha256) =
+                self.map_source(&path, Some(expected_source_sha256))?;
+            let mapped_size = mapped_size_bytes(&region)?;
+            if mapped_size < required_end {
+                return Err(RuntimeError::SourceTooShort {
+                    path,
+                    actual: mapped_size,
+                    required: required_end,
+                });
+            }
+            if verified_source_sha256.as_deref() != Some(expected_source_sha256) {
+                return Err(RuntimeError::Validation(
+                    "source verification completed without the declared digest".into(),
+                ));
+            }
+        }
+
+        let mut state = self.verified_dataset_content_sha256.lock().map_err(|_| {
+            RuntimeError::Validation("dataset verification state lock was poisoned".into())
+        })?;
+        *state = Some(expected_dataset_sha256.clone());
+        Ok(Some(expected_dataset_sha256))
     }
 
     pub fn plan_windows(
@@ -273,41 +339,11 @@ impl Dataset {
     }
 
     fn open_window(&self, descriptor: WindowDescriptor) -> Result<WindowHandle> {
-        let requested_path = self.root.join(&descriptor.record.path);
-        let path = std::fs::canonicalize(&requested_path)
-            .map_err(|source| RuntimeError::io(&requested_path, source))?;
-        if !path.starts_with(&self.root) {
-            return Err(RuntimeError::Validation(format!(
-                "record {:?} resolves outside the dataset root: {}",
-                descriptor.record.id,
-                path.display()
-            )));
-        }
-
-        let required_end = descriptor.record.required_end_byte()?;
-        let metadata =
-            std::fs::metadata(&path).map_err(|source| RuntimeError::io(&path, source))?;
-        if !metadata.is_file() {
-            return Err(RuntimeError::Validation(format!(
-                "record {:?} source is not a regular file: {}",
-                descriptor.record.id,
-                path.display()
-            )));
-        }
-        if metadata.len() < required_end {
-            return Err(RuntimeError::SourceTooShort {
-                path,
-                actual: metadata.len(),
-                required: required_end,
-            });
-        }
-
+        let (path, required_end) = self.resolve_record_source(&descriptor.record)?;
         let declared_source_sha256 = descriptor.record.source_sha256.clone();
         let (region, verified_source_sha256) =
             self.map_source(&path, declared_source_sha256.as_deref())?;
-        let mapped_size = u64::try_from(region.mmap.len()).map_err(|_| {
-            RuntimeError::Validation("mapped source size does not fit in u64".into())
-        })?;
+        let mapped_size = mapped_size_bytes(&region)?;
         if mapped_size < required_end {
             return Err(RuntimeError::SourceTooShort {
                 path,
@@ -320,19 +356,60 @@ impl Dataset {
         } else {
             SourceVerificationState::Unverified
         };
+        let end_frame_exclusive = descriptor
+            .start_frame
+            .checked_add(descriptor.length_frames)
+            .ok_or_else(|| RuntimeError::InvalidWindow("window frame extent overflowed usize".into()))?;
+        let verified_dataset_content_sha256 = self.verified_dataset_content_sha256()?;
 
         Ok(WindowHandle {
             region,
             record: descriptor.record,
             start_frame: descriptor.start_frame,
+            end_frame_exclusive,
             length_frames: descriptor.length_frames,
             frame_elements: descriptor.frame_elements,
+            record_byte_end_exclusive: required_end,
             source_size_bytes: mapped_size,
             manifest_sha256: self.manifest_sha256.clone(),
             declared_source_sha256,
             verified_source_sha256,
             source_verification_state,
+            declared_dataset_content_sha256: self.declared_dataset_content_sha256.clone(),
+            verified_dataset_content_sha256,
         })
+    }
+
+    fn resolve_record_source(&self, record: &Record) -> Result<(PathBuf, u64)> {
+        let requested_path = self.root.join(&record.path);
+        let path = std::fs::canonicalize(&requested_path)
+            .map_err(|source| RuntimeError::io(&requested_path, source))?;
+        if !path.starts_with(&self.root) {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} resolves outside the dataset root: {}",
+                record.id,
+                path.display()
+            )));
+        }
+
+        let required_end = record.required_end_byte()?;
+        let metadata =
+            std::fs::metadata(&path).map_err(|source| RuntimeError::io(&path, source))?;
+        if !metadata.is_file() {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} source is not a regular file: {}",
+                record.id,
+                path.display()
+            )));
+        }
+        if metadata.len() < required_end {
+            return Err(RuntimeError::SourceTooShort {
+                path,
+                actual: metadata.len(),
+                required: required_end,
+            });
+        }
+        Ok((path, required_end))
     }
 
     fn map_source(
@@ -415,6 +492,11 @@ impl Dataset {
     }
 }
 
+fn mapped_size_bytes(region: &MappedRegion) -> Result<u64> {
+    u64::try_from(region.mmap.len())
+        .map_err(|_| RuntimeError::Validation("mapped source size does not fit in u64".into()))
+}
+
 impl WindowHandle {
     pub fn record_id(&self) -> &str {
         &self.record.id
@@ -430,6 +512,10 @@ impl WindowHandle {
 
     pub fn start_frame(&self) -> usize {
         self.start_frame
+    }
+
+    pub const fn end_frame_exclusive(&self) -> usize {
+        self.end_frame_exclusive
     }
 
     pub fn shape(&self) -> Vec<usize> {
@@ -450,6 +536,14 @@ impl WindowHandle {
         self.source_size_bytes
     }
 
+    pub fn record_byte_start(&self) -> u64 {
+        self.record.offset_bytes
+    }
+
+    pub const fn record_byte_end_exclusive(&self) -> u64 {
+        self.record_byte_end_exclusive
+    }
+
     pub fn declared_source_sha256(&self) -> Option<&str> {
         self.declared_source_sha256.as_deref()
     }
@@ -460,6 +554,14 @@ impl WindowHandle {
 
     pub const fn source_verification_state(&self) -> SourceVerificationState {
         self.source_verification_state
+    }
+
+    pub fn declared_dataset_content_sha256(&self) -> Option<&str> {
+        self.declared_dataset_content_sha256.as_deref()
+    }
+
+    pub fn verified_dataset_content_sha256(&self) -> Option<&str> {
+        self.verified_dataset_content_sha256.as_deref()
     }
 
     pub fn element_len(&self) -> Result<usize> {
@@ -621,17 +723,25 @@ mod tests {
             &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
         );
         assert_eq!(window.shape(), vec![2, 4]);
+        assert_eq!(window.start_frame(), 0);
+        assert_eq!(window.end_frame_exclusive(), 2);
+        assert_eq!(window.record_byte_start(), 0);
+        assert_eq!(window.record_byte_end_exclusive(), 96);
         assert_eq!(
             window.source_verification_state(),
             SourceVerificationState::Unverified
         );
         assert_eq!(window.declared_source_sha256(), None);
         assert_eq!(window.verified_source_sha256(), None);
+        assert_eq!(window.declared_dataset_content_sha256(), None);
+        assert_eq!(window.verified_dataset_content_sha256(), None);
     }
 
     #[test]
     fn declared_source_hash_is_verified_before_window_is_returned() {
         let (_directory, dataset, source_sha256) = fixture_with_declared_hash(true);
+        assert!(dataset.declared_dataset_content_sha256().is_some());
+        assert_eq!(dataset.verified_dataset_content_sha256().unwrap(), None);
         let mut stream = dataset
             .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 1)
             .unwrap();
@@ -642,6 +752,40 @@ mod tests {
             window.source_verification_state(),
             SourceVerificationState::VerifiedAtOpen
         );
+        assert!(window.declared_dataset_content_sha256().is_some());
+        assert_eq!(window.verified_dataset_content_sha256(), None);
+    }
+
+    #[test]
+    fn explicit_dataset_verification_promotes_dataset_content_identity() {
+        let (_directory, dataset, source_sha256) = fixture_with_declared_hash(true);
+        let declared = dataset
+            .declared_dataset_content_sha256()
+            .unwrap()
+            .to_owned();
+        assert_eq!(dataset.verify_content().unwrap(), Some(declared.clone()));
+        assert_eq!(
+            dataset.verified_dataset_content_sha256().unwrap(),
+            Some(declared.clone())
+        );
+
+        let mut stream = dataset
+            .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 1)
+            .unwrap();
+        let window = stream.next().unwrap().unwrap();
+        assert_eq!(window.verified_source_sha256(), Some(source_sha256.as_str()));
+        assert_eq!(
+            window.verified_dataset_content_sha256(),
+            Some(declared.as_str())
+        );
+    }
+
+    #[test]
+    fn partial_hash_manifest_cannot_claim_verified_dataset_identity() {
+        let (_directory, dataset) = fixture();
+        assert_eq!(dataset.declared_dataset_content_sha256(), None);
+        assert_eq!(dataset.verify_content().unwrap(), None);
+        assert_eq!(dataset.verified_dataset_content_sha256().unwrap(), None);
     }
 
     #[test]
