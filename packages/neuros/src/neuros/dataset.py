@@ -72,6 +72,16 @@ class DataWindow:
 
     @property
     def provenance(self) -> dict[str, Any]:
+        """Return explicit source and runtime identity for this window.
+
+        ``verified_at_open`` means the complete regular file matched the SHA-256
+        declared by the dataset manifest when the native runtime first verified
+        that mapped source. It does not claim the surrounding filesystem is
+        immutable against later external writers.
+        """
+
+        declared = self._native_window.declared_source_sha256
+        verified = self._native_window.verified_source_sha256
         return {
             "record_id": self.record_id,
             "subject": self.subject,
@@ -81,6 +91,9 @@ class DataWindow:
             "sampling_hz": self.sampling_hz,
             "manifest_sha256": str(self._native_window.manifest_sha256),
             "source_size_bytes": int(self._native_window.source_size_bytes),
+            "declared_source_sha256": None if declared is None else str(declared),
+            "verified_source_sha256": None if verified is None else str(verified),
+            "source_verification_state": str(self._native_window.source_verification_state),
         }
 
     def __getattr__(self, name: str) -> Any:
