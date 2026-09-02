@@ -1,0 +1,122 @@
+{
+  "claim_scope": "controlled synthetic representation geometry and temporal-objective controls only",
+  "evidence_id": "controlled-representation-program-v3",
+  "hypothesis_updates": {
+    "retired_or_weakened": [
+      "Four-epoch autoencoder noise fragility as evidence of intrinsic nonlinear-autoencoder inferiority.",
+      "One-step temporal prediction as sufficient evidence for general superiority over converged reconstruction."
+    ],
+    "still_live": [
+      "Richer temporal objectives or externally pretrained temporal representations may add information beyond converged reconstruction.",
+      "Development-only neural geometry may prospectively predict later decoding gains, but that requires a dedicated prospective statistic and frozen reveal protocol rather than descriptive RSA."
+    ]
+  },
+  "kind": "neuros_reviewed_aggregate_evidence",
+  "model_context_policy": {
+    "context_only": true,
+    "excluded": [
+      "per-case rows",
+      "raw arrays",
+      "operational measurements",
+      "hidden or OOD outcomes",
+      "cross-objective loss ranking"
+    ],
+    "may_inform_hypothesis_generation": true,
+    "may_not_be_used_as_scientific_promotion": true,
+    "payload_class": "aggregate_metrics"
+  },
+  "optimization_horizon": {
+    "final_reconstruction_loss_mean": {
+      "autoencoder_e16": [0.6555010342597962,0.6596794402599334,0.6705834424495698,0.6952644395828247,0.7248186683654785,0.774377189874649,0.8166716814041137],
+      "autoencoder_e256": [0.0007512429013149813,0.01022347482852638,0.03365081511437893,0.08506108239293099,0.14506588026881218,0.2461259564757347,0.33618902504444126],
+      "autoencoder_e4": [0.9823616874217986,0.9826393556594848,0.9835052895545958,0.9854784619808197,0.9878154051303862,0.9916537261009216,0.9948574233055114],
+      "autoencoder_e64": [0.0330661173723638,0.04273688366636634,0.06754261277616024,0.12861935868859292,0.19434108644723894,0.3051438674330711,0.4046032631397248]
+    },
+    "reference_local_knn_mean": {
+      "autoencoder_e256": [0.9007142857142856,0.8952678571428571,0.8721428571428571,0.8049107142857143,0.7373214285714285,0.6224107142857143,0.526875],
+      "autoencoder_e4": [0.8199107142857143,0.7322321428571429,0.6013392857142856,0.4515178571428572,0.35124999999999995,0.25330357142857146,0.19267857142857142],
+      "autoencoder_e64": [0.8939285714285713,0.8883928571428571,0.8616071428571429,0.7950892857142857,0.7319642857142856,0.6276785714285714,0.530982142857143],
+      "pca": [0.8944642857142858,0.8767857142857143,0.8609821428571429,0.8158928571428572,0.7572321428571428,0.6535714285714286,0.5570535714285714]
+    },
+    "reference_pairwise_rank_mean": {
+      "autoencoder_e256": [0.7947947400438649,0.7904627580425687,0.7831765792567282,0.7642801098976703,0.7435292034401033,0.7095284217211671,0.6602916469122293],
+      "autoencoder_e4": [0.523394547660536,0.5179406191803742,0.506248670701425,0.480423916713172,0.4476217611577013,0.386074636672968,0.3232515549575453],
+      "autoencoder_e64": [0.7217616774523079,0.7210174237328022,0.7184989392015259,0.6944227544844411,0.6739344743451242,0.6416722806102235,0.6002316280073321],
+      "pca": [0.6061508628610321,0.6055872718910973,0.6044787200457881,0.6016442438036039,0.5973151266886708,0.5864417678110057,0.5708011424079529]
+    }
+  },
+  "review_fingerprint": "60ff05842043fd444c27c57d34fb6911361b927a1965d95d9c046ddb91ad703b",
+  "reviewed_observations": [
+    "The four-epoch autoencoder was materially under-optimized. By 64 to 256 epochs, reconstruction loss fell sharply and most apparent local-geometry fragility recovered, so the earlier short-horizon degradation is partly an optimization artifact rather than clean representation-class evidence.",
+    "Well-optimized autoencoders and PCA preserve different controlled geometry. PCA better preserves observed-space pairwise ordering, while converged autoencoders can better preserve the known synthetic latent reference pairwise geometry. There is no universal winner.",
+    "The ordered lag-1 predictive autoencoder beat the within-sequence shuffled-successor null on every declared geometry metric at every noise level, with every recorded minimum seed-level effect still positive. Temporal correspondence therefore materially constrains the learned predictive representation in this synthetic system.",
+    "The ordered lag-1 predictive autoencoder did not establish superiority over the matched-capacity reconstruction autoencoder. Effects are small or mixed at low to moderate noise, and local geometry becomes modestly worse for prediction at high noise.",
+    "Objective-specific training losses are diagnostics only and are not cross-objective scores.",
+    "No T-PHATE or external temporal-SSL efficacy result is contained in this evidence.",
+    "All reference geometry is synthetic, not biological ground truth, neural decoding performance, BCI learnability, or clinical evidence."
+  ],
+  "schema_version": 1,
+  "scientific_fingerprint": "2635b1f25bf489dd08ad3204d70c70ba9a6d84ce996075d4c087fd459cfaaa89",
+  "source_revision": "36c7c239c2779b51f20280b2a252d9ea17ae9a47",
+  "source_studies": {
+    "autoencoder_optimization_horizon": {
+      "cases": 70,
+      "full_artifact_fingerprint": "74a726d2a1d2813bae8346e27d94b5f0ced7ddf4392991b8548b2ed948c03fa9",
+      "method_case_rows": 350,
+      "scientific_fingerprint": "bf3fb77447b608c0221a73719af10c9899c4fdec46da0a7eecacceda21169f9c",
+      "source_revision": "f6c1b9c080cfd34991977b154feea23297d5f73c",
+      "study_json_sha256": "0d33cc434fea55ec7e5e45b1b49daba6e10932ac89bf07b6aee5cea1e6e328f9",
+      "zip_sha256": "ca760b1496c27eab19884087319985209d8366df0b8d4c79b6f55c241dbf9bb0"
+    },
+    "temporal_objective_control": {
+      "cases": 70,
+      "full_artifact_fingerprint": "c9cde20d41cd1707d1180c766cac95b450b8efeff2d1f9bf5b8e0839f99351b8",
+      "matched_effect_rows": 700,
+      "method_case_rows": 280,
+      "scientific_fingerprint": "f0cf3cd460e3559d505d795c6d8ad9f6d98b28c3e7315c821d089f97e5fa8d00",
+      "source_revision": "36c7c239c2779b51f20280b2a252d9ea17ae9a47",
+      "study_json_sha256": "3501421da66fb88d39eed690818ce37be5662b8364cd19aae59d8dc2e1db315c",
+      "zip_sha256": "dc2cf26ac6e2b0fe3d54f91db24f13b89f3670a95df5552134f29e9e99fd0a04"
+    }
+  },
+  "study_parameters": {
+    "batch_size": 64,
+    "components": 3,
+    "hidden_dim": 32,
+    "noise_std": [0.0,0.1,0.2,0.35,0.5,0.75,1.0],
+    "optimization_epoch_grid": [4,16,64,256],
+    "seed_count_per_noise": 10,
+    "sequence_boundary_policy": "never_cross",
+    "temporal_lag": 1,
+    "temporal_objective_epochs": 256
+  },
+  "temporal_objective": {
+    "primary_predictive_vs_shuffled": {
+      "effect_orientation": "positive means ordered predictive preserves more declared geometry",
+      "mean": {
+        "local_knn_preservation": [0.1725892857142857,0.3240178571428571,0.6141071428571429,0.6875892857142857,0.6152678571428571,0.4886607142857143,0.3851785714285715],
+        "pairwise_distance_rank": [0.4561987928054297,0.4544406844083764,0.5631530805067408,0.7060521146933908,0.6947860390295069,0.6846152665237325,0.6318579374717195],
+        "reference_local_knn_preservation": [0.17160714285714285,0.2979464285714285,0.5834821428571428,0.6718750000000001,0.6233035714285714,0.5053571428571428,0.3960714285714286],
+        "reference_pairwise_distance_rank": [0.5218671299858897,0.5041478726401317,0.5735731191363881,0.6659509386443425,0.6896862603240697,0.6572111710289008,0.5996688921618795],
+        "temporal_continuity_ratio": [0.09745612854683147,0.13326158814932768,0.40226732248739194,0.6410350879997755,0.69844606090363,0.6590591668976674,0.6107081767832208]
+      },
+      "minimum_seed_effect": {
+        "local_knn_preservation": [0.09107142857142847,0.17053571428571435,0.5,0.6133928571428571,0.5705357142857144,0.43750000000000006,0.33035714285714285],
+        "pairwise_distance_rank": [0.16870240876002063,0.14559925721798128,0.22592009571937788,0.541302890366091,0.5402145636266507,0.5528463936928792,0.5292042675035088],
+        "reference_local_knn_preservation": [0.09375,0.1473214285714285,0.4633928571428572,0.6125,0.5696428571428571,0.42232142857142857,0.3357142857142857],
+        "reference_pairwise_distance_rank": [0.26110343119726187,0.1891748939814848,0.15645500446022653,0.4421763521317995,0.5389132748618669,0.49319547257774,0.3995536015906429],
+        "temporal_continuity_ratio": [0.06883322104994591,0.07925983371310655,0.20028327795637418,0.5199522306224551,0.601910598569385,0.5153640524835497,0.5004240363635245]
+      }
+    },
+    "secondary_predictive_vs_reconstruction": {
+      "effect_orientation": "positive means predictive preserves more declared geometry",
+      "mean": {
+        "local_knn_preservation": [-0.0020535714285714545,0.0025892857142857163,0.00714285714285714,0.003482142857142867,-0.014642857142857157,-0.025714285714285724,-0.040803571428571425],
+        "pairwise_distance_rank": [-0.005926002137943365,-0.010881607677661508,-0.01613792927026094,-0.015091148975747726,-0.01599023458491309,-0.017128371121594023,-0.03905560152522327],
+        "reference_local_knn_preservation": [0.0003571428571428559,0.003482142857142856,0.003571428571428592,0.008214285714285707,-0.0052678571428571574,-0.023839285714285695,-0.0458035714285714],
+        "reference_pairwise_distance_rank": [-0.0056943786029524214,0.0006699784639561223,0.003214733010803794,0.011226996876182439,0.012705962230139057,-0.006375758027703732,-0.01818778100045539],
+        "temporal_continuity_ratio": [-0.00030616717653217385,0.0011768647034228045,0.0034561025142843304,0.0046381614140786395,0.005349682010836148,-0.006013108527632138,-0.016837078479166025]
+      }
+    }
+  }
+}

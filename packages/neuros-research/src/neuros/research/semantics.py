@@ -27,6 +27,7 @@ ClaimRelation = Literal[
     "complementarity",
     "stability",
     "control_sweep",
+    "prospective_prediction",
 ]
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -39,11 +40,17 @@ _ALLOWED_CLAIM_RELATIONS = frozenset(
         "complementarity",
         "stability",
         "control_sweep",
+        "prospective_prediction",
     }
 )
 _COMPARATIVE_CLAIM_RE = re.compile(
     r"\b(?:than|versus|vs\.?|compared(?:\s+to|\s+with)?|relative\s+to|"
     r"matched[-\s]?control|baseline|improvement\s+over|gain\s+over|reduction\s+versus)\b",
+    re.IGNORECASE,
+)
+_PROSPECTIVE_PREDICTION_RE = re.compile(
+    r"\b(?:prospectiv(?:e|ely)|predicts?|forecast(?:s|ing|ed)?|later\s+validation|"
+    r"subsequent\s+validation|future\s+validation|pre[-\s]?reveal\s+screen(?:s|ing)?)\b",
     re.IGNORECASE,
 )
 
@@ -127,6 +134,12 @@ ALGORITHMIC_METRIC_REGISTRY: dict[str, MetricSpec] = {
         "rsa_spearman",
         "higher_is_better",
         "Development-only Spearman RSA alignment between frozen representation and neural geometry.",
+    ),
+    "prospective_geometry_gain_spearman": MetricSpec(
+        "prospective_geometry_gain_spearman",
+        "higher_is_better",
+        "Spearman correlation across a predeclared candidate set between a geometry score frozen before outcome reveal and the subsequently revealed matched-control validation Pearson delta.",
+        claim_relation="prospective_prediction",
     ),
     "temporal_shift_drop": MetricSpec(
         "temporal_shift_drop",
@@ -319,6 +332,13 @@ class SemanticResearchProposal:
             raise ValueError(
                 "explicit comparative claim requires a comparative primary metric, "
                 "not an absolute metric"
+            )
+        if relation != "prospective_prediction" and _PROSPECTIVE_PREDICTION_RE.search(
+            explicit_claim_text
+        ):
+            raise ValueError(
+                "prospective prediction claim requires the prospective_prediction relation "
+                "and prospective_geometry_gain_spearman primary metric"
             )
 
         known_metrics = set(self.proposal.development_metrics)

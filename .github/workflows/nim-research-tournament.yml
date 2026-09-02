@@ -74,15 +74,24 @@ jobs:
           from pathlib import Path
 
           from neuros.research.reviewed_context import load_reviewed_aggregate_context
+          from neuros.research.semantics import metric_registry_payload
 
           path = Path(
-              "packages/neuros-research/evidence/controlled_representation_noise_sweep_v2.json"
+              "packages/neuros-research/evidence/controlled_representation_program_v3.json"
           )
           payload = load_reviewed_aggregate_context(path)
+          assert payload["evidence_id"] == "controlled-representation-program-v3"
           assert payload["review_fingerprint"] == (
-              "46169bc5770bc7c6d56867c5c6eb044b367edafaedc09e24498a4658be3dc6bc"
+              "60ff05842043fd444c27c57d34fb6911361b927a1965d95d9c046ddb91ad703b"
           )
-          print("reviewed aggregate evidence verified before network dispatch")
+          assert payload["scientific_fingerprint"] == (
+              "2635b1f25bf489dd08ad3204d70c70ba9a6d84ce996075d4c087fd459cfaaa89"
+          )
+          registry = metric_registry_payload()
+          assert registry["prospective_geometry_gain_spearman"]["claim_relation"] == (
+              "prospective_prediction"
+          )
+          print("reviewed v3 evidence and prospective prediction semantics verified")
           PY
 
       - name: Run live evidence-informed NVIDIA NIM tournament
@@ -115,7 +124,7 @@ jobs:
           payload = json.loads(raw)
           if payload.get("kind") != "neuros_nim_research_tournament":
               raise SystemExit("unexpected tournament artifact kind")
-          if payload.get("schema_version") != 2 or payload.get("semantic_contract_version") != 1:
+          if payload.get("schema_version") != 2 or payload.get("semantic_contract_version") != 2:
               raise SystemExit("unexpected tournament semantic schema")
           if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
               raise SystemExit("tournament artifact source revision mismatch")
@@ -128,10 +137,16 @@ jobs:
           reviewed = public_context.get("reviewed_prior_evidence")
           if not isinstance(reviewed, dict):
               raise SystemExit("reviewed aggregate evidence is missing from public context")
+          if reviewed.get("evidence_id") != "controlled-representation-program-v3":
+              raise SystemExit("unexpected reviewed aggregate evidence ID")
           if reviewed.get("review_fingerprint") != (
-              "46169bc5770bc7c6d56867c5c6eb044b367edafaedc09e24498a4658be3dc6bc"
+              "60ff05842043fd444c27c57d34fb6911361b927a1965d95d9c046ddb91ad703b"
           ):
               raise SystemExit("unexpected reviewed aggregate evidence identity")
+          if reviewed.get("scientific_fingerprint") != (
+              "2635b1f25bf489dd08ad3204d70c70ba9a6d84ce996075d4c087fd459cfaaa89"
+          ):
+              raise SystemExit("unexpected reviewed scientific evidence identity")
           policy = reviewed.get("model_context_policy", {})
           if policy.get("payload_class") != "aggregate_metrics" or policy.get("context_only") is not True:
               raise SystemExit("reviewed evidence dispatch policy mismatch")
@@ -142,6 +157,9 @@ jobs:
           if len(proposals) != 5:
               raise SystemExit("expected exactly five validated proposals")
           proposal_ids = {row["candidate_id"] for row in proposals}
+          relations = {row.get("claim_relation") for row in proposals}
+          if "prospective_prediction" not in relations:
+              raise SystemExit("tournament omitted required prospective geometry-screening proposal")
           reviews = payload.get("critic", {}).get("reviews", [])
           if {row.get("candidate_id") for row in reviews} != proposal_ids:
               raise SystemExit("critic review identities do not match proposals")
@@ -194,6 +212,7 @@ jobs:
           print()
           print(f"- Artifact: `{payload['fingerprint']}`")
           print(f"- Source: `{payload['source_revision']}`")
+          print(f"- Semantic contract: v{payload['semantic_contract_version']}")
           print(f"- Reviewed evidence: `{reviewed['review_fingerprint']}`")
           print(f"- Prior scientific evidence: `{reviewed['scientific_fingerprint']}`")
           print(f"- Validation repairs: `{payload['validation_repairs']}`")

@@ -94,6 +94,9 @@ def test_metric_registry_exposes_claim_relation_authority() -> None:
     assert registry["validation_mse_reduction"]["claim_relation"] == "matched_control"
     assert registry["temporal_shift_drop"]["claim_relation"] == "temporal_null"
     assert registry["complementarity_score"]["claim_relation"] == "complementarity"
+    assert registry["prospective_geometry_gain_spearman"]["claim_relation"] == (
+        "prospective_prediction"
+    )
 
 
 def test_support_direction_inversion_is_rejected() -> None:
@@ -291,6 +294,76 @@ def test_absolute_claim_without_comparison_is_allowed() -> None:
     proposal = parse(payload)
     assert proposal.claim_relation == "absolute"
     assert proposal.control_description == ""
+
+
+def test_prospective_prediction_claim_cannot_use_descriptive_rsa() -> None:
+    payload = proposal_payload()
+    payload["statement"] = (
+        "Development-only neural RSA predicts later validation gain across frozen representations."
+    )
+    payload["development_metrics"] = ["rsa_spearman", "runtime_seconds"]
+    payload["primary_metric"] = "rsa_spearman"
+    payload["claim_relation"] = "absolute"
+    payload["control_description"] = ""
+    payload["supports_if"] = [
+        {
+            "metric": "rsa_spearman",
+            "operator": ">=",
+            "threshold": 0.4,
+            "rationale": "strong descriptive RSA",
+        }
+    ]
+    payload["rejects_if"] = [
+        {
+            "metric": "rsa_spearman",
+            "operator": "<=",
+            "threshold": 0.1,
+            "rationale": "weak descriptive RSA",
+        }
+    ]
+    payload["falsification_test"] = "Reject if RSA fails to predict subsequent validation gain."
+    with pytest.raises(ValueError, match="prospective prediction claim requires"):
+        parse(payload)
+
+
+def test_prospective_prediction_claim_uses_frozen_reveal_metric() -> None:
+    payload = proposal_payload()
+    payload["statement"] = (
+        "Development-only neural geometry prospectively predicts later matched validation gain "
+        "across a predeclared representation set."
+    )
+    payload["development_metrics"] = [
+        "prospective_geometry_gain_spearman",
+        "runtime_seconds",
+    ]
+    payload["primary_metric"] = "prospective_geometry_gain_spearman"
+    payload["claim_relation"] = "prospective_prediction"
+    payload["control_description"] = (
+        "Freeze geometry scores and the candidate set before revealing matched-control "
+        "validation Pearson deltas."
+    )
+    payload["supports_if"] = [
+        {
+            "metric": "prospective_geometry_gain_spearman",
+            "operator": ">=",
+            "threshold": 0.5,
+            "rationale": "predeclared positive prospective association",
+        }
+    ]
+    payload["rejects_if"] = [
+        {
+            "metric": "prospective_geometry_gain_spearman",
+            "operator": "<=",
+            "threshold": 0.1,
+            "rationale": "practical-null prospective association",
+        }
+    ]
+    payload["falsification_test"] = (
+        "Reject if the frozen geometry screen fails to forecast subsequent validation gain."
+    )
+    proposal = parse(payload)
+    assert proposal.claim_relation == "prospective_prediction"
+    assert proposal.primary_metric == "prospective_geometry_gain_spearman"
 
 
 def test_synthesis_stopping_authority_is_deterministic_and_candidate_independent() -> None:
