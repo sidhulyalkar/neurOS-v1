@@ -4,7 +4,6 @@ from io import BytesIO
 from urllib.error import HTTPError
 
 import pytest
-
 from neuros.research.nim_provider import (
     DOCUMENTED_NVIDIA_CHAT_MODELS,
     QualifiedNvidiaNimClient,
