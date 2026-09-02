@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 
 import pytest
-
 from neuros.research.algonauts_prospective import (
     _algonaut_canonical_sha256,
     ingest_algonaut_prospective_geometry,
