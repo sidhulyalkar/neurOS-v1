@@ -7,27 +7,18 @@ use std::thread;
 
 use arrow_array::Float32Array;
 use arrow_buffer::{Buffer, ScalarBuffer};
-use crossbeam_channel::{bounded, Receiver};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use memmap2::{Mmap, MmapOptions};
 use sha2::{Digest, Sha256};
 use tracing::{debug, instrument};
 
 use crate::error::{Result, RuntimeError};
-use crate::manifest::{DatasetManifest, Record, MANIFEST_FILE};
+use crate::manifest::{DatasetManifest, MANIFEST_FILE, Record};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StreamSelector {
     pub subjects: Vec<String>,
     pub modalities: Vec<String>,
-}
-
-impl Default for StreamSelector {
-    fn default() -> Self {
-        Self {
-            subjects: Vec::new(),
-            modalities: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,8 +39,8 @@ impl WindowSpec {
 }
 
 #[derive(Clone, Debug)]
-pub struct WindowDescriptor {
-    record: Record,
+struct WindowDescriptor {
+    record: Arc<Record>,
     start_frame: usize,
     length_frames: usize,
     frame_elements: usize,
@@ -58,6 +49,7 @@ pub struct WindowDescriptor {
 pub struct Dataset {
     root: PathBuf,
     manifest: DatasetManifest,
+    records: Vec<Arc<Record>>,
     manifest_sha256: String,
     mmap_cache: Mutex<HashMap<PathBuf, Weak<MappedRegion>>>,
 }
@@ -70,7 +62,7 @@ struct MappedRegion {
 #[derive(Clone)]
 pub struct WindowHandle {
     region: Arc<MappedRegion>,
-    record: Record,
+    record: Arc<Record>,
     start_frame: usize,
     length_frames: usize,
     frame_elements: usize,
@@ -78,8 +70,14 @@ pub struct WindowHandle {
     manifest_sha256: String,
 }
 
+enum StreamMessage {
+    Window(Result<WindowHandle>),
+    Finished,
+}
+
 pub struct WindowStream {
-    receiver: Receiver<Result<WindowHandle>>,
+    receiver: Receiver<StreamMessage>,
+    finished: bool,
 }
 
 impl Dataset {
@@ -91,17 +89,30 @@ impl Dataset {
             ));
         }
 
-        let root = root.as_ref().to_path_buf();
+        let requested_root = root.as_ref();
+        let root = std::fs::canonicalize(requested_root)
+            .map_err(|source| RuntimeError::io(requested_root, source))?;
+        let root_metadata =
+            std::fs::metadata(&root).map_err(|source| RuntimeError::io(&root, source))?;
+        if !root_metadata.is_dir() {
+            return Err(RuntimeError::Validation(format!(
+                "dataset root is not a directory: {}",
+                root.display()
+            )));
+        }
+
         let manifest_path = root.join(MANIFEST_FILE);
         let bytes = std::fs::read(&manifest_path)
             .map_err(|source| RuntimeError::io(&manifest_path, source))?;
         let manifest: DatasetManifest = serde_json::from_slice(&bytes)?;
         manifest.validate()?;
+        let records = manifest.records.iter().cloned().map(Arc::new).collect();
         let manifest_sha256 = format!("{:x}", Sha256::digest(&bytes));
 
         Ok(Arc::new(Self {
             root,
             manifest,
+            records,
             manifest_sha256,
             mmap_cache: Mutex::new(HashMap::new()),
         }))
@@ -119,39 +130,12 @@ impl Dataset {
         &self,
         selector: &StreamSelector,
         spec: WindowSpec,
-    ) -> Result<Vec<WindowDescriptor>> {
-        let subjects: HashSet<&str> = selector.subjects.iter().map(String::as_str).collect();
-        let modalities: HashSet<&str> = selector.modalities.iter().map(String::as_str).collect();
+    ) -> Result<Vec<(String, usize)>> {
         let mut windows = Vec::new();
-
-        for record in &self.manifest.records {
-            if !subjects.is_empty() && !subjects.contains(record.subject.as_str()) {
-                continue;
-            }
-            if !modalities.is_empty() && !modalities.contains(record.modality.as_str()) {
-                continue;
-            }
-
-            let frames = record.shape[0];
-            if frames < spec.length {
-                continue;
-            }
-            let frame_elements = record.frame_elements()?;
-            let final_start = frames - spec.length;
-            let mut start = 0usize;
-            loop {
-                windows.push(WindowDescriptor {
-                    record: record.clone(),
-                    start_frame: start,
-                    length_frames: spec.length,
-                    frame_elements,
-                });
-                if start > final_start.saturating_sub(spec.stride) {
-                    break;
-                }
-                start += spec.stride;
-            }
-        }
+        self.visit_window_descriptors(selector, spec, |descriptor| {
+            windows.push((descriptor.record.id.clone(), descriptor.start_frame));
+            Ok(true)
+        })?;
         Ok(windows)
     }
 
@@ -166,29 +150,131 @@ impl Dataset {
                 "prefetch must be at least one".into(),
             ));
         }
-        let plan = self.plan_windows(&selector, spec)?;
         let (sender, receiver) = bounded(prefetch);
         let dataset = Arc::clone(self);
 
         thread::Builder::new()
             .name("neuros-data-prefetch".into())
-            .spawn(move || {
-                for descriptor in plan {
-                    if sender.send(dataset.open_window(descriptor)).is_err() {
-                        debug!("window consumer dropped; cancelling prefetch worker");
-                        return;
-                    }
-                }
-            })
+            .spawn(move || dataset.run_stream_worker(selector, spec, sender))
             .map_err(|source| RuntimeError::io("<prefetch-thread>", source))?;
 
-        Ok(WindowStream { receiver })
+        Ok(WindowStream {
+            receiver,
+            finished: false,
+        })
+    }
+
+    fn visit_window_descriptors<F>(
+        &self,
+        selector: &StreamSelector,
+        spec: WindowSpec,
+        mut visitor: F,
+    ) -> Result<bool>
+    where
+        F: FnMut(WindowDescriptor) -> Result<bool>,
+    {
+        let subjects: HashSet<&str> = selector.subjects.iter().map(String::as_str).collect();
+        let modalities: HashSet<&str> = selector.modalities.iter().map(String::as_str).collect();
+
+        for record in &self.records {
+            if !subjects.is_empty() && !subjects.contains(record.subject.as_str()) {
+                continue;
+            }
+            if !modalities.is_empty() && !modalities.contains(record.modality.as_str()) {
+                continue;
+            }
+
+            let frames = record.shape[0];
+            if frames < spec.length {
+                continue;
+            }
+            let frame_elements = record.frame_elements()?;
+            let final_start = frames - spec.length;
+            let mut start = 0usize;
+
+            loop {
+                if !visitor(WindowDescriptor {
+                    record: Arc::clone(record),
+                    start_frame: start,
+                    length_frames: spec.length,
+                    frame_elements,
+                })? {
+                    return Ok(false);
+                }
+
+                let Some(next_start) = start.checked_add(spec.stride) else {
+                    return Err(RuntimeError::InvalidWindow(
+                        "window stride overflowed usize".into(),
+                    ));
+                };
+                if next_start > final_start {
+                    break;
+                }
+                start = next_start;
+            }
+        }
+        Ok(true)
+    }
+
+    fn run_stream_worker(
+        self: Arc<Self>,
+        selector: StreamSelector,
+        spec: WindowSpec,
+        sender: Sender<StreamMessage>,
+    ) {
+        let result = self.visit_window_descriptors(&selector, spec, |descriptor| {
+            match self.open_window(descriptor) {
+                Ok(window) => {
+                    if sender.send(StreamMessage::Window(Ok(window))).is_err() {
+                        debug!("window consumer dropped; cancelling prefetch worker");
+                        return Ok(false);
+                    }
+                }
+                Err(error) => {
+                    if sender.send(StreamMessage::Window(Err(error))).is_ok() {
+                        let _ = sender.send(StreamMessage::Finished);
+                    }
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        });
+
+        match result {
+            Ok(true) => {
+                let _ = sender.send(StreamMessage::Finished);
+            }
+            Ok(false) => {}
+            Err(error) => {
+                if sender.send(StreamMessage::Window(Err(error))).is_ok() {
+                    let _ = sender.send(StreamMessage::Finished);
+                }
+            }
+        }
     }
 
     fn open_window(&self, descriptor: WindowDescriptor) -> Result<WindowHandle> {
-        let path = self.root.join(&descriptor.record.path);
+        let requested_path = self.root.join(&descriptor.record.path);
+        let path = std::fs::canonicalize(&requested_path)
+            .map_err(|source| RuntimeError::io(&requested_path, source))?;
+        if !path.starts_with(&self.root) {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} resolves outside the dataset root: {}",
+                descriptor.record.id,
+                path.display()
+            )));
+        }
+
         let required_end = descriptor.record.required_end_byte()?;
-        let metadata = std::fs::metadata(&path).map_err(|source| RuntimeError::io(&path, source))?;
+        let metadata =
+            std::fs::metadata(&path).map_err(|source| RuntimeError::io(&path, source))?;
+        if !metadata.is_file() {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} source is not a regular file: {}",
+                descriptor.record.id,
+                path.display()
+            )));
+        }
         if metadata.len() < required_end {
             return Err(RuntimeError::SourceTooShort {
                 path,
@@ -273,7 +359,9 @@ impl WindowHandle {
     pub fn element_len(&self) -> Result<usize> {
         self.length_frames
             .checked_mul(self.frame_elements)
-            .ok_or_else(|| RuntimeError::InvalidWindow("window element count overflowed usize".into()))
+            .ok_or_else(|| {
+                RuntimeError::InvalidWindow("window element count overflowed usize".into())
+            })
     }
 
     /// Create an Arrow Float32Array that owns a reference to the mmap and therefore
@@ -284,19 +372,21 @@ impl WindowHandle {
             .start_frame
             .checked_mul(self.frame_elements)
             .ok_or_else(|| RuntimeError::InvalidWindow("window offset overflowed usize".into()))?;
-        let relative_byte_offset = element_offset
-            .checked_mul(4)
-            .ok_or_else(|| RuntimeError::InvalidWindow("window byte offset overflowed usize".into()))?;
+        let relative_byte_offset = element_offset.checked_mul(4).ok_or_else(|| {
+            RuntimeError::InvalidWindow("window byte offset overflowed usize".into())
+        })?;
         let byte_offset = usize::try_from(self.record.offset_bytes)
             .ok()
             .and_then(|base| base.checked_add(relative_byte_offset))
-            .ok_or_else(|| RuntimeError::InvalidWindow("source byte offset overflowed usize".into()))?;
-        let byte_len = element_len
-            .checked_mul(4)
-            .ok_or_else(|| RuntimeError::InvalidWindow("window byte length overflowed usize".into()))?;
-        let byte_end = byte_offset
-            .checked_add(byte_len)
-            .ok_or_else(|| RuntimeError::InvalidWindow("window byte extent overflowed usize".into()))?;
+            .ok_or_else(|| {
+                RuntimeError::InvalidWindow("source byte offset overflowed usize".into())
+            })?;
+        let byte_len = element_len.checked_mul(4).ok_or_else(|| {
+            RuntimeError::InvalidWindow("window byte length overflowed usize".into())
+        })?;
+        let byte_end = byte_offset.checked_add(byte_len).ok_or_else(|| {
+            RuntimeError::InvalidWindow("window byte extent overflowed usize".into())
+        })?;
         if byte_end > self.region.mmap.len() {
             return Err(RuntimeError::InvalidWindow(
                 "window extends beyond mapped source".into(),
@@ -307,8 +397,9 @@ impl WindowHandle {
         // manifest offsets are validated by the manifest contract, and the Arc passed as
         // the Arrow allocation owner keeps the mapping alive for the full array lifetime.
         let ptr = unsafe { self.region.mmap.as_ptr().add(byte_offset) as *mut u8 };
-        let ptr = NonNull::new(ptr)
-            .ok_or_else(|| RuntimeError::InvalidWindow("mapped source returned a null pointer".into()))?;
+        let ptr = NonNull::new(ptr).ok_or_else(|| {
+            RuntimeError::InvalidWindow("mapped source returned a null pointer".into())
+        })?;
         let owner = Arc::clone(&self.region);
         let buffer = unsafe { Buffer::from_custom_allocation(ptr, byte_len, owner) };
         let values = ScalarBuffer::<f32>::new(buffer, 0, element_len);
@@ -320,7 +411,21 @@ impl Iterator for WindowStream {
     type Item = Result<WindowHandle>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.receiver.recv().ok()
+        if self.finished {
+            return None;
+        }
+
+        match self.receiver.recv() {
+            Ok(StreamMessage::Window(window)) => Some(window),
+            Ok(StreamMessage::Finished) => {
+                self.finished = true;
+                None
+            }
+            Err(_) => {
+                self.finished = true;
+                Some(Err(RuntimeError::WorkerTerminated))
+            }
+        }
     }
 }
 
@@ -372,19 +477,74 @@ mod tests {
         let plan = dataset
             .plan_windows(&StreamSelector::default(), spec)
             .unwrap();
-        let starts: Vec<_> = plan.iter().map(|window| window.start_frame).collect();
+        let starts: Vec<_> = plan.iter().map(|(_, start)| *start).collect();
         assert_eq!(starts, vec![0, 2]);
+    }
+
+    #[test]
+    fn stride_larger_than_final_start_never_emits_out_of_bounds_window() {
+        let (_directory, dataset) = fixture();
+        let plan = dataset
+            .plan_windows(&StreamSelector::default(), WindowSpec::new(3, 4).unwrap())
+            .unwrap();
+        let starts: Vec<_> = plan.iter().map(|(_, start)| *start).collect();
+        assert_eq!(starts, vec![0]);
     }
 
     #[test]
     fn arrow_window_is_zero_copy_over_mmap() {
         let (_directory, dataset) = fixture();
         let mut stream = dataset
-            .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 2)
+            .stream(
+                StreamSelector::default(),
+                WindowSpec::new(2, 2).unwrap(),
+                2,
+            )
             .unwrap();
         let window = stream.next().unwrap().unwrap();
         let values = window.arrow_values().unwrap();
-        assert_eq!(values.values().as_ref(), &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]);
+        assert_eq!(
+            values.values().as_ref(),
+            &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]
+        );
         assert_eq!(window.shape(), vec![2, 4]);
+    }
+
+    #[test]
+    fn source_error_is_reported_once_then_stream_finishes() {
+        let (directory, dataset) = fixture();
+        std::fs::write(directory.path().join("fmri.f32"), [0_u8; 4]).unwrap();
+        let mut stream = dataset
+            .stream(
+                StreamSelector::default(),
+                WindowSpec::new(2, 2).unwrap(),
+                2,
+            )
+            .unwrap();
+        assert!(stream.next().unwrap().is_err());
+        assert!(stream.next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escape_from_dataset_root() {
+        use std::os::unix::fs::symlink;
+
+        let (directory, dataset) = fixture();
+        let outside = tempdir().unwrap();
+        let outside_file = outside.path().join("outside.f32");
+        std::fs::write(&outside_file, [0_u8; 96]).unwrap();
+        std::fs::remove_file(directory.path().join("fmri.f32")).unwrap();
+        symlink(&outside_file, directory.path().join("fmri.f32")).unwrap();
+
+        let mut stream = dataset
+            .stream(
+                StreamSelector::default(),
+                WindowSpec::new(2, 2).unwrap(),
+                2,
+            )
+            .unwrap();
+        assert!(stream.next().unwrap().is_err());
+        assert!(stream.next().is_none());
     }
 }
