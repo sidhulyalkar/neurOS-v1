@@ -495,11 +495,7 @@ mod tests {
     fn arrow_window_is_zero_copy_over_mmap() {
         let (_directory, dataset) = fixture();
         let mut stream = dataset
-            .stream(
-                StreamSelector::default(),
-                WindowSpec::new(2, 2).unwrap(),
-                2,
-            )
+            .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 2)
             .unwrap();
         let window = stream.next().unwrap().unwrap();
         let values = window.arrow_values().unwrap();
@@ -515,11 +511,7 @@ mod tests {
         let (directory, dataset) = fixture();
         std::fs::write(directory.path().join("fmri.f32"), [0_u8; 4]).unwrap();
         let mut stream = dataset
-            .stream(
-                StreamSelector::default(),
-                WindowSpec::new(2, 2).unwrap(),
-                2,
-            )
+            .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 2)
             .unwrap();
         assert!(stream.next().unwrap().is_err());
         assert!(stream.next().is_none());
@@ -538,11 +530,7 @@ mod tests {
         symlink(&outside_file, directory.path().join("fmri.f32")).unwrap();
 
         let mut stream = dataset
-            .stream(
-                StreamSelector::default(),
-                WindowSpec::new(2, 2).unwrap(),
-                2,
-            )
+            .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 2)
             .unwrap();
         assert!(stream.next().unwrap().is_err());
         assert!(stream.next().is_none());
