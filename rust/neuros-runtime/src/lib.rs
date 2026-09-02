@@ -12,7 +12,9 @@ mod dataset;
 mod error;
 mod manifest;
 
-pub use dataset::{Dataset, StreamSelector, WindowHandle, WindowSpec, WindowStream};
+pub use dataset::{
+    Dataset, SourceVerificationState, StreamSelector, WindowHandle, WindowSpec, WindowStream,
+};
 pub use error::{Result, RuntimeError};
 pub use manifest::{
     ClockSpec, DType, DatasetManifest, MANIFEST_FILE, MANIFEST_SCHEMA_VERSION, Record,
