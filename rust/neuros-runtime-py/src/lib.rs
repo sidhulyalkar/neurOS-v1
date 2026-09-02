@@ -155,8 +155,7 @@ impl NativeWindow {
         let values = self.inner.arrow_values().map_err(runtime_error)?;
         let array: ArrayRef = Arc::new(values);
         let field = Arc::new(Field::new("values", DataType::Float32, false));
-        let py_array = PyArray::new(array, field);
-        py_array.to_pyarrow(py)
+        PyArray::new(array, field).into_pyarrow(py)
     }
 
     fn __repr__(&self) -> String {
