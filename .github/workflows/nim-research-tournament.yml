@@ -215,10 +215,11 @@ jobs:
           )
           PY
 
-      - name: Upload immutable proposal evidence
+      - name: Upload immutable proposal or failure evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nim-research-tournament-${{ github.sha }}
           path: artifacts/nim-research/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30

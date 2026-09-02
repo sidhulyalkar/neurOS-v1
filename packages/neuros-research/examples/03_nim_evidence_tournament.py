@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from neuros.research._canonical import canonical_sha256
 from neuros.research.nim_provider import QualifiedNvidiaNimClient
@@ -37,22 +38,32 @@ def _output_path() -> Path:
     return Path(args.output)
 
 
-def _write_provider_failure(output: Path) -> None:
+def _write_failure_evidence(output: Path, reviewed: dict[str, Any], exc: Exception) -> None:
     client = QualifiedNvidiaNimClient.latest_instance
     if client is None:
         return
     payload = {
-        "kind": "neuros_nim_provider_qualification",
+        "kind": "neuros_nim_tournament_failure_evidence",
         "schema_version": 1,
         "source_revision": os.environ.get("GITHUB_SHA", "local-unspecified").strip(),
         "provider": "nvidia_nim",
-        "qualification": client.provider_qualification(),
+        "reviewed_evidence_fingerprint": reviewed["review_fingerprint"],
+        "provider_qualification": client.provider_qualification(),
+        "calls": client.call_journal_payload(),
+        "failure": {
+            "type": type(exc).__name__,
+            "message": str(exc),
+        },
+        "scientific_boundary": (
+            "This artifact preserves untrusted proposer failures and transport evidence only. "
+            "It is not ExperimentEvidence and cannot promote any candidate."
+        ),
     }
     payload["fingerprint"] = canonical_sha256(payload)
     output.parent.mkdir(parents=True, exist_ok=True)
-    path = output.with_name("provider-qualification.json")
+    path = output.with_name("tournament-failure.json")
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"NIM_PROVIDER_QUALIFICATION_SHA256={payload['fingerprint']}")
+    print(f"NIM_FAILURE_EVIDENCE_SHA256={payload['fingerprint']}")
 
 
 def _attach_provider_qualification(output: Path) -> None:
@@ -92,8 +103,8 @@ def main() -> None:
     output = _output_path()
     try:
         base.main()
-    except Exception:
-        _write_provider_failure(output)
+    except Exception as exc:
+        _write_failure_evidence(output, reviewed, exc)
         raise
     _attach_provider_qualification(output)
 

@@ -10,12 +10,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ._canonical import canonical_sha256, require_nonempty
-from .nim import NvidiaNimClient
+from .nim import NimCallRecord, NvidiaNimClient
 
+# Role preference is deliberate: the stronger models get the schema-heavy generator/critic
+# positions when all routes qualify, while Lightning remains the fast workhorse fallback.
 DOCUMENTED_NVIDIA_CHAT_MODELS = (
-    "nvidia/nemotron-3.5-lightning-30b-a3b",
     "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3-ultra-550b-a55b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
 )
 _RETRIABLE_HTTP = frozenset({408, 409, 429, 500, 502, 503, 504})
 _MAX_PROVIDER_ERROR_BYTES = 4096
@@ -28,6 +30,10 @@ def _sanitize_provider_text(value: str, *, secret: str) -> str:
     text = str(value).replace(secret, "[REDACTED]")
     text = " ".join(text.split())
     return text[:_MAX_PROVIDER_ERROR_CHARS]
+
+
+def _redact_secret(value: str, *, secret: str) -> str:
+    return str(value).replace(secret, "[REDACTED]")
 
 
 class NimProviderRequestError(RuntimeError):
@@ -91,6 +97,7 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
         self.catalog_models: tuple[str, ...] = ()
         self.catalog_error: dict[str, Any] | None = None
         self.discovery_mode = "not_run"
+        self.call_journal: list[NimCallRecord] = []
         type(self).latest_instance = self
 
     def _request(self, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -229,7 +236,7 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
         preferences: tuple[str, ...] = DOCUMENTED_NVIDIA_CHAT_MODELS,
         count: int = 3,
     ) -> tuple[str, ...]:
-        """Select only live-qualified models, preserving documented preference order."""
+        """Select only live-qualified models, preserving documented role preference order."""
 
         if count < 1:
             raise ValueError("count must be positive")
@@ -238,6 +245,23 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
         if not selected:
             raise ValueError("no bounded-probe-qualified NVIDIA chat model is available")
         return selected[:count]
+
+    def chat_json(self, **kwargs: Any) -> tuple[dict[str, Any], NimCallRecord]:
+        """Journal every successfully parsed model response before semantic validation occurs."""
+
+        parsed, record = super().chat_json(**kwargs)
+        self.call_journal.append(record)
+        return parsed, record
+
+    def call_journal_payload(self) -> list[dict[str, Any]]:
+        """Return credential-redacted call evidence, including failed semantic attempts."""
+
+        rows: list[dict[str, Any]] = []
+        for record in self.call_journal:
+            row = record.to_dict(include_response=True)
+            row["response_text"] = _redact_secret(row["response_text"], secret=self._api_key)
+            rows.append(row)
+        return rows
 
     def provider_qualification(self) -> dict[str, Any]:
         """Return the complete credential-free provider qualification record."""
