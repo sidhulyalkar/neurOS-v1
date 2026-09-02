@@ -139,6 +139,21 @@ impl NativeWindow {
         self.inner.source_size_bytes()
     }
 
+    #[getter]
+    fn declared_source_sha256(&self) -> Option<String> {
+        self.inner.declared_source_sha256().map(str::to_owned)
+    }
+
+    #[getter]
+    fn verified_source_sha256(&self) -> Option<String> {
+        self.inner.verified_source_sha256().map(str::to_owned)
+    }
+
+    #[getter]
+    fn source_verification_state(&self) -> &'static str {
+        self.inner.source_verification_state().as_str()
+    }
+
     /// Return an arro3 Array backed directly by the memory-mapped source bytes.
     /// The Arrow allocation retains the mmap owner, so the view remains valid even
     /// after this NativeWindow instance is dropped.
