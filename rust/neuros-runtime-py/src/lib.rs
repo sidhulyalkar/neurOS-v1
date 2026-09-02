@@ -151,11 +151,12 @@ impl NativeWindow {
 
     /// Convenience adapter for environments that already carry PyArrow.
     /// This uses Arrow's capsule interface and does not copy the underlying values.
-    fn to_pyarrow<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn to_pyarrow(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let values = self.inner.arrow_values().map_err(runtime_error)?;
         let array: ArrayRef = Arc::new(values);
         let field = Arc::new(Field::new("values", DataType::Float32, false));
-        PyArray::new(array, field).into_pyarrow(py)
+        let py_array = PyArray::new(array, field);
+        Ok(py_array.to_pyarrow(py)?.unbind())
     }
 
     fn __repr__(&self) -> String {
