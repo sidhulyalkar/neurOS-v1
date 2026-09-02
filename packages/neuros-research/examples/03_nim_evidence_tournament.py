@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -19,6 +20,24 @@ _ROOT = Path(__file__).resolve().parents[1]
 _BASE_TOURNAMENT = Path(__file__).with_name("02_nim_algonauts_tournament.py")
 _REVIEWED_EVIDENCE = _ROOT / "evidence" / "controlled_representation_program_v3.json"
 _SEMANTIC_CONTRACT_VERSION = 2
+
+_REQUIRED_SEMANTIC_CANDIDATE_FIELDS = (
+    "candidate_id",
+    "title",
+    "statement",
+    "rationale",
+    "family",
+    "changed_variables",
+    "required_payload_classes",
+    "development_metrics",
+    "primary_metric",
+    "claim_relation",
+    "control_description",
+    "supports_if",
+    "rejects_if",
+    "falsification_test",
+    "estimated_compute_tier",
+)
 
 _CLAIM_RELATION_CONTRACT = """
 ADDITIONAL_TYPED_CLAIM_CONTRACT:
@@ -110,6 +129,47 @@ def _attach_provider_qualification(output: Path) -> None:
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _require_complete_semantic_candidate_shape(payload: dict[str, Any]) -> None:
+    """Report all missing v2 candidate fields without inventing proposer content."""
+
+    rows = payload.get("candidates")
+    if not isinstance(rows, list):
+        raise ValueError("semantic proposal response must contain a candidates list")
+    problems: list[str] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            problems.append(f"candidate[{index}] must be a JSON object")
+            continue
+        missing = tuple(field for field in _REQUIRED_SEMANTIC_CANDIDATE_FIELDS if field not in row)
+        if missing:
+            problems.append(f"candidate[{index}] missing fields: {', '.join(missing)}")
+    if problems:
+        raise ValueError("semantic proposal shape incomplete; " + "; ".join(problems))
+
+
+def _repair_schema_contract(full_generator_prompt: str) -> str:
+    fields = ", ".join(_REQUIRED_SEMANTIC_CANDIDATE_FIELDS)
+    return (
+        "REPAIR_SCHEMA_CONTRACT:\n"
+        "Return one top-level JSON object with exactly one candidates list. Preserve the five "
+        "existing candidate IDs and scientific intent where possible. Do not omit a field merely "
+        "because it was valid in an earlier response. Every candidate MUST explicitly contain all "
+        f"of these fields: {fields}. Do not synthesize hidden outcomes or change frozen authority.\n\n"
+        "FULL_ORIGINAL_GENERATOR_CONTRACT:\n"
+        + full_generator_prompt
+    )
+
+
+def _wrap_semantic_parser(
+    parser: Callable[..., Any],
+) -> Callable[..., Any]:
+    def validate(payload: dict[str, Any], **kwargs: Any) -> Any:
+        _require_complete_semantic_candidate_shape(payload)
+        return parser(payload, **kwargs)
+
+    return validate
+
+
 def main() -> None:
     # This validation occurs before base.main() constructs a client or performs model discovery.
     reviewed = load_reviewed_aggregate_context(_REVIEWED_EVIDENCE)
@@ -117,8 +177,10 @@ def main() -> None:
     base_context = base._public_context
     base_generator_prompt = base._generator_prompt
     base_generator_repair_prompt = base._generator_repair_prompt
+    base_parse_semantic_proposals = base.parse_semantic_proposals
     base_validate_synthesis = base._validate_synthesis
     base.NvidiaNimClient = QualifiedNvidiaNimClient
+    base.parse_semantic_proposals = _wrap_semantic_parser(base_parse_semantic_proposals)
 
     def evidence_informed_context():
         context = base_context()
@@ -141,8 +203,11 @@ def main() -> None:
     def evidence_generator_repair_prompt(
         context: dict[str, Any], previous_payload: dict[str, Any], validation_error: str
     ) -> str:
+        full_generator_prompt = evidence_generator_prompt(context)
         return (
             base_generator_repair_prompt(context, previous_payload, validation_error)
+            + "\n\n"
+            + _repair_schema_contract(full_generator_prompt)
             + "\n\n"
             + _CLAIM_RELATION_CONTRACT
         )
