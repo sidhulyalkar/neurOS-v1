@@ -7,6 +7,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from ._validation import nonblank_string, positive_finite_real, positive_integral
 from .queues import OverflowPolicy
 
 
@@ -19,6 +20,10 @@ class NodeKind(str, Enum):
     MONITOR = "monitor"
 
 
+_PROCESS_TRANSPORTS = frozenset({"pickle", "shared_memory"})
+_EXECUTORS = frozenset({"inline", "thread", "process", "gpu"})
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeNode:
     node_id: str
@@ -26,15 +31,92 @@ class RuntimeNode:
     operator: Any
     executor: str = "inline"
     latency_budget_ms: float | None = None
+    execution_timeout_s: float | None = None
+    process_transport: str = "pickle"
+    process_request_capacity_bytes: int | None = None
+    process_response_capacity_bytes: int | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.node_id:
-            raise ValueError("node_id must be non-empty")
-        if self.latency_budget_ms is not None and self.latency_budget_ms <= 0:
-            raise ValueError("latency_budget_ms must be positive")
-        if self.executor not in {"inline", "thread", "process", "gpu"}:
+        object.__setattr__(
+            self, "node_id", nonblank_string(self.node_id, field_name="node_id")
+        )
+
+        if not isinstance(self.kind, (NodeKind, str)):
+            raise TypeError("kind must be a NodeKind or node-kind string")
+        try:
+            kind = NodeKind(self.kind)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported node kind: {self.kind}") from exc
+        object.__setattr__(self, "kind", kind)
+
+        if self.latency_budget_ms is not None:
+            object.__setattr__(
+                self,
+                "latency_budget_ms",
+                positive_finite_real(
+                    self.latency_budget_ms, field_name="latency_budget_ms"
+                ),
+            )
+        if self.execution_timeout_s is not None:
+            object.__setattr__(
+                self,
+                "execution_timeout_s",
+                positive_finite_real(
+                    self.execution_timeout_s, field_name="execution_timeout_s"
+                ),
+            )
+
+        if not isinstance(self.executor, str):
+            raise TypeError("executor must be a string")
+        if self.executor not in _EXECUTORS:
             raise ValueError(f"Unsupported executor: {self.executor}")
+        if self.kind is NodeKind.SOURCE and self.executor != "inline":
+            raise ValueError(
+                "Source nodes currently require executor='inline'; source "
+                "lifecycle/stream isolation is not yet implemented"
+            )
+        if self.execution_timeout_s is not None and self.executor != "process":
+            raise ValueError(
+                "execution_timeout_s is only authoritative for executor='process'"
+            )
+        if self.executor == "process" and self.execution_timeout_s is None:
+            raise ValueError(
+                "executor='process' requires an explicit execution_timeout_s; "
+                "latency_budget_ms is an SLO and is not termination authority"
+            )
+
+        if not isinstance(self.process_transport, str):
+            raise TypeError("process_transport must be a string")
+        if self.process_transport not in _PROCESS_TRANSPORTS:
+            raise ValueError(
+                f"Unsupported process_transport: {self.process_transport}"
+            )
+        capacities = (
+            ("process_request_capacity_bytes", self.process_request_capacity_bytes),
+            ("process_response_capacity_bytes", self.process_response_capacity_bytes),
+        )
+        any_capacity = any(value is not None for _, value in capacities)
+        if self.executor != "process":
+            if self.process_transport != "pickle" or any_capacity:
+                raise ValueError(
+                    "process transport declarations are only valid for executor='process'"
+                )
+        elif self.process_transport == "shared_memory":
+            for field_name, value in capacities:
+                try:
+                    resolved = positive_integral(value, field_name=field_name)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"shared_memory transport requires positive {field_name}"
+                    ) from exc
+                object.__setattr__(self, field_name, resolved)
+        elif any_capacity:
+            raise ValueError(
+                "process mailbox capacities are only valid for "
+                "process_transport='shared_memory'"
+            )
+
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
 
@@ -46,9 +128,20 @@ class RuntimeEdge:
     overflow: str = "drop_oldest"
 
     def __post_init__(self) -> None:
-        if self.capacity <= 0:
-            raise ValueError("capacity must be positive")
-        OverflowPolicy(self.overflow)
+        object.__setattr__(
+            self, "source", nonblank_string(self.source, field_name="source")
+        )
+        object.__setattr__(
+            self, "target", nonblank_string(self.target, field_name="target")
+        )
+        object.__setattr__(
+            self, "capacity", positive_integral(self.capacity, field_name="capacity")
+        )
+        try:
+            overflow = OverflowPolicy(self.overflow)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Unsupported overflow policy: {self.overflow}") from exc
+        object.__setattr__(self, "overflow", overflow.value)
         if self.source == self.target:
             raise ValueError("self edges are not allowed")
 
@@ -60,12 +153,61 @@ class RuntimeGraph:
     nodes: dict[str, RuntimeNode] = field(default_factory=dict)
     edges: list[RuntimeEdge] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.nodes, dict):
+            raise TypeError("RuntimeGraph nodes must be a dict")
+        if not isinstance(self.edges, list):
+            raise TypeError("RuntimeGraph edges must be a list")
+        # Detach constructor-owned containers. The graph remains intentionally
+        # mutable through its own public containers and mutation methods, but a
+        # caller retaining the constructor arguments must not mutate it by alias.
+        self.nodes = dict(self.nodes)
+        self.edges = list(self.edges)
+        self._validate_structure()
+
+    def _validate_container_types(self) -> None:
+        if not isinstance(self.nodes, dict):
+            raise TypeError("RuntimeGraph nodes must be a dict")
+        if not isinstance(self.edges, list):
+            raise TypeError("RuntimeGraph edges must be a list")
+
+    def _validate_structure(self) -> None:
+        """Prove graph container, identity, edge-type, and endpoint integrity."""
+
+        self._validate_container_types()
+        for node_id, node in self.nodes.items():
+            nonblank_string(node_id, field_name="RuntimeGraph node key")
+            if not isinstance(node, RuntimeNode):
+                raise TypeError(f"RuntimeGraph node {node_id!r} must be a RuntimeNode")
+            if node_id != node.node_id:
+                raise ValueError(
+                    f"RuntimeGraph node key {node_id!r} does not match "
+                    f"node_id {node.node_id!r}"
+                )
+
+        seen_edges: set[tuple[str, str]] = set()
+        for edge in self.edges:
+            if not isinstance(edge, RuntimeEdge):
+                raise TypeError("RuntimeGraph edges must be RuntimeEdge instances")
+            edge_key = (edge.source, edge.target)
+            if edge_key in seen_edges:
+                raise ValueError(f"Duplicate edge: {edge.source} -> {edge.target}")
+            seen_edges.add(edge_key)
+            if edge.source not in self.nodes or edge.target not in self.nodes:
+                raise ValueError(f"Invalid edge: {edge.source} -> {edge.target}")
+
     def add_node(self, node: RuntimeNode) -> None:
+        if not isinstance(node, RuntimeNode):
+            raise TypeError("node must be a RuntimeNode")
+        self._validate_structure()
         if node.node_id in self.nodes:
             raise ValueError(f"Duplicate node_id: {node.node_id}")
         self.nodes[node.node_id] = node
 
     def connect(self, edge: RuntimeEdge) -> None:
+        if not isinstance(edge, RuntimeEdge):
+            raise TypeError("edge must be a RuntimeEdge")
+        self._validate_structure()
         if edge.source not in self.nodes or edge.target not in self.nodes:
             raise ValueError("Both edge endpoints must be registered nodes")
         if any(
@@ -75,13 +217,21 @@ class RuntimeGraph:
             raise ValueError(f"Duplicate edge: {edge.source} -> {edge.target}")
         self.edges.append(edge)
 
-    def incoming(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+    def _incoming_unchecked(self, node_id: str) -> tuple[RuntimeEdge, ...]:
         return tuple(edge for edge in self.edges if edge.target == node_id)
 
-    def outgoing(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+    def _outgoing_unchecked(self, node_id: str) -> tuple[RuntimeEdge, ...]:
         return tuple(edge for edge in self.edges if edge.source == node_id)
 
-    def topological_order(self) -> tuple[str, ...]:
+    def incoming(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        self._validate_structure()
+        return self._incoming_unchecked(node_id)
+
+    def outgoing(self, node_id: str) -> tuple[RuntimeEdge, ...]:
+        self._validate_structure()
+        return self._outgoing_unchecked(node_id)
+
+    def _topological_order_unchecked(self) -> tuple[str, ...]:
         indegree = {node_id: 0 for node_id in self.nodes}
         adjacency: dict[str, list[str]] = {node_id: [] for node_id in self.nodes}
         for edge in self.edges:
@@ -101,15 +251,17 @@ class RuntimeGraph:
             raise ValueError("RuntimeGraph must be acyclic")
         return tuple(order)
 
+    def topological_order(self) -> tuple[str, ...]:
+        self._validate_structure()
+        return self._topological_order_unchecked()
+
     def validate(self) -> None:
-        for edge in self.edges:
-            if edge.source not in self.nodes or edge.target not in self.nodes:
-                raise ValueError(f"Invalid edge: {edge.source} -> {edge.target}")
-        self.topological_order()
+        self._validate_structure()
+        self._topological_order_unchecked()
 
         for node_id, node in self.nodes.items():
-            incoming = self.incoming(node_id)
-            outgoing = self.outgoing(node_id)
+            incoming = self._incoming_unchecked(node_id)
+            outgoing = self._outgoing_unchecked(node_id)
             if node.kind is NodeKind.SOURCE and incoming:
                 raise ValueError(f"Source node {node_id} cannot have incoming edges")
             if node.kind is NodeKind.FUSION and len(incoming) < 2:

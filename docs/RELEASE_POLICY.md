@@ -8,13 +8,28 @@ The repository is a multi-distribution workspace. Individual Python distribution
 
 A platform release must record the exact versions and wheel hashes of every included distribution.
 
+## Workspace membership is not release eligibility
+
+`tool.uv.workspace.members` answers only whether a distribution is developed and validated in this monorepo. It does **not** authorize that distribution for publication.
+
+`release/package-policy.json` is the machine-readable release authority. It classifies every workspace member exactly once across two independent dimensions:
+
+- `release_tier`: whether the package is part of the default public runtime, a separately qualified integration, a research extension, or an internal preview;
+- `scientific_maturity`: what kind of evidence the package has actually earned.
+
+Only entries with `publish_candidate=true` enter the default release-candidate wheel set. The policy validator fails closed if a workspace package is unclassified, a distribution name drifts from package metadata, a non-runtime package enters the default release set, or the SDK dependency closure is missing.
+
+A package may remain fully maintained in the monorepo while intentionally not being a default publication candidate. Version number, workspace membership, test coverage, and scientific maturity are not interchangeable promotion signals.
+
+The release manifest checksum-binds the exact package-policy file and the selected package inventory so the artifact set can be reconstructed from evidence rather than inferred from repository layout.
+
 ## Distribution and namespace ownership
 
 Multiple distributions may contribute subpackages to the shared `neuros` Python namespace, but **two distributions must never own the same installed file path**.
 
 Component distributions use PEP 420 implicit namespace portions. The user-facing `neuros` SDK is the sole owner of `neuros/__init__.py` because that initializer defines the public top-level SDK API.
 
-Release qualification scans the payload of every built workspace wheel, normalizes wheel `.data/purelib` and `.data/platlib` entries to their real install destinations, and fails if any destination has multiple owners. The resulting `neuros.wheel_ownership.v1` manifest is checksum-bound into the release-candidate bundle.
+Release qualification scans the payload of every built release wheel, normalizes wheel `.data/purelib` and `.data/platlib` entries to their real install destinations, and fails if any destination has multiple owners. The resulting `neuros.wheel_ownership.v1` manifest is checksum-bound into the release-candidate bundle.
 
 This is an install-integrity requirement, not a style preference. Package managers track files per distribution; if two wheels record the same path, uninstalling either distribution can delete a file the other still requires.
 
@@ -43,11 +58,13 @@ Persisted replay/archive/qualification formats require stronger discipline. A fo
 
 Before a public release is published, CI must:
 
-- build every intended workspace wheel from the release source;
+- validate that every workspace member is explicitly classified by the release package policy;
+- build every distribution explicitly authorized for the default release set from the release source;
 - run package metadata validation (`twine check` or equivalent);
 - prove that built wheels have no overlapping installed-file ownership;
 - prove core/drivers/models work as implicit namespace portions without the SDK initializer;
 - prove the installed SDK owns and exposes the documented top-level `neuros` API;
+- checksum-bind the release package policy and selected inventory into the release manifest;
 - generate SHA-256 checksums for release artifacts and the wheel-ownership manifest;
 - smoke-install the user-facing `neuros` distribution from the built wheel set;
 - execute a minimal `neuros doctor` / compatibility smoke path;
@@ -62,6 +79,7 @@ Release notes should include:
 
 - Git tag and commit SHA;
 - component package/version manifest;
+- release package-policy SHA-256 and selected inventory;
 - SHA-256 manifest for built artifacts;
 - wheel-ownership manifest proving unique installed-file ownership;
 - strongest supported evidence tiers and important claim boundaries;

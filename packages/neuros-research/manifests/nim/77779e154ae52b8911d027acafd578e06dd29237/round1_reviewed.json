@@ -1,0 +1,51 @@
+{
+  "artifact_id": 9785696283,
+  "artifact_name": "nim-research-tournament-77779e154ae52b8911d027acafd578e06dd29237",
+  "artifact_zip_sha256": "c6c8c2cf1492017466c6287227656295966c281a1d28a5edbe9cdf092374b8cf",
+  "candidate_reviews": [
+    {
+      "candidate_id": "control-ridge-baseline",
+      "finding": "The stated null says ridge regularization has no meaningful impact, but the prose falsification condition (<0.01 score span) actually supports that null.",
+      "required_fix": "Use a typed neutrality metric such as validation_pearson_span with <= support and >= rejection thresholds separated by an indeterminate gap.",
+      "status": "revise"
+    },
+    {
+      "candidate_id": "pca-segment-geometry-control",
+      "finding": "The stated null says segment-aware geometry does not improve on matched PCA, while the listed falsification condition (within 0.01) again supports rather than rejects it.",
+      "required_fix": "Declare an explicit matched effect metric and directional support/rejection predicates.",
+      "status": "revise"
+    },
+    {
+      "candidate_id": "neural-geometry-screening-test",
+      "finding": "The idea is scientifically valuable, but its endpoint wording conflates development validation with unseen-level generalization that belongs behind the frozen G2 boundary.",
+      "required_fix": "Use development-only RSA/readout criteria for G1 and prospectively freeze a separate G2 evaluation packet before unseen-level truth is opened.",
+      "status": "revise"
+    },
+    {
+      "candidate_id": "temporal-feature-density-test",
+      "finding": "temporal_shift_null has no declared direction, so the phrase 'improve temporal_shift_null' cannot be checked consistently.",
+      "required_fix": "Replace it with a derived temporal_shift_drop metric whose larger-is-better semantics are defined in the metric registry.",
+      "status": "revise"
+    },
+    {
+      "candidate_id": "complementarity-error-analysis",
+      "finding": "The proposal reverses the meaning of raw residual error correlation in one place, making the decision rule semantically inconsistent.",
+      "required_fix": "Use complementarity_score = 1 - matched residual-error correlation, with larger-is-better semantics and typed thresholds.",
+      "status": "revise"
+    }
+  ],
+  "critic_prompt_sha256": "2519c6d804ca395d68201db7a28679b5a71cca5b94c1a1de3e5997ad70f854dc",
+  "execution_authorized": false,
+  "generator_prompt_sha256": "5deaf7649b9a96af6dd181649403d9def06fff468cfc3914315dcc17751aea38",
+  "kind": "neuros_nim_tournament_review",
+  "model": "nvidia/nemotron-3-super-120b-a12b",
+  "next_authorized_action": "Regenerate proposals under semantic contract v1. Only reviewed, semantically valid candidates may be materialized into G1 ExperimentPackets, and packet creation must fail closed until real dataset, split, preprocessing, runner, source revision, and seed identities are supplied.",
+  "provider": "nvidia_nim",
+  "review_boundary": "This is an independent semantic review of untrusted proposal material. No candidate is ExperimentEvidence and none is authorized for real-data execution.",
+  "schema_version": 1,
+  "source_revision": "77779e154ae52b8911d027acafd578e06dd29237",
+  "synthesizer_prompt_sha256": "5099cf2832d438a84bf6a2256de3db01363c884212e4a9c2c1aacfa642022108",
+  "tournament_fingerprint": "175306abc067c29fd6a31bf1ba398673463b4f9e6f787d600af27c778c3ca7c3",
+  "tournament_json_sha256": "65a030fac6929c40fcdda155411a49f3152ab724903b9b5a3e1466b3935f7fb",
+  "workflow_run_id": 33468443907
+}
