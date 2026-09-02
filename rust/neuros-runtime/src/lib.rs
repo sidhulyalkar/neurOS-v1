@@ -15,5 +15,5 @@ mod manifest;
 pub use dataset::{Dataset, StreamSelector, WindowHandle, WindowSpec, WindowStream};
 pub use error::{Result, RuntimeError};
 pub use manifest::{
-    ClockSpec, DType, DatasetManifest, Record, MANIFEST_FILE, MANIFEST_SCHEMA_VERSION,
+    ClockSpec, DType, DatasetManifest, MANIFEST_FILE, MANIFEST_SCHEMA_VERSION, Record,
 };
