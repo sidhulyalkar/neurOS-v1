@@ -75,6 +75,30 @@ def _require_no_holdout_access(payload: Mapping[str, Any], *, name: str) -> None
 
 
 @dataclass(frozen=True, slots=True)
+class AlgonautProspectivePlanBinding:
+    """Native neurOS plan frozen from one verified Algonaut pre-reveal screen."""
+
+    plan: ProspectiveGeometryPlan
+    algonaut_screen_fingerprint: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "algonaut_screen_fingerprint",
+            require_sha256(
+                self.algonaut_screen_fingerprint,
+                name="algonaut_screen_fingerprint",
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "plan": self.plan.to_artifact(),
+            "algonaut_screen_fingerprint": self.algonaut_screen_fingerprint,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AlgonautProspectiveEvaluation:
     """Verified native neurOS interpretation of one Algonaut NG3 screen/reveal pair."""
 
@@ -127,34 +151,20 @@ class AlgonautProspectiveEvaluation:
         }
 
 
-def ingest_algonaut_prospective_geometry(
+def _bind_algonaut_prospective_screen(
     screen: Mapping[str, Any],
-    reveal: Mapping[str, Any],
-) -> AlgonautProspectiveEvaluation:
-    """Verify Algonaut NG3 artifacts, then evaluate them under native neurOS authority."""
-
+) -> tuple[dict[str, Any], str, ProspectiveGeometryPlan]:
     screen_unsigned, screen_fingerprint = _verify_algonaut_artifact(
         screen,
         expected_kind="algonaut_mario.neuros_prospective_geometry_screen",
         expected_schema=2,
         name="Algonaut prospective screen",
     )
-    reveal_unsigned, reveal_fingerprint = _verify_algonaut_artifact(
-        reveal,
-        expected_kind="algonaut_mario.neuros_prospective_geometry_reveal",
-        expected_schema=2,
-        name="Algonaut prospective reveal",
-    )
     _require_no_holdout_access(screen_unsigned, name="Algonaut prospective screen")
-    _require_no_holdout_access(reveal_unsigned, name="Algonaut prospective reveal")
     if screen_unsigned.get("volume_isolation") != "verified_metadata":
         raise ValueError("Algonaut screen lacks verified physical-volume isolation")
-    if reveal_unsigned.get("volume_isolation") != "verified_metadata":
-        raise ValueError("Algonaut reveal lacks verified physical-volume isolation")
     if screen_unsigned.get("temporal_control_status") != "predeclared_not_revealed":
         raise ValueError("Algonaut screen does not prove a preregistered control boundary")
-    if reveal_unsigned.get("screen_fingerprint_sha256") != screen_fingerprint:
-        raise ValueError("Algonaut reveal does not reference the exact frozen screen")
 
     plan_input = screen_unsigned.get("neuros_plan_input")
     if not isinstance(plan_input, Mapping):
@@ -194,6 +204,39 @@ def ingest_algonaut_prospective_geometry(
         raise ValueError("native neurOS preprocessing identity disagrees with Algonaut screen")
     if plan.source_revision != screen_unsigned.get("source_revision"):
         raise ValueError("native neurOS source revision disagrees with Algonaut screen")
+    return screen_unsigned, screen_fingerprint, plan
+
+
+def freeze_algonaut_prospective_plan(
+    screen: Mapping[str, Any],
+) -> AlgonautProspectivePlanBinding:
+    """Verify a screen and freeze neurOS plan identity before any reveal exists."""
+
+    _, screen_fingerprint, plan = _bind_algonaut_prospective_screen(screen)
+    return AlgonautProspectivePlanBinding(
+        plan=plan,
+        algonaut_screen_fingerprint=screen_fingerprint,
+    )
+
+
+def ingest_algonaut_prospective_geometry(
+    screen: Mapping[str, Any],
+    reveal: Mapping[str, Any],
+) -> AlgonautProspectiveEvaluation:
+    """Verify Algonaut NG3 artifacts, then evaluate them under native neurOS authority."""
+
+    screen_unsigned, screen_fingerprint, plan = _bind_algonaut_prospective_screen(screen)
+    reveal_unsigned, reveal_fingerprint = _verify_algonaut_artifact(
+        reveal,
+        expected_kind="algonaut_mario.neuros_prospective_geometry_reveal",
+        expected_schema=2,
+        name="Algonaut prospective reveal",
+    )
+    _require_no_holdout_access(reveal_unsigned, name="Algonaut prospective reveal")
+    if reveal_unsigned.get("volume_isolation") != "verified_metadata":
+        raise ValueError("Algonaut reveal lacks verified physical-volume isolation")
+    if reveal_unsigned.get("screen_fingerprint_sha256") != screen_fingerprint:
+        raise ValueError("Algonaut reveal does not reference the exact frozen screen")
 
     projection = reveal_unsigned.get("neuros_reveal_projection")
     if not isinstance(projection, Mapping):

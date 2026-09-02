@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+neuros-research-algonaut-prospective = "neuros.research.algonauts_prospective_cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4",
