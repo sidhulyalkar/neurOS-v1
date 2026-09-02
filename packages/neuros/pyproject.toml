@@ -34,6 +34,9 @@ all = [
     "neuros-cloud>=2.0.0",
     "mne>=1.6",
 ]
+runtime = [
+    "neuros-runtime-native>=0.1.0",
+]
 bci = [
     "neuros-drivers[eeg]>=2.0.0",
     "neuros-models[pytorch]>=2.0.0",
