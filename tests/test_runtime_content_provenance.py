@@ -52,6 +52,8 @@ def _window() -> DataWindow:
 
 def test_data_window_provenance_exposes_exact_intervals_and_content_identity() -> None:
     provenance = _window().provenance
+    assert provenance["start_frame"] == 4
+    assert provenance["end_frame_exclusive"] == 8
     assert provenance["manifest_sha256"] == SHA_MANIFEST
     assert provenance["declared_source_sha256"] == SHA_SOURCE
     assert provenance["verified_source_sha256"] == SHA_SOURCE
