@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 
 import pytest
-
 from neuros.research._canonical import canonical_sha256
 from neuros.research.prospective import (
     ProspectiveGeometryCandidate,
