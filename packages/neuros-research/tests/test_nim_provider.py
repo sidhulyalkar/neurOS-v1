@@ -16,7 +16,8 @@ def _ok_response() -> dict[str, object]:
 
 def test_probe_requires_real_nonempty_chat_response() -> None:
     class Stub(QualifiedNvidiaNimClient):
-        def _request(self, path: str, *, payload=None):  # type: ignore[no-untyped-def]
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del kwargs
             assert path == "chat/completions"
             assert payload["chat_template_kwargs"] == {"enable_thinking": False}
             return _ok_response()
@@ -49,9 +50,28 @@ def test_probe_preserves_http_status_and_redacts_credential(monkeypatch: pytest.
     assert "[REDACTED]" in probe.error_excerpt
 
 
+def test_raw_read_timeout_becomes_probe_evidence_instead_of_aborting_discovery() -> None:
+    class Stub(QualifiedNvidiaNimClient):
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del kwargs
+            if path == "models":
+                return {"data": [{"id": model} for model in DOCUMENTED_NVIDIA_CHAT_MODELS]}
+            if payload["model"] == DOCUMENTED_NVIDIA_CHAT_MODELS[0]:
+                raise TimeoutError("read operation timed out")
+            return _ok_response()
+
+    client = Stub("secret-for-test-only", max_attempts=1)
+    available, _ = client.discover_models()
+    assert available == DOCUMENTED_NVIDIA_CHAT_MODELS[1:]
+    assert client.model_probes[0].status == "transport_error"
+    assert "timed out" in client.model_probes[0].error_excerpt
+    assert all(probe.status == "qualified" for probe in client.model_probes[1:])
+
+
 def test_discovery_never_promotes_documented_fallback_without_successful_probe() -> None:
     class Stub(QualifiedNvidiaNimClient):
-        def _request(self, path: str, *, payload=None):  # type: ignore[no-untyped-def]
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del payload, kwargs
             if path == "models":
                 raise RuntimeError("catalog unavailable")
             raise RuntimeError("chat route unavailable")
@@ -68,7 +88,8 @@ def test_discovery_falls_through_to_next_documented_model_only_after_live_probe(
     second = DOCUMENTED_NVIDIA_CHAT_MODELS[1]
 
     class Stub(QualifiedNvidiaNimClient):
-        def _request(self, path: str, *, payload=None):  # type: ignore[no-untyped-def]
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del kwargs
             if path == "models":
                 return {"data": [{"id": model} for model in DOCUMENTED_NVIDIA_CHAT_MODELS]}
             if payload["model"] == second:
@@ -86,9 +107,53 @@ def test_discovery_falls_through_to_next_documented_model_only_after_live_probe(
     ]
 
 
+def test_invalid_probe_response_is_recorded_and_other_candidates_continue() -> None:
+    first = DOCUMENTED_NVIDIA_CHAT_MODELS[0]
+
+    class Stub(QualifiedNvidiaNimClient):
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del kwargs
+            if path == "models":
+                return {"data": [{"id": model} for model in DOCUMENTED_NVIDIA_CHAT_MODELS]}
+            if payload["model"] == first:
+                raise ValueError("malformed provider response")
+            return _ok_response()
+
+    client = Stub("secret-for-test-only", max_attempts=1)
+    available, _ = client.discover_models()
+    assert available == DOCUMENTED_NVIDIA_CHAT_MODELS[1:]
+    assert client.model_probes[0].status == "invalid_response"
+
+
+def test_discovery_requests_use_a_smaller_bounded_budget() -> None:
+    observed: list[tuple[str, float | None, int | None]] = []
+
+    class Stub(QualifiedNvidiaNimClient):
+        def _request(  # type: ignore[no-untyped-def]
+            self, path: str, *, payload=None, timeout_s=None, max_attempts=None
+        ):
+            del payload
+            observed.append((path, timeout_s, max_attempts))
+            if path == "models":
+                return {"data": [{"id": model} for model in DOCUMENTED_NVIDIA_CHAT_MODELS]}
+            return _ok_response()
+
+    client = Stub("secret-for-test-only", timeout_s=90.0, max_attempts=4)
+    client.discover_models()
+    assert observed
+    assert all(timeout == 20.0 for _, timeout, _ in observed)
+    assert all(attempts == 2 for _, _, attempts in observed)
+    qualification = client.provider_qualification()
+    assert qualification["discovery_budget"] == {
+        "timeout_seconds_per_attempt": 20.0,
+        "max_attempts_per_route": 2,
+    }
+
+
 def test_provider_qualification_fingerprint_is_stable() -> None:
     class Stub(QualifiedNvidiaNimClient):
-        def _request(self, path: str, *, payload=None):  # type: ignore[no-untyped-def]
+        def _request(self, path: str, *, payload=None, **kwargs):  # type: ignore[no-untyped-def]
+            del kwargs
             if path == "models":
                 return {"data": [{"id": DOCUMENTED_NVIDIA_CHAT_MODELS[0]}]}
             return _ok_response()

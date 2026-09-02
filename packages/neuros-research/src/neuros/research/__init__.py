@@ -13,6 +13,13 @@ from .contracts import (
 from .evidence import AdversarialCheck, ExperimentEvidence, MetricObservation
 from .insight import InsightCard
 from .ledger import EvidenceLedger, LedgerEvent
+from .prospective import (
+    ProspectiveGeometryCandidate,
+    ProspectiveGeometryPlan,
+    ProspectiveGeometryReveal,
+    ProspectiveOutcome,
+    evaluate_prospective_geometry_gain,
+)
 from .registry import ResearchRegistry
 from .semantics import (
     ALGORITHMIC_METRIC_REGISTRY,
@@ -46,9 +53,14 @@ __all__ = [
     "MetricSpec",
     "PromotionDecision",
     "PromotionPolicy",
+    "ProspectiveGeometryCandidate",
+    "ProspectiveGeometryPlan",
+    "ProspectiveGeometryReveal",
+    "ProspectiveOutcome",
     "ResearchAgent",
     "ResearchRegistry",
     "SemanticResearchProposal",
+    "evaluate_prospective_geometry_gain",
     "materialize_g1_packet",
     "metric_registry_payload",
     "parse_semantic_proposals",

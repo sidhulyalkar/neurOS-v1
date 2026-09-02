@@ -22,6 +22,8 @@ DOCUMENTED_NVIDIA_CHAT_MODELS = (
 _RETRIABLE_HTTP = frozenset({408, 409, 429, 500, 502, 503, 504})
 _MAX_PROVIDER_ERROR_BYTES = 4096
 _MAX_PROVIDER_ERROR_CHARS = 768
+_DISCOVERY_TIMEOUT_S = 20.0
+_DISCOVERY_MAX_ATTEMPTS = 2
 
 
 def _sanitize_provider_text(value: str, *, secret: str) -> str:
@@ -100,8 +102,15 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
         self.call_journal: list[NimCallRecord] = []
         type(self).latest_instance = self
 
-    def _request(self, path: str, *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Use the same API contract as the base client, preserving sanitized HTTP evidence."""
+    def _request(
+        self,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        timeout_s: float | None = None,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any]:
+        """Use the base API contract while preserving sanitized, bounded transport evidence."""
 
         normalized_path = path.lstrip("/")
         body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -117,11 +126,17 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
             headers=headers,
             method="GET" if payload is None else "POST",
         )
+        request_timeout = self.timeout_s if timeout_s is None else float(timeout_s)
+        attempts = self.max_attempts if max_attempts is None else int(max_attempts)
+        if request_timeout <= 0.0:
+            raise ValueError("request timeout must be positive")
+        if attempts < 1 or attempts > self.max_attempts:
+            raise ValueError("request attempts must be in [1, client.max_attempts]")
 
         last_error: Exception | None = None
-        for attempt in range(self.max_attempts):
+        for attempt in range(attempts):
             try:
-                with urlopen(request, timeout=self.timeout_s) as response:
+                with urlopen(request, timeout=request_timeout) as response:
                     decoded = json.loads(response.read().decode("utf-8"))
                 if not isinstance(decoded, dict):
                     raise ValueError("NIM API returned a non-object JSON response")
@@ -139,20 +154,39 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
                 last_error = error
                 if exc.code not in _RETRIABLE_HTTP:
                     raise error from exc
-            except URLError as exc:
+            except (URLError, TimeoutError, OSError) as exc:
+                reason = exc.reason if isinstance(exc, URLError) else exc
                 last_error = RuntimeError(
                     "NVIDIA NIM transport error: "
-                    + _sanitize_provider_text(str(exc.reason), secret=self._api_key)
+                    + _sanitize_provider_text(str(reason), secret=self._api_key)
                 )
-            if attempt + 1 < self.max_attempts:
+            if attempt + 1 < attempts:
                 time.sleep(min(2**attempt, 8))
 
         if isinstance(last_error, NimProviderRequestError):
             raise last_error
         raise RuntimeError("NVIDIA NIM API request exhausted retry budget") from last_error
 
+    def _bounded_catalog_models(self) -> tuple[str, ...]:
+        payload = self._request(
+            "models",
+            timeout_s=min(self.timeout_s, _DISCOVERY_TIMEOUT_S),
+            max_attempts=min(self.max_attempts, _DISCOVERY_MAX_ATTEMPTS),
+        )
+        rows = payload.get("data")
+        if not isinstance(rows, list):
+            raise ValueError("NIM model catalog missing data list")
+        models = tuple(
+            str(row["id"])
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"].strip()
+        )
+        if not models:
+            raise ValueError("NIM model catalog is empty")
+        return tuple(dict.fromkeys(models))
+
     def probe_model(self, model: str) -> NimModelProbe:
-        """Run a tiny request using the same non-thinking chat mode as the tournament."""
+        """Run a tiny bounded request using the same non-thinking chat mode as the tournament."""
 
         model = require_nonempty(model, name="model")
         payload = {
@@ -164,7 +198,12 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
             "chat_template_kwargs": {"enable_thinking": False},
         }
         try:
-            response = self._request("chat/completions", payload=payload)
+            response = self._request(
+                "chat/completions",
+                payload=payload,
+                timeout_s=min(self.timeout_s, _DISCOVERY_TIMEOUT_S),
+                max_attempts=min(self.max_attempts, _DISCOVERY_MAX_ATTEMPTS),
+            )
         except NimProviderRequestError as exc:
             return NimModelProbe(
                 model=model,
@@ -172,10 +211,16 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
                 status_code=exc.status_code,
                 error_excerpt=exc.response_excerpt or str(exc),
             )
-        except RuntimeError as exc:
+        except (RuntimeError, TimeoutError, OSError) as exc:
             return NimModelProbe(
                 model=model,
                 status="transport_error",
+                error_excerpt=_sanitize_provider_text(str(exc), secret=self._api_key),
+            )
+        except ValueError as exc:
+            return NimModelProbe(
+                model=model,
+                status="invalid_response",
                 error_excerpt=_sanitize_provider_text(str(exc), secret=self._api_key),
             )
 
@@ -202,14 +247,14 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
         """Treat catalog discovery as a hint; bounded chat execution is the authority."""
 
         try:
-            self.catalog_models = super().list_models()
+            self.catalog_models = self._bounded_catalog_models()
             self.catalog_error = None
             catalog_mode = "api_models_endpoint"
         except NimProviderRequestError as exc:
             self.catalog_models = ()
             self.catalog_error = exc.to_dict()
             catalog_mode = "catalog_unavailable"
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, TimeoutError, OSError) as exc:
             self.catalog_models = ()
             self.catalog_error = {
                 "kind": "catalog_error",
@@ -279,9 +324,15 @@ class QualifiedNvidiaNimClient(NvidiaNimClient):
             "qualified_models": [
                 probe.model for probe in self.model_probes if probe.status == "qualified"
             ],
+            "discovery_budget": {
+                "timeout_seconds_per_attempt": min(self.timeout_s, _DISCOVERY_TIMEOUT_S),
+                "max_attempts_per_route": min(self.max_attempts, _DISCOVERY_MAX_ATTEMPTS),
+            },
             "authority_boundary": (
                 "A documented model is usable for this tournament only after the exact hosted "
-                "chat route returns a non-empty response under the tournament's non-thinking mode."
+                "chat route returns a non-empty response under the tournament's non-thinking mode. "
+                "Timeout or failure of one candidate is preserved as probe evidence and cannot "
+                "prevent independent qualification of another candidate."
             ),
         }
         payload["fingerprint"] = canonical_sha256(payload)
