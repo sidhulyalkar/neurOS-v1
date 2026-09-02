@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -94,7 +94,7 @@ impl Record {
                 self.id, self.path
             )));
         }
-        if self.shape.is_empty() || self.shape.iter().any(|&dimension| dimension == 0) {
+        if self.shape.is_empty() || self.shape.contains(&0) {
             return Err(RuntimeError::Validation(format!(
                 "record {:?} shape dimensions must all be positive",
                 self.id
@@ -172,7 +172,7 @@ impl DType {
     }
 }
 
-fn is_safe_relative_path(path: &PathBuf) -> bool {
+fn is_safe_relative_path(path: &Path) -> bool {
     !path.is_absolute()
         && path
             .components()
