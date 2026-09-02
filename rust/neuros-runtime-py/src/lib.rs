@@ -51,7 +51,8 @@ impl NativeDataset {
     }
 
     fn verify_content(&self, py: Python<'_>) -> PyResult<Option<String>> {
-        py.detach(|| self.inner.verify_content()).map_err(runtime_error)
+        py.detach(|| self.inner.verify_content())
+            .map_err(runtime_error)
     }
 
     #[getter]
