@@ -20,9 +20,39 @@ from .nim import ResearchProposal
 
 CriterionOperator = Literal[">", ">=", "<", "<="]
 MetricDirection = Literal["higher_is_better", "lower_is_better", "neutrality"]
+ClaimRelation = Literal[
+    "absolute",
+    "matched_control",
+    "temporal_null",
+    "complementarity",
+    "stability",
+    "control_sweep",
+]
 
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _ALLOWED_OPERATORS = frozenset({">", ">=", "<", "<="})
+_ALLOWED_CLAIM_RELATIONS = frozenset(
+    {
+        "absolute",
+        "matched_control",
+        "temporal_null",
+        "complementarity",
+        "stability",
+        "control_sweep",
+    }
+)
+_COMPARATIVE_CLAIM_RE = re.compile(
+    r"\b(?:than|versus|vs\.?|compared(?:\s+to|\s+with)?|relative\s+to|"
+    r"matched[-\s]?control|baseline|improvement\s+over|gain\s+over|reduction\s+versus)\b",
+    re.IGNORECASE,
+)
+
+INDEPENDENT_CANDIDATE_STOPPING_RULE = (
+    "Evaluate every queued candidate independently against its own typed support and rejection "
+    "criteria. Rejection or failure of one candidate does not terminate unrelated candidates. "
+    "Global execution stops only when frozen safety, data-authority, evaluator-authority, or "
+    "compute-budget constraints prevent further authorized execution."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +63,7 @@ class MetricSpec:
     direction: MetricDirection
     definition: str
     unit: str = "unitless"
+    claim_relation: ClaimRelation = "absolute"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", require_nonempty(self.name, name="metric name"))
@@ -44,6 +75,8 @@ class MetricSpec:
         object.__setattr__(self, "unit", require_nonempty(self.unit, name="metric unit"))
         if self.direction not in {"higher_is_better", "lower_is_better", "neutrality"}:
             raise ValueError(f"unsupported metric direction {self.direction!r}")
+        if self.claim_relation not in _ALLOWED_CLAIM_RELATIONS:
+            raise ValueError(f"unsupported metric claim relation {self.claim_relation!r}")
 
     @property
     def support_operators(self) -> frozenset[str]:
@@ -63,6 +96,7 @@ class MetricSpec:
             "direction": self.direction,
             "definition": self.definition,
             "unit": self.unit,
+            "claim_relation": self.claim_relation,
         }
 
 
@@ -81,11 +115,13 @@ ALGORITHMIC_METRIC_REGISTRY: dict[str, MetricSpec] = {
         "validation_pearson_delta",
         "higher_is_better",
         "Candidate minus matched-control development-validation Pearson correlation.",
+        claim_relation="matched_control",
     ),
     "validation_mse_reduction": MetricSpec(
         "validation_mse_reduction",
         "higher_is_better",
         "Matched-control MSE minus candidate MSE on the same development-validation examples.",
+        claim_relation="matched_control",
     ),
     "rsa_spearman": MetricSpec(
         "rsa_spearman",
@@ -96,11 +132,13 @@ ALGORITHMIC_METRIC_REGISTRY: dict[str, MetricSpec] = {
         "temporal_shift_drop",
         "higher_is_better",
         "Validation score at zero shift minus the best matched temporal-shift null score.",
+        claim_relation="temporal_null",
     ),
     "validation_stability": MetricSpec(
         "validation_stability",
         "higher_is_better",
         "Predeclared stability score across development folds, seeds, or segments.",
+        claim_relation="stability",
     ),
     "runtime_seconds": MetricSpec(
         "runtime_seconds",
@@ -118,16 +156,19 @@ ALGORITHMIC_METRIC_REGISTRY: dict[str, MetricSpec] = {
         "complementarity_score",
         "higher_is_better",
         "One minus matched validation residual-error correlation; larger means more complementary errors.",
+        claim_relation="complementarity",
     ),
     "validation_pearson_span": MetricSpec(
         "validation_pearson_span",
         "neutrality",
         "Maximum minus minimum validation Pearson correlation across a predeclared control sweep.",
+        claim_relation="control_sweep",
     ),
     "matched_geometry_rsa_delta": MetricSpec(
         "matched_geometry_rsa_delta",
         "higher_is_better",
         "RSA Spearman delta versus a capacity- and dimensionality-matched geometry control.",
+        claim_relation="matched_control",
     ),
 }
 
@@ -139,6 +180,19 @@ def metric_registry_payload() -> dict[str, dict[str, str]]:
         name: ALGORITHMIC_METRIC_REGISTRY[name].to_dict()
         for name in sorted(ALGORITHMIC_METRIC_REGISTRY)
     }
+
+
+def enforce_independent_synthesis_stopping_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    """Demote model-authored stopping prose to an advisory note and install fixed authority."""
+
+    if not isinstance(payload, dict):
+        raise TypeError("synthesis payload must be a dictionary")
+    model_note = require_nonempty(str(payload.get("stopping_rule", "")), name="model stopping note")
+    normalized = dict(payload)
+    normalized["model_stopping_note"] = model_note
+    normalized["stopping_rule"] = INDEPENDENT_CANDIDATE_STOPPING_RULE
+    normalized["stopping_rule_authority"] = "deterministic_independent_candidate_policy"
+    return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,6 +278,8 @@ class SemanticResearchProposal:
 
     proposal: ResearchProposal
     primary_metric: str
+    claim_relation: ClaimRelation
+    control_description: str
     supports_if: tuple[DecisionCriterion, ...]
     rejects_if: tuple[DecisionCriterion, ...]
 
@@ -239,6 +295,31 @@ class SemanticResearchProposal:
             raise ValueError("primary_metric must appear in development_metrics")
         if not self.supports_if or not self.rejects_if:
             raise ValueError("supports_if and rejects_if must both contain criteria")
+
+        relation = str(self.claim_relation).strip()
+        if relation not in _ALLOWED_CLAIM_RELATIONS:
+            raise ValueError(f"unsupported proposal claim relation {relation!r}")
+        object.__setattr__(self, "claim_relation", relation)
+        control = str(self.control_description).strip()
+        primary_spec = ALGORITHMIC_METRIC_REGISTRY[self.primary_metric]
+        if relation != primary_spec.claim_relation:
+            raise ValueError(
+                f"claim_relation {relation!r} contradicts primary metric "
+                f"{self.primary_metric!r} relation {primary_spec.claim_relation!r}"
+            )
+        if relation == "absolute":
+            if control:
+                raise ValueError("absolute claims cannot carry a comparison control")
+        elif not control:
+            raise ValueError(f"{relation} claims require a non-empty control_description")
+        object.__setattr__(self, "control_description", control)
+
+        explicit_claim_text = f"{self.proposal.statement} {self.proposal.falsification_test}"
+        if relation == "absolute" and _COMPARATIVE_CLAIM_RE.search(explicit_claim_text):
+            raise ValueError(
+                "explicit comparative claim requires a comparative primary metric, "
+                "not an absolute metric"
+            )
 
         known_metrics = set(self.proposal.development_metrics)
         if not known_metrics.issubset(ALGORITHMIC_METRIC_REGISTRY):
@@ -292,6 +373,8 @@ class SemanticResearchProposal:
         return cls(
             proposal=proposal,
             primary_metric=str(payload["primary_metric"]),
+            claim_relation=str(payload["claim_relation"]),  # type: ignore[arg-type]
+            control_description=str(payload.get("control_description", "")),
             supports_if=tuple(DecisionCriterion.from_dict(row) for row in supports),
             rejects_if=tuple(DecisionCriterion.from_dict(row) for row in rejects),
         )
@@ -300,6 +383,8 @@ class SemanticResearchProposal:
         return {
             **self.proposal.to_dict(),
             "primary_metric": self.primary_metric,
+            "claim_relation": self.claim_relation,
+            "control_description": self.control_description,
             "supports_if": [criterion.to_dict() for criterion in self.supports_if],
             "rejects_if": [criterion.to_dict() for criterion in self.rejects_if],
         }
@@ -454,6 +539,8 @@ def materialize_g1_packet(
             "runner_entrypoint": binding.runner_entrypoint,
             "preprocessing_fingerprint": binding.preprocessing_fingerprint,
             "primary_metric": proposal.primary_metric,
+            "claim_relation": proposal.claim_relation,
+            "control_description": proposal.control_description,
             "supports_if": [criterion.to_dict() for criterion in proposal.supports_if],
             "rejects_if": [criterion.to_dict() for criterion in proposal.rejects_if],
             "scientific_boundary": (
