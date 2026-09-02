@@ -56,9 +56,10 @@ jobs:
           maturin build --release --manifest-path rust/neuros-runtime-py/Cargo.toml --interpreter python
       - name: Install native wheel
         run: python -m pip install target/wheels/*.whl
-      - name: Native Arrow smoke test
+      - name: Native Arrow and provenance smoke test
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import struct
           import tempfile
@@ -69,7 +70,9 @@ jobs:
           with tempfile.TemporaryDirectory() as directory:
               root = Path(directory)
               values = [float(value) for value in range(24)]
-              (root / "fmri.f32").write_bytes(b"".join(struct.pack("<f", value) for value in values))
+              source = b"".join(struct.pack("<f", value) for value in values)
+              source_sha256 = hashlib.sha256(source).hexdigest()
+              (root / "fmri.f32").write_bytes(source)
               manifest = {
                   "schema_version": 1,
                   "dataset_id": "ci-smoke",
@@ -79,6 +82,7 @@ jobs:
                           "subject": "sub-01",
                           "modality": "fmri",
                           "path": "fmri.f32",
+                          "source_sha256": source_sha256,
                           "dtype": "float32-le",
                           "shape": [6, 4],
                           "sampling_hz": 0.5,
@@ -94,4 +98,8 @@ jobs:
               assert len(arrow) == 8
               assert first.modality == "fmri"
               assert len(first.manifest_sha256) == 64
+              assert first.source_size_bytes == len(source)
+              assert first.declared_source_sha256 == source_sha256
+              assert first.verified_source_sha256 == source_sha256
+              assert first.source_verification_state == "verified_at_open"
           PY
