@@ -92,6 +92,8 @@ class DataWindow:
             "record_id": self.record_id,
             "subject": self.subject,
             "modality": self.modality,
+            "start_frame": self.start_frame,
+            "end_frame_exclusive": self.end_frame_exclusive,
             "shape": self.shape,
             "sampling_hz": self.sampling_hz,
             "manifest_sha256": str(self._native_window.manifest_sha256),
