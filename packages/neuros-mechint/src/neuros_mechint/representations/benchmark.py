@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from time import perf_counter
 
 from .contracts import (
     MethodOutcome,
@@ -15,12 +16,21 @@ from .metrics import aggregate_geometry_metrics, aggregate_reference_metrics
 from .pca import _positive_int
 
 
+def _runtime_metadata(started: float) -> dict[str, float | str]:
+    return {
+        "runtime_seconds": max(0.0, perf_counter() - started),
+        "runtime_domain": "operational",
+    }
+
+
 class RepresentationBenchmark:
     """Run requested methods under their declared fit regimes.
 
     The result intentionally does not rank methods. T-PHATE's transductive
     target fit, train-only PCA/autoencoder fitting, and fixed pretrained
     encoders represent different information regimes and must remain visible.
+    Runtime is recorded as an operational diagnostic and is not a scientific
+    geometry metric.
     """
 
     def __init__(
@@ -66,6 +76,7 @@ class RepresentationBenchmark:
 
         outcomes: list[MethodOutcome] = []
         for method in self.methods:
+            started = perf_counter()
             try:
                 embedding = method.embed(train, evaluation)
                 if embedding.sequence_ids != evaluation.sequence_ids:
@@ -103,6 +114,7 @@ class RepresentationBenchmark:
                         metrics=metrics,
                         metadata={
                             "metric_scope": "trajectory_local_rigid_transform_invariant",
+                            **_runtime_metadata(started),
                         },
                     )
                 )
@@ -114,9 +126,12 @@ class RepresentationBenchmark:
                         status=MethodStatus.UNAVAILABLE,
                         error_type=type(exc).__name__,
                         error_message=str(exc),
+                        metadata=_runtime_metadata(started),
                     )
                 )
-            except Exception as exc:
+            # A representation plugin is an experiment subject. Any plugin-local failure must
+            # become explicit FAILED evidence rather than aborting the remaining comparison.
+            except Exception as exc:  # noqa: BLE001
                 outcomes.append(
                     MethodOutcome(
                         method_id=method.method_id,
@@ -124,6 +139,7 @@ class RepresentationBenchmark:
                         status=MethodStatus.FAILED,
                         error_type=type(exc).__name__,
                         error_message=str(exc),
+                        metadata=_runtime_metadata(started),
                     )
                 )
 
@@ -136,5 +152,6 @@ class RepresentationBenchmark:
                 "ranking_policy": "none",
                 "claim_scope": "representation_geometry",
                 "reference_geometry": "provided" if reference is not None else "none",
+                "runtime_domain": "operational",
             },
         )

@@ -1,0 +1,228 @@
+{
+  "claim_scope": "controlled synthetic representation geometry only",
+  "evidence_id": "controlled-representation-noise-sweep-v2",
+  "kind": "neuros_reviewed_aggregate_evidence",
+  "method_status": {
+    "autoencoder": {
+      "failed_cases": 0,
+      "fit_regime": "train_only_inductive",
+      "ok_cases": 70,
+      "unavailable_cases": 0
+    },
+    "pca": {
+      "failed_cases": 0,
+      "fit_regime": "train_only_inductive",
+      "ok_cases": 70,
+      "unavailable_cases": 0
+    },
+    "tphate": {
+      "failed_cases": 0,
+      "fit_regime": "transductive_target_observed",
+      "ok_cases": 0,
+      "unavailable_cases": 70
+    }
+  },
+  "model_context_policy": {
+    "context_only": true,
+    "excluded": [
+      "per-case rows",
+      "raw arrays",
+      "operational runtime measurements",
+      "hidden or OOD outcomes"
+    ],
+    "may_inform_hypothesis_generation": true,
+    "may_not_be_used_as_scientific_promotion": true,
+    "payload_class": "aggregate_metrics"
+  },
+  "noise_conditioned_diagnostics": {
+    "metrics": {
+      "autoencoder": {
+        "reference_local_knn_preservation": {
+          "mean": [
+            0.8199107142857143,
+            0.7322321428571429,
+            0.6013392857142856,
+            0.4515178571428572,
+            0.35124999999999995,
+            0.25330357142857146,
+            0.19267857142857142
+          ],
+          "sem": [
+            0.017965470037328037,
+            0.02715990288175724,
+            0.03164748624726733,
+            0.02987509724934124,
+            0.026763615222410487,
+            0.0217828070204311,
+            0.018238390523532738
+          ]
+        },
+        "reference_pairwise_distance_rank": {
+          "mean": [
+            0.523394547660536,
+            0.5179406191803742,
+            0.506248670701425,
+            0.480423916713172,
+            0.4476217611577013,
+            0.386074636672968,
+            0.3232515549575453
+          ],
+          "sem": [
+            0.03811098018089738,
+            0.0373621129082233,
+            0.03692163042281885,
+            0.037308561408391304,
+            0.038169066214140325,
+            0.03885218255846518,
+            0.038013091898412725
+          ]
+        },
+        "temporal_continuity_ratio": {
+          "mean": [
+            0.10443893522788791,
+            0.1359582490712225,
+            0.1981469255729116,
+            0.29709099169010955,
+            0.3832880164557784,
+            0.5110088760386619,
+            0.6089104260959417
+          ],
+          "sem": [
+            0.004284236838197399,
+            0.007464257833687424,
+            0.013280886098852192,
+            0.02194246462880056,
+            0.029075965576745324,
+            0.036575904480944776,
+            0.0383742234210374
+          ]
+        }
+      },
+      "pca": {
+        "reference_local_knn_preservation": {
+          "mean": [
+            0.8944642857142858,
+            0.8767857142857143,
+            0.8609821428571429,
+            0.8158928571428572,
+            0.7572321428571428,
+            0.6535714285714286,
+            0.5570535714285714
+          ],
+          "sem": [
+            0.011623005034488544,
+            0.007681800723676484,
+            0.006831054145368889,
+            0.00765268801055211,
+            0.009229502093841612,
+            0.012171127222590379,
+            0.011228129724439574
+          ]
+        },
+        "reference_pairwise_distance_rank": {
+          "mean": [
+            0.6061508628610321,
+            0.6055872718910973,
+            0.6044787200457881,
+            0.6016442438036039,
+            0.5973151266886708,
+            0.5864417678110057,
+            0.5708011424079529
+          ],
+          "sem": [
+            0.02831326939195328,
+            0.028306184798568567,
+            0.02825115849314094,
+            0.028089594792475782,
+            0.027816296365299625,
+            0.02715590318140809,
+            0.026428369183391365
+          ]
+        },
+        "temporal_continuity_ratio": {
+          "mean": [
+            0.09363581307827944,
+            0.09460248064291824,
+            0.1009478328777429,
+            0.11987271925662035,
+            0.14506970119223556,
+            0.1984827079544989,
+            0.25409493636478503
+          ],
+          "sem": [
+            0.0020663457252205683,
+            0.0021388416294719193,
+            0.002137271787211457,
+            0.0028502079633340996,
+            0.0035026157689336894,
+            0.005755988748384313,
+            0.008252402726346121
+          ]
+        }
+      }
+    },
+    "noise_std": [
+      0.0,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "seed_count_per_noise": 10
+  },
+  "reproducibility": {
+    "attempts": [
+      {
+        "full_artifact_fingerprint": "3a2383ff8dde0e4e93ecf90e94a7d1ca965f54eed5844d4cc511a6edbb3512f4",
+        "sweep_json_sha256": "eaa65cf2d3e3cee30ba21ec78e6dbc5de3efc1dde7c7cb3a2101304498c26a28",
+        "zip_sha256": "072af52a7f4f53ec23991fc99ac3f19dfca45744872f3a50912ab742937063fa"
+      },
+      {
+        "full_artifact_fingerprint": "68948c33adde1cd4ed5829de320d6d832444d80b1d3cc72f91b778030e28621e",
+        "sweep_json_sha256": "6e753600753f64a2f5e8565ed3f418d9742ea5d44bdfdf6a2d6493e5448c8976",
+        "zip_sha256": "93ab8e065ac7366faf79324dd3c3ecb42a9ea7b23968bd1c06bfdea99551322a"
+      }
+    ],
+    "exact_head_attempts": 2,
+    "operational_timings_excluded_from_scientific_fingerprint": true,
+    "scientific_projection_identical": true
+  },
+  "review_fingerprint": "46169bc5770bc7c6d56867c5c6eb044b367edafaedc09e24498a4658be3dc6bc",
+  "reviewed_observations": [
+    "PCA reference-local neighborhood preservation declines monotonically as synthetic observation noise increases.",
+    "The four-epoch autoencoder degrades more sharply across the same noise grid, but this is a short-horizon optimization baseline and is not evidence of converged architecture inferiority.",
+    "T-PHATE was unavailable in normal CI by design because the upstream non-commercial dependency is not automatically installed, so this evidence contains no T-PHATE efficacy result.",
+    "The controlled clean latent trajectory is synthetic reference geometry, not biological ground truth, neural decoding performance, or BCI efficacy."
+  ],
+  "schema_version": 1,
+  "scientific_fingerprint": "9c64d025d4f8ca7364d9278b314840f47384f5747160b32d551199e0f84c8f60",
+  "source_revision": "41ed7cb71a9e455dc29ec1a6bc233914302130b5",
+  "study_parameters": {
+    "autoencoder_epochs": 4,
+    "components": 3,
+    "neighborhood_k": 8,
+    "noise_grid": [
+      0.0,
+      0.1,
+      0.2,
+      0.35,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ]
+  }
+}

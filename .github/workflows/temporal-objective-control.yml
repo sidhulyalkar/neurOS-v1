@@ -1,0 +1,296 @@
+name: Temporal Objective Control
+
+on:
+  push:
+    branches:
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/temporal-objective-control.yml"
+      - "packages/neuros-mechint/pyproject.toml"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/autoencoder.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/predictive.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/benchmark.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/contracts.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/controlled.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/metrics.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/sweep.py"
+      - "packages/neuros-mechint/src/neuros_mechint/representations/__init__.py"
+      - "packages/neuros-mechint/examples/14_temporal_objective_control.py"
+      - "packages/neuros-mechint/tests/test_mechint_predictive_representation.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temporal-objective-control-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  temporal-objective-control:
+    name: 280-cell matched temporal objective study
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU scientific surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e "packages/neuros-core[test]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e "packages/neuros-mechint[dev]"
+          python -m pip check
+
+      - name: Qualify sequence-safe temporal contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            packages/neuros-mechint/src/neuros_mechint/representations/predictive.py \
+            packages/neuros-mechint/examples/14_temporal_objective_control.py
+          python -m ruff check \
+            packages/neuros-mechint/src/neuros_mechint/representations \
+            packages/neuros-mechint/examples/14_temporal_objective_control.py \
+            packages/neuros-mechint/tests/test_mechint_predictive_representation.py
+          python -m pytest -q \
+            packages/neuros-mechint/tests/test_mechint_representations.py \
+            packages/neuros-mechint/tests/test_mechint_representation_sweep.py \
+            packages/neuros-mechint/tests/test_mechint_predictive_representation.py
+
+      - name: Run tiny temporal contract smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python packages/neuros-mechint/examples/14_temporal_objective_control.py \
+            --noise 0.35 \
+            --seed 0 --seed 1 \
+            --epochs 2 \
+            > "${RUNNER_TEMP}/temporal-objective-smoke.json"
+          python - "${RUNNER_TEMP}/temporal-objective-smoke.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert payload["kind"] == "neuros_temporal_objective_control"
+          assert payload["schema_version"] == 1
+          assert len(payload["cases"]) == 2
+          assert len(payload["evidence"]) == 8
+          assert len(payload["objective_evidence"]) == 6
+          assert len(payload["matched_effects"]) == 20
+          assert len(payload["matched_effect_summaries"]) == 10
+          assert payload["metadata"]["sequence_boundary_policy"] == "never_cross"
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["primary_temporal_control"] == (
+              "predictive_autoencoder_vs_predictive_shuffled"
+          )
+          assert payload["metadata"]["excluded_methods"] == ["tphate", "external_temporal_ssl"]
+          assert "winner" not in payload
+          PY
+
+      - name: Run full matched temporal-objective study
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/temporal-objective-control
+          python packages/neuros-mechint/examples/14_temporal_objective_control.py \
+            > artifacts/temporal-objective-control/study.json
+          sha256sum artifacts/temporal-objective-control/study.json \
+            > artifacts/temporal-objective-control/SHA256SUMS
+
+      - name: Verify complete evidence grid and scientific identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import copy
+          import hashlib
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/temporal-objective-control/study.json")
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          assert payload["kind"] == "neuros_temporal_objective_control"
+          assert payload["schema_version"] == 1
+          assert payload["metadata"]["source_revision"] == os.environ["GITHUB_SHA"]
+          assert payload["metadata"]["noise_grid"] == [0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0]
+          assert payload["metadata"]["seeds"] == list(range(10))
+          assert payload["metadata"]["epochs"] == 256
+          assert payload["metadata"]["components"] == 3
+          assert payload["metadata"]["hidden_dim"] == 32
+          assert payload["metadata"]["batch_size"] == 64
+          assert payload["metadata"]["lag"] == 1
+          assert payload["metadata"]["sequence_boundary_policy"] == "never_cross"
+          assert payload["metadata"]["ranking_policy"] == "none"
+          assert payload["metadata"]["primary_temporal_control"] == (
+              "predictive_autoencoder_vs_predictive_shuffled"
+          )
+          assert payload["metadata"]["secondary_objective_control"] == (
+              "predictive_autoencoder_vs_reconstruction_autoencoder"
+          )
+          assert payload["metadata"]["excluded_methods"] == ["tphate", "external_temporal_ssl"]
+          assert "winner" not in payload
+
+          assert len(payload["cases"]) == 70
+          assert len(payload["evidence"]) == 280
+          assert len(payload["summaries"]) == 4
+          assert len(payload["noise_summaries"]) == 28
+          assert len(payload["objective_evidence"]) == 210
+          assert len(payload["matched_effects"]) == 700
+          assert len(payload["matched_effect_summaries"]) == 70
+
+          method_ids = {
+              "pca",
+              "reconstruction_autoencoder",
+              "predictive_autoencoder",
+              "predictive_shuffled",
+          }
+          expected = {
+              (case["case_id"], method_id)
+              for case in payload["cases"]
+              for method_id in method_ids
+          }
+          actual = {(row["case_id"], row["method_id"]) for row in payload["evidence"]}
+          assert actual == expected
+
+          by_method = {row["method_id"]: row for row in payload["summaries"]}
+          assert set(by_method) == method_ids
+          for summary in by_method.values():
+              assert summary["declared_cases"] == 70
+              assert summary["ok_cases"] == 70
+              assert summary["failed_cases"] == 0
+              assert summary["unavailable_cases"] == 0
+
+          objective_counts = {
+              "reconstruction_autoencoder": 0,
+              "predictive_autoencoder": 0,
+              "predictive_shuffled": 0,
+          }
+          for row in payload["objective_evidence"]:
+              objective_counts[row["method_id"]] += 1
+              assert math.isfinite(row["final_training_loss"])
+              assert row["final_training_loss"] >= 0
+              assert row["fit_pair_or_sample_count"] > 0
+              assert row["diagnostic_scope"] == (
+                  "objective_specific_train_loss_not_cross_objective_score"
+              )
+          assert objective_counts == {key: 70 for key in objective_counts}
+
+          comparisons = {"predictive_vs_shuffled", "predictive_vs_reconstruction"}
+          metrics = {
+              "local_knn_preservation",
+              "pairwise_distance_rank",
+              "reference_local_knn_preservation",
+              "reference_pairwise_distance_rank",
+              "temporal_continuity_ratio",
+          }
+          assert {row["comparison_id"] for row in payload["matched_effects"]} == comparisons
+          assert {row["metric"] for row in payload["matched_effects"]} == metrics
+          assert all(row["status"] == "ok" for row in payload["matched_effects"])
+          assert all(math.isfinite(row["oriented_effect"]) for row in payload["matched_effects"])
+
+          for row in payload["matched_effect_summaries"]:
+              assert row["declared_seeds"] == 10
+              assert row["evaluable_seeds"] == 10
+              assert row["missing_seeds"] == 0
+              summary = row["oriented_effect"]
+              assert summary["n"] == 10
+              for key in ("mean", "std", "sem", "min", "max"):
+                  assert math.isfinite(summary[key])
+
+          scientific = copy.deepcopy(payload)
+          expected_scientific = scientific.pop("scientific_fingerprint")
+          scientific.pop("fingerprint")
+          scientific["kind"] = "neuros_temporal_objective_control_scientific"
+          for row in scientific["evidence"]:
+              row.pop("operational")
+          for row in scientific["summaries"]:
+              row.pop("operational_summaries")
+          for row in scientific["noise_summaries"]:
+              row.pop("operational_summaries")
+          encoded = json.dumps(
+              scientific,
+              sort_keys=True,
+              separators=(",", ":"),
+              allow_nan=False,
+          )
+          assert expected_scientific == hashlib.sha256(encoded.encode()).hexdigest()
+
+          full_fingerprint = payload["fingerprint"]
+          unsigned = dict(payload)
+          unsigned.pop("fingerprint")
+          encoded_full = json.dumps(
+              unsigned,
+              sort_keys=True,
+              separators=(",", ":"),
+              allow_nan=False,
+          )
+          assert full_fingerprint == hashlib.sha256(encoded_full.encode()).hexdigest()
+          print(
+              "TEMPORAL_OBJECTIVE_VERIFIED cases=70 evidence=280 matched_effects=700 "
+              f"scientific={expected_scientific} artifact={full_fingerprint}"
+          )
+          PY
+          sha256sum -c artifacts/temporal-objective-control/SHA256SUMS
+
+      - name: Write qualification summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f artifacts/temporal-objective-control/study.json ]; then
+            echo "Temporal-objective artifact was not produced." >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          python - <<'PY' >> "${GITHUB_STEP_SUMMARY}"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("artifacts/temporal-objective-control/study.json").read_text()
+          )
+          print("## Matched temporal-objective control")
+          print()
+          print(f"- Source: `{payload['metadata']['source_revision']}`")
+          print(f"- Scientific fingerprint: `{payload['scientific_fingerprint']}`")
+          print(f"- Cases: {len(payload['cases'])}")
+          print(f"- Method-case rows: {len(payload['evidence'])}")
+          print(f"- Paired matched-effect rows: {len(payload['matched_effects'])}")
+          print("- Primary temporal control: predictive successor vs within-sequence shuffled successor")
+          print("- Secondary control: predictive successor vs same-capacity reconstruction")
+          print()
+          print(
+              "**Boundary:** controlled synthetic geometry only. Positive paired effects are "
+              "oriented to mean the candidate preserves more of the declared geometry. "
+              "Objective-specific training losses are not cross-objective scores. This study "
+              "does not establish neural decoding, BCI learnability, biological mechanism, "
+              "or clinical efficacy."
+          )
+          PY
+
+      - name: Upload immutable temporal-objective evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: temporal-objective-control-${{ github.sha }}
+          path: artifacts/temporal-objective-control/
+          if-no-files-found: warn
+          retention-days: 30

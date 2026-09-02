@@ -1,0 +1,115 @@
+name: NVIDIA NIM Provider Qualification
+
+on:
+  push:
+    branches:
+      - feat/research-tournament-authority-v1
+    paths:
+      - ".github/workflows/nim-provider-qualification.yml"
+      - "packages/neuros-research/src/neuros/research/nim.py"
+      - "packages/neuros-research/src/neuros/research/nim_provider.py"
+      - "packages/neuros-research/examples/04_nim_provider_qualification.py"
+      - "packages/neuros-research/tests/test_nim_provider.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nim-provider-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  provider-qualification:
+    name: Bounded hosted-model transport qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.NVIDIA_NIM_API_KEY || secrets.NVAPI_KEY }}
+      NVIDIA_NIM_ENDPOINT: https://integrate.api.nvidia.com/v1
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Require NVIDIA API credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "::error::Expected repository secret NVIDIA_API_KEY, NVIDIA_NIM_API_KEY, or NVAPI_KEY."
+            exit 1
+          fi
+          echo "::add-mask::${NVIDIA_API_KEY}"
+
+      - name: Install and qualify provider authority locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "packages/neuros-research[dev]"
+          python -m compileall -q packages/neuros-research/src packages/neuros-research/examples
+          python -m ruff check packages/neuros-research/src/neuros/research/nim_provider.py \
+            packages/neuros-research/examples/04_nim_provider_qualification.py \
+            packages/neuros-research/tests/test_nim_provider.py
+          python -m pytest -q packages/neuros-research/tests/test_nim.py \
+            packages/neuros-research/tests/test_nim_provider.py
+
+      - name: Run bounded live provider qualification
+        id: live_probe
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/nim-provider
+          python packages/neuros-research/examples/04_nim_provider_qualification.py \
+            --output artifacts/nim-provider/provider-qualification.json
+          sha256sum artifacts/nim-provider/provider-qualification.json \
+            > artifacts/nim-provider/SHA256SUMS
+
+      - name: Preserve provider qualification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nim-provider-qualification-${{ github.sha }}
+          path: artifacts/nim-provider/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Require at least one qualified hosted model
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f artifacts/nim-provider/provider-qualification.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("artifacts/nim-provider/provider-qualification.json")
+          raw = path.read_text(encoding="utf-8")
+          key = os.environ["NVIDIA_API_KEY"]
+          if key and key in raw:
+              raise SystemExit("credential material leaked into provider qualification artifact")
+          payload = json.loads(raw)
+          if payload.get("kind") != "neuros_nim_provider_qualification":
+              raise SystemExit("unexpected provider qualification artifact kind")
+          if payload.get("source_revision") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("provider qualification source revision mismatch")
+          qualified = payload.get("qualification", {}).get("qualified_models", [])
+          if not qualified:
+              raise SystemExit("no NVIDIA hosted chat model passed bounded qualification")
+          print("qualified hosted models: " + ",".join(qualified))
+          PY
