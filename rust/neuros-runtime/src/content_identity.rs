@@ -17,18 +17,17 @@ pub fn declared_dataset_content_sha256(manifest: &DatasetManifest) -> Result<Opt
     records.sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut hasher = Sha256::new();
-    update_bytes(&mut hasher, DATASET_CONTENT_DOMAIN.as_bytes());
+    update_bytes(&mut hasher, DATASET_CONTENT_DOMAIN.as_bytes())?;
     for record in records {
         let Some(source_sha256) = record.source_sha256.as_deref() else {
             return Ok(None);
         };
-        update_bytes(&mut hasher, record.id.as_bytes());
-        update_bytes(&mut hasher, source_sha256.as_bytes());
+        update_bytes(&mut hasher, record.id.as_bytes())?;
+        update_bytes(&mut hasher, source_sha256.as_bytes())?;
         hasher.update(record.offset_bytes.to_le_bytes());
-        update_bytes(&mut hasher, dtype_tag(record.dtype));
-        let rank = u64::try_from(record.shape.len()).map_err(|_| {
-            RuntimeError::Validation("record rank does not fit in u64".into())
-        })?;
+        update_bytes(&mut hasher, dtype_tag(record.dtype))?;
+        let rank = u64::try_from(record.shape.len())
+            .map_err(|_| RuntimeError::Validation("record rank does not fit in u64".into()))?;
         hasher.update(rank.to_le_bytes());
         for dimension in &record.shape {
             let dimension = u64::try_from(*dimension).map_err(|_| {
@@ -40,10 +39,12 @@ pub fn declared_dataset_content_sha256(manifest: &DatasetManifest) -> Result<Opt
     Ok(Some(format!("{:x}", hasher.finalize())))
 }
 
-fn update_bytes(hasher: &mut Sha256, value: &[u8]) {
-    let length = u64::try_from(value.len()).expect("byte slice length must fit in u64");
+fn update_bytes(hasher: &mut Sha256, value: &[u8]) -> Result<()> {
+    let length = u64::try_from(value.len())
+        .map_err(|_| RuntimeError::Validation("identity field length does not fit in u64".into()))?;
     hasher.update(length.to_le_bytes());
     hasher.update(value);
+    Ok(())
 }
 
 const fn dtype_tag(dtype: DType) -> &'static [u8] {
