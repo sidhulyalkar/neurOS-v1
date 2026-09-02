@@ -53,10 +53,14 @@ impl DatasetManifest {
             )));
         }
         if self.dataset_id.trim().is_empty() {
-            return Err(RuntimeError::Validation("dataset_id must not be empty".into()));
+            return Err(RuntimeError::Validation(
+                "dataset_id must not be empty".into(),
+            ));
         }
         if self.records.is_empty() {
-            return Err(RuntimeError::Validation("manifest must contain at least one record".into()));
+            return Err(RuntimeError::Validation(
+                "manifest must contain at least one record".into(),
+            ));
         }
 
         let mut ids = HashSet::with_capacity(self.records.len());
@@ -75,7 +79,10 @@ impl DatasetManifest {
 
 impl Record {
     pub fn validate(&self) -> Result<()> {
-        if self.id.trim().is_empty() || self.subject.trim().is_empty() || self.modality.trim().is_empty() {
+        if self.id.trim().is_empty()
+            || self.subject.trim().is_empty()
+            || self.modality.trim().is_empty()
+        {
             return Err(RuntimeError::Validation(format!(
                 "record {:?} requires non-empty id, subject, and modality",
                 self.id
@@ -91,6 +98,13 @@ impl Record {
             return Err(RuntimeError::Validation(format!(
                 "record {:?} shape dimensions must all be positive",
                 self.id
+            )));
+        }
+        let alignment = self.dtype.size_bytes() as u64;
+        if self.offset_bytes % alignment != 0 {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} offset_bytes={} is not aligned to {} bytes for {:?}",
+                self.id, self.offset_bytes, alignment, self.dtype
             )));
         }
         if let Some(rate) = self.sampling_hz {
@@ -122,21 +136,31 @@ impl Record {
     }
 
     pub fn frame_elements(&self) -> Result<usize> {
-        self.shape.iter().skip(1).try_fold(1usize, |acc, &dimension| {
-            acc.checked_mul(dimension).ok_or_else(|| {
-                RuntimeError::Validation(format!("record {:?} frame shape overflows usize", self.id))
+        self.shape
+            .iter()
+            .skip(1)
+            .try_fold(1usize, |acc, &dimension| {
+                acc.checked_mul(dimension).ok_or_else(|| {
+                    RuntimeError::Validation(format!(
+                        "record {:?} frame shape overflows usize",
+                        self.id
+                    ))
+                })
             })
-        })
     }
 
     pub fn required_end_byte(&self) -> Result<u64> {
         let payload = self
             .element_count()?
             .checked_mul(self.dtype.size_bytes())
-            .ok_or_else(|| RuntimeError::Validation(format!("record {:?} byte size overflows usize", self.id)))?;
+            .ok_or_else(|| {
+                RuntimeError::Validation(format!("record {:?} byte size overflows usize", self.id))
+            })?;
         self.offset_bytes
             .checked_add(payload as u64)
-            .ok_or_else(|| RuntimeError::Validation(format!("record {:?} byte extent overflows u64", self.id)))
+            .ok_or_else(|| {
+                RuntimeError::Validation(format!("record {:?} byte extent overflows u64", self.id))
+            })
     }
 }
 
@@ -150,9 +174,9 @@ impl DType {
 
 fn is_safe_relative_path(path: &PathBuf) -> bool {
     !path.is_absolute()
-        && path.components().all(|component| {
-            matches!(component, Component::Normal(_) | Component::CurDir)
-        })
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
 #[cfg(test)]
@@ -177,6 +201,13 @@ mod tests {
     fn rejects_path_escape() {
         let mut candidate = record();
         candidate.path = "../outside.f32".into();
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_misaligned_offset() {
+        let mut candidate = record();
+        candidate.offset_bytes = 2;
         assert!(candidate.validate().is_err());
     }
 
