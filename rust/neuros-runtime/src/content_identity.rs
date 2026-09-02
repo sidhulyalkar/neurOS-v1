@@ -40,8 +40,9 @@ pub fn declared_dataset_content_sha256(manifest: &DatasetManifest) -> Result<Opt
 }
 
 fn update_bytes(hasher: &mut Sha256, value: &[u8]) -> Result<()> {
-    let length = u64::try_from(value.len())
-        .map_err(|_| RuntimeError::Validation("identity field length does not fit in u64".into()))?;
+    let length = u64::try_from(value.len()).map_err(|_| {
+        RuntimeError::Validation("identity field length does not fit in u64".into())
+    })?;
     hasher.update(length.to_le_bytes());
     hasher.update(value);
     Ok(())
