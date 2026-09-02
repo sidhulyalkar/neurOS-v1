@@ -1,8 +1,6 @@
 """Train-only sequence-safe predictive representation controls."""
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
