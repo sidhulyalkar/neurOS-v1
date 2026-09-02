@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "neuros-runtime-native"
+version = "0.1.0"
+description = "Rust data plane and zero-copy Arrow bridge for neurOS"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "neurOS Development Team"}]
+dependencies = ["arro3-core>=0.8.1"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "neuros_runtime_native"
+features = ["pyo3/extension-module"]
+strip = true

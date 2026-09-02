@@ -10,6 +10,12 @@ from pkgutil import extend_path
 __path__ = extend_path(__path__, __name__)
 
 from neuros.contracts import DecoderOutput, SignalFrame, StreamDescriptor  # noqa: E402,F401
+from neuros.dataset import (  # noqa: E402,F401
+    DataWindow,
+    Dataset,
+    NativeRuntimeUnavailable,
+    native_runtime_available,
+)
 from neuros.pipeline import MultiModalPipeline, Pipeline  # noqa: E402,F401
 from neuros.plugins import load_plugin  # noqa: E402,F401
 from neuros.runtime import OverflowPolicy, RuntimeState  # noqa: E402,F401
@@ -25,9 +31,12 @@ __all__ = [
     "BandpassFilter",
     "BaseDriver",
     "BaseModel",
+    "DataWindow",
+    "Dataset",
     "DecoderOutput",
     "MockDriver",
     "MultiModalPipeline",
+    "NativeRuntimeUnavailable",
     "OverflowPolicy",
     "Pipeline",
     "RuntimeState",
@@ -36,4 +45,5 @@ __all__ = [
     "SmoothingFilter",
     "StreamDescriptor",
     "load_plugin",
+    "native_runtime_available",
 ]

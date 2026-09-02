@@ -1,0 +1,97 @@
+name: Rust Runtime CI
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust/**"
+      - "packages/neuros/src/neuros/dataset.py"
+      - "packages/neuros/src/neuros/__init__.py"
+      - "packages/neuros/pyproject.toml"
+      - ".github/workflows/rust-runtime-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust/**"
+      - "packages/neuros/src/neuros/dataset.py"
+      - "packages/neuros/src/neuros/__init__.py"
+      - "packages/neuros/pyproject.toml"
+      - ".github/workflows/rust-runtime-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test -p neuros-runtime --all-features
+
+  python-wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native wheel
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin==1.15.0"
+          maturin build --release --manifest-path rust/neuros-runtime-py/Cargo.toml --interpreter python
+      - name: Install native wheel
+        run: python -m pip install target/wheels/*.whl
+      - name: Native Arrow smoke test
+        run: |
+          python - <<'PY'
+          import json
+          import struct
+          import tempfile
+          from pathlib import Path
+
+          import neuros_runtime_native as native
+
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              values = [float(value) for value in range(24)]
+              (root / "fmri.f32").write_bytes(b"".join(struct.pack("<f", value) for value in values))
+              manifest = {
+                  "schema_version": 1,
+                  "dataset_id": "ci-smoke",
+                  "records": [
+                      {
+                          "id": "r1",
+                          "subject": "sub-01",
+                          "modality": "fmri",
+                          "path": "fmri.f32",
+                          "dtype": "float32-le",
+                          "shape": [6, 4],
+                          "sampling_hz": 0.5,
+                      }
+                  ],
+              }
+              (root / "neuros.dataset.json").write_text(json.dumps(manifest))
+              dataset = native.NativeDataset.open(root)
+              stream = dataset.stream(modalities=["fmri"], window=2, stride=2, prefetch=2)
+              first = next(stream)
+              arrow = first.to_arrow()
+              assert first.shape == [2, 4]
+              assert len(arrow) == 8
+              assert first.modality == "fmri"
+              assert len(first.manifest_sha256) == 64
+          PY

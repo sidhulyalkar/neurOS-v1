@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = [
+    "rust/neuros-runtime",
+    "rust/neuros-runtime-py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+authors = ["neurOS Development Team"]
+repository = "https://github.com/sidhulyalkar/neurOS-v1"
+
+[workspace.dependencies]
+arrow-array = "59.2"
+arrow-buffer = "59.2"
+arrow-schema = "59.2"
+crossbeam-channel = "0.5"
+memmap2 = "0.9"
+pyo3 = "0.29"
+pyo3-arrow = "0.19"
+rayon = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
