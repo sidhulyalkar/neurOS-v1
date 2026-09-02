@@ -180,6 +180,10 @@ impl Dataset {
 
         let mut records: Vec<_> = self.records.iter().collect();
         records.sort_by(|left, right| left.id.cmp(&right.id));
+        // The process-wide mmap cache intentionally stores weak references. Hold
+        // verified mappings strongly for this pass so multiple records referencing
+        // one source share verification work even when no window is alive yet.
+        let mut verified_regions = Vec::new();
         for record in records {
             let expected_source_sha256 = record.source_sha256.as_deref().ok_or_else(|| {
                 RuntimeError::Validation(
@@ -202,6 +206,7 @@ impl Dataset {
                     "source verification completed without the declared digest".into(),
                 ));
             }
+            verified_regions.push(region);
         }
 
         let mut state = self.verified_dataset_content_sha256.lock().map_err(|_| {
@@ -359,7 +364,9 @@ impl Dataset {
         let end_frame_exclusive = descriptor
             .start_frame
             .checked_add(descriptor.length_frames)
-            .ok_or_else(|| RuntimeError::InvalidWindow("window frame extent overflowed usize".into()))?;
+            .ok_or_else(|| {
+                RuntimeError::InvalidWindow("window frame extent overflowed usize".into())
+            })?;
         let verified_dataset_content_sha256 = self.verified_dataset_content_sha256()?;
 
         Ok(WindowHandle {
@@ -646,9 +653,7 @@ mod tests {
     use super::*;
     use crate::manifest::{DType, DatasetManifest};
 
-    fn fixture_with_declared_hash(
-        declare_hash: bool,
-    ) -> (tempfile::TempDir, Arc<Dataset>, String) {
+    fn fixture_with_declared_hash(declare_hash: bool) -> (tempfile::TempDir, Arc<Dataset>, String) {
         let directory = tempdir().unwrap();
         let data_path = directory.path().join("fmri.f32");
         let mut data = File::create(&data_path).unwrap();
@@ -746,8 +751,14 @@ mod tests {
             .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 1)
             .unwrap();
         let window = stream.next().unwrap().unwrap();
-        assert_eq!(window.declared_source_sha256(), Some(source_sha256.as_str()));
-        assert_eq!(window.verified_source_sha256(), Some(source_sha256.as_str()));
+        assert_eq!(
+            window.declared_source_sha256(),
+            Some(source_sha256.as_str())
+        );
+        assert_eq!(
+            window.verified_source_sha256(),
+            Some(source_sha256.as_str())
+        );
         assert_eq!(
             window.source_verification_state(),
             SourceVerificationState::VerifiedAtOpen
@@ -773,7 +784,10 @@ mod tests {
             .stream(StreamSelector::default(), WindowSpec::new(2, 2).unwrap(), 1)
             .unwrap();
         let window = stream.next().unwrap().unwrap();
-        assert_eq!(window.verified_source_sha256(), Some(source_sha256.as_str()));
+        assert_eq!(
+            window.verified_source_sha256(),
+            Some(source_sha256.as_str())
+        );
         assert_eq!(
             window.verified_dataset_content_sha256(),
             Some(declared.as_str())
