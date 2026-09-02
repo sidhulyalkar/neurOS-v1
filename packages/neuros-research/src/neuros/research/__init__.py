@@ -1,6 +1,10 @@
 """Provider-agnostic autonomous research authority for neurOS."""
 
 from .algonauts import AlgonautsAuthoritySpec
+from .algonauts_prospective import (
+    AlgonautProspectiveEvaluation,
+    ingest_algonaut_prospective_geometry,
+)
 from .arbiter import EvidenceArbiter, MetricGate, PromotionDecision, PromotionPolicy
 from .contracts import (
     DatasetAuthority,
@@ -35,6 +39,7 @@ from .semantics import (
 __all__ = [
     "ALGORITHMIC_METRIC_REGISTRY",
     "AdversarialCheck",
+    "AlgonautProspectiveEvaluation",
     "AlgonautsAuthoritySpec",
     "DatasetAuthority",
     "DecisionCriterion",
@@ -61,6 +66,7 @@ __all__ = [
     "ResearchRegistry",
     "SemanticResearchProposal",
     "evaluate_prospective_geometry_gain",
+    "ingest_algonaut_prospective_geometry",
     "materialize_g1_packet",
     "metric_registry_payload",
     "parse_semantic_proposals",
