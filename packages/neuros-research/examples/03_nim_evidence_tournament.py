@@ -13,10 +13,28 @@ from typing import Any
 from neuros.research._canonical import canonical_sha256
 from neuros.research.nim_provider import QualifiedNvidiaNimClient
 from neuros.research.reviewed_context import load_reviewed_aggregate_context
+from neuros.research.semantics import enforce_independent_synthesis_stopping_policy
 
 _ROOT = Path(__file__).resolve().parents[1]
 _BASE_TOURNAMENT = Path(__file__).with_name("02_nim_algonauts_tournament.py")
 _REVIEWED_EVIDENCE = _ROOT / "evidence" / "controlled_representation_noise_sweep_v2.json"
+
+_CLAIM_RELATION_CONTRACT = """
+ADDITIONAL_TYPED_CLAIM_CONTRACT:
+Every candidate MUST include two additional fields: claim_relation and control_description.
+claim_relation MUST exactly equal the claim_relation registered for primary_metric in
+metric_registry. Allowed relations are absolute, matched_control, temporal_null,
+complementarity, stability, and control_sweep. For absolute metrics, control_description MUST
+be an empty string and the statement/falsification test MUST NOT claim superiority over a
+baseline/control. For every non-absolute relation, control_description MUST be a concrete,
+non-empty description of the matched control, null, comparison, or sweep. A claim using words
+such as than, versus, vs, compared to, relative to, matched-control, baseline, improvement over,
+gain over, or reduction versus MUST NOT use absolute validation_pearson or validation_mse as
+its primary metric. Use validation_pearson_delta or validation_mse_reduction for matched-control
+performance claims. Use matched_geometry_rsa_delta for matched geometry comparisons,
+temporal_shift_drop for temporal-null claims, and complementarity_score for complementarity.
+These fields are deterministic execution authority, not optional prose.
+""".strip()
 
 
 def _load_base_tournament() -> ModuleType:
@@ -82,6 +100,9 @@ def main() -> None:
     reviewed = load_reviewed_aggregate_context(_REVIEWED_EVIDENCE)
     base = _load_base_tournament()
     base_context = base._public_context
+    base_generator_prompt = base._generator_prompt
+    base_generator_repair_prompt = base._generator_repair_prompt
+    base_validate_synthesis = base._validate_synthesis
     base.NvidiaNimClient = QualifiedNvidiaNimClient
 
     def evidence_informed_context():
@@ -99,7 +120,28 @@ def main() -> None:
         ]
         return context
 
+    def evidence_generator_prompt(context: dict[str, Any]) -> str:
+        return base_generator_prompt(context) + "\n\n" + _CLAIM_RELATION_CONTRACT
+
+    def evidence_generator_repair_prompt(
+        context: dict[str, Any], previous_payload: dict[str, Any], validation_error: str
+    ) -> str:
+        return (
+            base_generator_repair_prompt(context, previous_payload, validation_error)
+            + "\n\n"
+            + _CLAIM_RELATION_CONTRACT
+        )
+
+    def deterministic_validate_synthesis(
+        payload: dict[str, Any], advanced_ids: set[str]
+    ) -> dict[str, Any]:
+        structurally_valid = base_validate_synthesis(payload, advanced_ids)
+        return enforce_independent_synthesis_stopping_policy(structurally_valid)
+
     base._public_context = evidence_informed_context
+    base._generator_prompt = evidence_generator_prompt
+    base._generator_repair_prompt = evidence_generator_repair_prompt
+    base._validate_synthesis = deterministic_validate_synthesis
     output = _output_path()
     try:
         base.main()
