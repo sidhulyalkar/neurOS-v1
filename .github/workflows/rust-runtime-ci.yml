@@ -9,6 +9,7 @@ on:
       - "packages/neuros/src/neuros/dataset.py"
       - "packages/neuros/src/neuros/__init__.py"
       - "packages/neuros/pyproject.toml"
+      - "tests/test_runtime_content_provenance.py"
       - ".github/workflows/rust-runtime-ci.yml"
   push:
     branches: [main]
@@ -19,6 +20,7 @@ on:
       - "packages/neuros/src/neuros/dataset.py"
       - "packages/neuros/src/neuros/__init__.py"
       - "packages/neuros/pyproject.toml"
+      - "tests/test_runtime_content_provenance.py"
       - ".github/workflows/rust-runtime-ci.yml"
 
 permissions:
@@ -91,15 +93,27 @@ jobs:
               }
               (root / "neuros.dataset.json").write_text(json.dumps(manifest))
               dataset = native.NativeDataset.open(root)
+              declared_dataset_sha256 = dataset.declared_dataset_content_sha256
+              assert declared_dataset_sha256 is not None
+              assert dataset.verified_dataset_content_sha256 is None
+              assert dataset.verify_content() == declared_dataset_sha256
+              assert dataset.verified_dataset_content_sha256 == declared_dataset_sha256
+
               stream = dataset.stream(modalities=["fmri"], window=2, stride=2, prefetch=2)
               first = next(stream)
               arrow = first.to_arrow()
               assert first.shape == [2, 4]
               assert len(arrow) == 8
               assert first.modality == "fmri"
+              assert first.start_frame == 0
+              assert first.end_frame_exclusive == 2
+              assert first.record_byte_start == 0
+              assert first.record_byte_end_exclusive == len(source)
               assert len(first.manifest_sha256) == 64
               assert first.source_size_bytes == len(source)
               assert first.declared_source_sha256 == source_sha256
               assert first.verified_source_sha256 == source_sha256
               assert first.source_verification_state == "verified_at_open"
+              assert first.declared_dataset_content_sha256 == declared_dataset_sha256
+              assert first.verified_dataset_content_sha256 == declared_dataset_sha256
           PY
