@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use arrow_array::ArrayRef;
 use arrow_schema::{DataType, Field};
-use neuros_runtime::{Dataset, StreamSelector, WindowHandle, WindowSpec, WindowStream};
+use neuros_runtime::{
+    Dataset, ExactAlignmentPlan, ExactAlignmentSpec, StreamSelector, WindowHandle, WindowSpec,
+    WindowStream, plan_exact_alignment,
+};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3_arrow::PyArray;
@@ -41,6 +44,27 @@ impl NativeDataset {
         self.inner.manifest().records.len()
     }
 
+    #[pyo3(signature = (*, sync_group, modalities, duration_ns, stride_ns=None))]
+    fn plan_aligned(
+        &self,
+        sync_group: String,
+        modalities: Vec<String>,
+        duration_ns: u64,
+        stride_ns: Option<u64>,
+    ) -> PyResult<NativeAlignmentPlan> {
+        let spec = ExactAlignmentSpec::new(duration_ns, stride_ns.unwrap_or(duration_ns))
+            .map_err(runtime_error)?;
+        let plan = plan_exact_alignment(
+            self.inner.manifest(),
+            self.inner.manifest_sha256(),
+            &sync_group,
+            &modalities,
+            spec,
+        )
+        .map_err(runtime_error)?;
+        Ok(NativeAlignmentPlan { inner: plan })
+    }
+
     #[pyo3(signature = (*, subjects=None, modalities=None, window, stride=None, prefetch=8))]
     fn stream(
         &self,
@@ -62,6 +86,74 @@ impl NativeDataset {
         Ok(NativeWindowStream {
             inner: Mutex::new(stream),
         })
+    }
+}
+
+#[pyclass]
+struct NativeAlignmentPlan {
+    inner: ExactAlignmentPlan,
+}
+
+#[pymethods]
+impl NativeAlignmentPlan {
+    #[getter]
+    fn dataset_id(&self) -> String {
+        self.inner.dataset_id.clone()
+    }
+
+    #[getter]
+    fn manifest_sha256(&self) -> String {
+        self.inner.manifest_sha256.clone()
+    }
+
+    #[getter]
+    fn sync_group(&self) -> String {
+        self.inner.sync_group.clone()
+    }
+
+    #[getter]
+    fn start_ns(&self) -> i64 {
+        self.inner.start_ns
+    }
+
+    #[getter]
+    fn overlap_end_ns(&self) -> i64 {
+        self.inner.overlap_end_ns
+    }
+
+    #[getter]
+    fn duration_ns(&self) -> u64 {
+        self.inner.duration_ns
+    }
+
+    #[getter]
+    fn stride_ns(&self) -> u64 {
+        self.inner.stride_ns
+    }
+
+    #[getter]
+    fn window_count(&self) -> usize {
+        self.inner.window_count
+    }
+
+    #[getter]
+    fn sha256(&self) -> PyResult<String> {
+        self.inner.sha256().map_err(runtime_error)
+    }
+
+    fn to_json(&self) -> PyResult<String> {
+        self.inner.to_json().map_err(runtime_error)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "NativeAlignmentPlan(sync_group={:?}, start_ns={}, duration_ns={}, stride_ns={}, windows={})",
+            self.inner.sync_group,
+            self.inner.start_ns,
+            self.inner.duration_ns,
+            self.inner.stride_ns,
+            self.inner.window_count,
+        )
     }
 }
 
@@ -188,6 +280,7 @@ fn require_single_modality(modalities: Vec<String>) -> PyResult<()> {
 #[pymodule]
 fn neuros_runtime_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeDataset>()?;
+    module.add_class::<NativeAlignmentPlan>()?;
     module.add_class::<NativeWindowStream>()?;
     module.add_class::<NativeWindow>()?;
     module.add_function(wrap_pyfunction!(runtime_version, module)?)?;
