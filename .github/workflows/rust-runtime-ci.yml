@@ -56,7 +56,7 @@ jobs:
           maturin build --release --manifest-path rust/neuros-runtime-py/Cargo.toml --interpreter python
       - name: Install native wheel
         run: python -m pip install target/wheels/*.whl
-      - name: Native Arrow smoke test
+      - name: Native Arrow and exact-clock smoke test
         run: |
           python - <<'PY'
           import json
@@ -66,27 +66,55 @@ jobs:
 
           import neuros_runtime_native as native
 
+          def write_f32(path, count):
+              path.write_bytes(
+                  b"".join(struct.pack("<f", float(value)) for value in range(count))
+              )
+
           with tempfile.TemporaryDirectory() as directory:
               root = Path(directory)
-              values = [float(value) for value in range(24)]
-              (root / "fmri.f32").write_bytes(b"".join(struct.pack("<f", value) for value in values))
+              write_f32(root / "fmri.f32", 40)
+              write_f32(root / "behavior.f32", 40)
               manifest = {
                   "schema_version": 1,
                   "dataset_id": "ci-smoke",
                   "records": [
                       {
-                          "id": "r1",
+                          "id": "fmri-run-01",
                           "subject": "sub-01",
                           "modality": "fmri",
+                          "sync_group": "sub-01/run-01",
                           "path": "fmri.f32",
                           "dtype": "float32-le",
-                          "shape": [6, 4],
+                          "shape": [10, 4],
                           "sampling_hz": 0.5,
-                      }
+                          "clock": {
+                              "id": "scanner-clock",
+                              "start_ns": 0,
+                              "period_ns": 2_000_000_000,
+                          },
+                      },
+                      {
+                          "id": "behavior-run-01",
+                          "subject": "sub-01",
+                          "modality": "behavior",
+                          "sync_group": "sub-01/run-01",
+                          "path": "behavior.f32",
+                          "dtype": "float32-le",
+                          "shape": [40, 1],
+                          "sampling_hz": 2.0,
+                          "clock": {
+                              "id": "behavior-clock",
+                              "start_ns": 0,
+                              "period_ns": 500_000_000,
+                          },
+                      },
                   ],
               }
               (root / "neuros.dataset.json").write_text(json.dumps(manifest))
               dataset = native.NativeDataset.open(root)
+
+              # Preserve the promoted v0 zero-copy single-modality path.
               stream = dataset.stream(modalities=["fmri"], window=2, stride=2, prefetch=2)
               first = next(stream)
               arrow = first.to_arrow()
@@ -94,4 +122,36 @@ jobs:
               assert len(arrow) == 8
               assert first.modality == "fmri"
               assert len(first.manifest_sha256) == 64
+
+              # Qualify v1 planning without opening multimodal source windows.
+              plan = dataset.plan_aligned(
+                  sync_group="sub-01/run-01",
+                  modalities=["fmri", "behavior"],
+                  duration_ns=4_000_000_000,
+                  stride_ns=2_000_000_000,
+              )
+              payload = json.loads(plan.to_json())
+              assert payload["policy"] == "exact"
+              assert payload["start_ns"] == 0
+              assert payload["overlap_end_ns"] == 20_000_000_000
+              assert payload["window_count"] == 9
+              assert len(plan.sha256) == 64
+              assert [entry["modality"] for entry in payload["entries"]] == [
+                  "behavior",
+                  "fmri",
+              ]
+
+              clocks = {
+                  record["modality"]: record["clock"] for record in manifest["records"]
+              }
+              for entry in payload["entries"]:
+                  clock = clocks[entry["modality"]]
+                  expected_start_frame = (
+                      payload["start_ns"] - clock["start_ns"]
+                  ) // clock["period_ns"]
+                  expected_frames = payload["duration_ns"] // clock["period_ns"]
+                  expected_stride = payload["stride_ns"] // clock["period_ns"]
+                  assert entry["start_frame"] == expected_start_frame
+                  assert entry["frames_per_window"] == expected_frames
+                  assert entry["frame_stride"] == expected_stride
           PY
