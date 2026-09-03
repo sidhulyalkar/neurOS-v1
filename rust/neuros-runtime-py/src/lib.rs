@@ -75,14 +75,7 @@ impl NativeDataset {
         let spec = ExactAlignmentSpec::new(duration_ns, stride_ns.unwrap_or(duration_ns))
             .map_err(runtime_error)?;
         let plan = py
-            .detach(|| {
-                plan_exact_alignment(
-                    self.inner.as_ref(),
-                    &sync_group,
-                    &modalities,
-                    spec,
-                )
-            })
+            .detach(|| plan_exact_alignment(self.inner.as_ref(), &sync_group, &modalities, spec))
             .map_err(runtime_error)?;
         Ok(NativeAlignmentPlan { inner: plan })
     }
