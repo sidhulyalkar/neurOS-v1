@@ -59,8 +59,10 @@ jobs:
       - name: Native Arrow and exact-clock smoke test
         run: |
           python - <<'PY'
+          import importlib.util
           import json
           import struct
+          import sys
           import tempfile
           from pathlib import Path
 
@@ -123,7 +125,7 @@ jobs:
               assert first.modality == "fmri"
               assert len(first.manifest_sha256) == 64
 
-              # Qualify v1 planning without opening multimodal source windows.
+              # Qualify v1 native planning without opening multimodal source windows.
               plan = dataset.plan_aligned(
                   sync_group="sub-01/run-01",
                   modalities=["fmri", "behavior"],
@@ -154,4 +156,32 @@ jobs:
                   assert entry["start_frame"] == expected_start_frame
                   assert entry["frames_per_window"] == expected_frames
                   assert entry["frame_stride"] == expected_stride
+
+              # Exercise the dependency-light public Python facade against the same wheel.
+              module_path = Path("packages/neuros/src/neuros/dataset.py").resolve()
+              spec = importlib.util.spec_from_file_location(
+                  "neuros_runtime_dataset_smoke", module_path
+              )
+              assert spec is not None and spec.loader is not None
+              dataset_module = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = dataset_module
+              spec.loader.exec_module(dataset_module)
+
+              study = dataset_module.Dataset.open(root)
+              public_plan = study.plan_aligned(
+                  sync_group="sub-01/run-01",
+                  modalities=["fmri", "behavior"],
+                  duration_ns=4_000_000_000,
+                  stride_ns=2_000_000_000,
+              )
+              assert public_plan.sha256 == plan.sha256
+              assert public_plan.window_count == 9
+              window = public_plan.window(3)
+              assert window["start_ns"] == 6_000_000_000
+              assert window["end_ns"] == 10_000_000_000
+              by_modality = {item["modality"]: item for item in window["slices"]}
+              assert by_modality["fmri"]["start_frame"] == 3
+              assert by_modality["fmri"]["stop_frame"] == 5
+              assert by_modality["behavior"]["start_frame"] == 12
+              assert by_modality["behavior"]["stop_frame"] == 20
           PY
