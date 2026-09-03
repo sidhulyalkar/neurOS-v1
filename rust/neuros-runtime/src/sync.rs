@@ -136,7 +136,8 @@ fn plan_exact_alignment_from_manifest(
     manifest.validate()?;
     if sync_group.is_empty() || sync_group != sync_group.trim() {
         return Err(RuntimeError::Alignment(
-            "sync_group must be a non-empty canonical identifier with no surrounding whitespace".into(),
+            "sync_group must be a non-empty canonical identifier with no surrounding whitespace"
+                .into(),
         ));
     }
     if modalities.len() < 2 {
@@ -570,24 +571,28 @@ mod tests {
         ]);
         let spec = ExactAlignmentSpec::new(4_000_000_000, 2_000_000_000).unwrap();
 
-        assert!(plan_exact_alignment_from_manifest(
-            &manifest,
-            &"4".repeat(64),
-            &"d".repeat(64),
-            " sub-01/run-01",
-            &["fmri".into(), "behavior".into()],
-            spec,
-        )
-        .is_err());
-        assert!(plan_exact_alignment_from_manifest(
-            &manifest,
-            &"4".repeat(64),
-            &"d".repeat(64),
-            "sub-01/run-01",
-            &[" fmri".into(), "behavior".into()],
-            spec,
-        )
-        .is_err());
+        assert!(
+            plan_exact_alignment_from_manifest(
+                &manifest,
+                &"4".repeat(64),
+                &"d".repeat(64),
+                " sub-01/run-01",
+                &["fmri".into(), "behavior".into()],
+                spec,
+            )
+            .is_err()
+        );
+        assert!(
+            plan_exact_alignment_from_manifest(
+                &manifest,
+                &"4".repeat(64),
+                &"d".repeat(64),
+                "sub-01/run-01",
+                &[" fmri".into(), "behavior".into()],
+                spec,
+            )
+            .is_err()
+        );
     }
 
     #[test]
