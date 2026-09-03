@@ -453,6 +453,7 @@ mod tests {
                 id: "r1".into(),
                 subject: "sub-01".into(),
                 modality: "fmri".into(),
+                sync_group: None,
                 path: "fmri.f32".into(),
                 offset_bytes: 0,
                 dtype: DType::Float32Le,
