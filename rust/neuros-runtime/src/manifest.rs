@@ -92,9 +92,11 @@ impl Record {
                 self.id
             )));
         }
-        if self.sync_group.as_deref().is_some_and(|group| {
-            group.trim().is_empty() || group != group.trim()
-        }) {
+        if self
+            .sync_group
+            .as_deref()
+            .is_some_and(|group| group.trim().is_empty() || group != group.trim())
+        {
             return Err(RuntimeError::Validation(format!(
                 "record {:?} sync_group must be non-empty and have no surrounding whitespace",
                 self.id
