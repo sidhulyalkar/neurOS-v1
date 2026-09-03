@@ -20,247 +20,229 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Harden staged aligned-plan validator
+      - name: Integrate and harden native aligned executor
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          path = Path("rust/neuros-runtime/src/aligned.rs")
-          text = path.read_text()
+          def replace_once(text: str, needle: str, replacement: str, label: str) -> str:
+              count = text.count(needle)
+              if count != 1:
+                  raise RuntimeError(f"{label}: expected exactly one anchor, found {count}")
+              return text.replace(needle, replacement, 1)
 
-          old = '''        let mut previous_key: Option<(&str, &str)> = None;
-                  let mut overlap_end = i128::MAX;
-          '''
-          new = '''        let mut previous_key: Option<(&str, &str)> = None;
-                  let mut overlap_start = i128::MIN;
-                  let mut overlap_end = i128::MAX;
-                  let mut common_period = 1i128;
-          '''
-          assert old in text
-          text = text.replace(old, new, 1)
+          aligned = Path("rust/neuros-runtime/src/aligned.rs")
+          text = aligned.read_text()
 
-          old = '''            let period_ns = i128::from(clock.period_ns);
-                  let frame_offset_ns = start_ns
-          '''
-          new = '''            let period_ns = i128::from(clock.period_ns);
-                  overlap_start = overlap_start.max(i128::from(clock.start_ns));
-                  common_period = checked_lcm(common_period, period_ns)?;
-                  let frame_offset_ns = start_ns
-          '''
-          assert old in text
-          text = text.replace(old, new, 1)
+          needle = "        let mut overlap_end = i128::MAX;\n"
+          replacement = (
+              "        let mut overlap_start = i128::MIN;\n"
+              "        let mut overlap_end = i128::MAX;\n"
+              "        let mut common_period = 1i128;\n"
+          )
+          text = replace_once(text, needle, replacement, "aligned overlap state")
 
-          marker = '''        let expected_overlap_end = i64::try_from(overlap_end).map_err(|_| {
-          '''
-          earliest = '''        let previous_common_boundary = start_ns.checked_sub(common_period).ok_or_else(|| {
-                  RuntimeError::Alignment(
-                      "alignment plan previous common boundary overflowed clock arithmetic".into(),
-                  )
-              })?;
-              if start_ns < overlap_start || previous_common_boundary >= overlap_start {
-                  return Err(RuntimeError::Alignment(
-                      "alignment plan does not begin at the earliest exact common boundary".into(),
-                  ));
-              }
+          needle = "            let period_ns = i128::from(clock.period_ns);\n"
+          replacement = (
+              needle
+              + "            overlap_start = overlap_start.max(i128::from(clock.start_ns));\n"
+              + "            common_period = checked_lcm(common_period, period_ns)?;\n"
+          )
+          text = replace_once(text, needle, replacement, "aligned exact-period state")
 
-          '''
-          assert marker in text
-          text = text.replace(marker, earliest + marker, 1)
+          needle = "        let expected_overlap_end = i64::try_from(overlap_end).map_err(|_| {\n"
+          earliest = (
+              "        let previous_common_boundary = start_ns.checked_sub(common_period).ok_or_else(|| {\n"
+              "            RuntimeError::Alignment(\n"
+              "                \"alignment plan previous common boundary overflowed clock arithmetic\".into(),\n"
+              "            )\n"
+              "        })?;\n"
+              "        if start_ns < overlap_start || previous_common_boundary >= overlap_start {\n"
+              "            return Err(RuntimeError::Alignment(\n"
+              "                \"alignment plan does not begin at the earliest exact common boundary\".into(),\n"
+              "            ));\n"
+              "        }\n\n"
+          )
+          text = replace_once(text, needle, earliest + needle, "earliest common boundary")
 
-          helper_marker = '''fn send_terminal_error(sender: &Sender<AlignedStreamMessage>, error: RuntimeError) {
-          '''
-          helpers = '''fn checked_lcm(left: i128, right: i128) -> Result<i128> {
-              let divisor = gcd_positive(left, right);
-              left.checked_div(divisor)
-                  .and_then(|value| value.checked_mul(right))
-                  .ok_or_else(|| {
-                      RuntimeError::Alignment(
-                          "alignment plan common clock period overflowed integer arithmetic".into(),
-                      )
-                  })
-          }
-
-          fn gcd_positive(mut left: i128, mut right: i128) -> i128 {
-              while right != 0 {
-                  let remainder = left % right;
-                  left = right;
-                  right = remainder;
-              }
-              left.abs()
-          }
-
-          '''
-          assert "fn checked_lcm(" not in text
-          assert helper_marker in text
-          text = text.replace(helper_marker, helpers + helper_marker, 1)
+          helper_anchor = "fn send_terminal_error(sender: &Sender<AlignedStreamMessage>, error: RuntimeError) {\n"
+          helpers = (
+              "fn checked_lcm(left: i128, right: i128) -> Result<i128> {\n"
+              "    let divisor = gcd_positive(left, right);\n"
+              "    left.checked_div(divisor)\n"
+              "        .and_then(|value| value.checked_mul(right))\n"
+              "        .ok_or_else(|| {\n"
+              "            RuntimeError::Alignment(\n"
+              "                \"alignment plan common clock period overflowed integer arithmetic\".into(),\n"
+              "            )\n"
+              "        })\n"
+              "}\n\n"
+              "fn gcd_positive(mut left: i128, mut right: i128) -> i128 {\n"
+              "    while right != 0 {\n"
+              "        let remainder = left % right;\n"
+              "        left = right;\n"
+              "        right = remainder;\n"
+              "    }\n"
+              "    left.abs()\n"
+              "}\n\n"
+          )
+          if "fn checked_lcm(" in text:
+              raise RuntimeError("checked_lcm already present before bootstrap")
+          text = replace_once(text, helper_anchor, helpers + helper_anchor, "LCM helper anchor")
 
           text = text.replace(".unwrap_err();", ".err().unwrap();")
-          assert ".unwrap_err();" not in text
+          if ".unwrap_err();" in text:
+              raise RuntimeError("unwrap_err remained after test normalization")
 
-          old = '''        let mut truncated = plan.clone();
-                  truncated.window_count -= 1;
-                  let error = dataset.stream_aligned(&truncated, 1).err().unwrap();
-                  assert!(error.to_string().contains("not maximal exact count"));
-              }
-          '''
-          new = '''        let mut truncated = plan.clone();
-                  truncated.window_count -= 1;
-                  let error = dataset.stream_aligned(&truncated, 1).err().unwrap();
-                  assert!(error.to_string().contains("not maximal exact count"));
+          needle = '        assert!(error.to_string().contains("not maximal exact count"));\n'
+          delayed_test = (
+              needle
+              + "\n        let mut delayed = plan.clone();\n"
+              + "        delayed.start_ns += delayed.stride_ns as i64;\n"
+              + "        delayed.window_count -= 1;\n"
+              + "        for entry in &mut delayed.entries {\n"
+              + "            entry.start_frame += entry.frame_stride;\n"
+              + "        }\n"
+              + "        let error = dataset.stream_aligned(&delayed, 1).err().unwrap();\n"
+              + "        assert!(error\n"
+              + "            .to_string()\n"
+              + "            .contains(\"earliest exact common boundary\"));\n"
+          )
+          text = replace_once(text, needle, delayed_test, "delayed-plan adversarial test")
+          aligned.write_text(text)
 
-                  let mut delayed = plan.clone();
-                  delayed.start_ns += delayed.stride_ns as i64;
-                  delayed.window_count -= 1;
-                  for entry in &mut delayed.entries {
-                      entry.start_frame += entry.frame_stride;
-                  }
-                  let error = dataset.stream_aligned(&delayed, 1).err().unwrap();
-                  assert!(error
-                      .to_string()
-                      .contains("earliest exact common boundary"));
-              }
-          '''
-          assert old in text
-          text = text.replace(old, new, 1)
-          path.write_text(text)
-          PY
+          dataset = Path("rust/neuros-runtime/src/dataset.rs")
+          text = dataset.read_text()
 
-      - name: Wire aligned executor into qualified data plane
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
+          manifest_anchor = (
+              "    pub fn manifest(&self) -> &DatasetManifest {\n"
+              "        &self.manifest\n"
+              "    }\n"
+          )
+          records_method = (
+              manifest_anchor
+              + "\n    pub(crate) fn records(&self) -> &[Arc<Record>] {\n"
+              + "        &self.records\n"
+              + "    }\n"
+          )
+          if "pub(crate) fn records(&self)" in text:
+              raise RuntimeError("records hook already present before bootstrap")
+          text = replace_once(text, manifest_anchor, records_method, "dataset records hook")
 
-          path = Path("rust/neuros-runtime/src/dataset.rs")
-          text = path.read_text()
+          plan_windows_anchor = "    pub fn plan_windows(\n"
+          fresh_verify = '''    /// Re-hash every declared source even when a prior verification cache exists.
+    ///
+    /// Exact aligned execution uses this at worker authorization time so a source
+    /// changed after planning cannot inherit an older cached verification result.
+    pub(crate) fn verify_content_fresh(&self) -> Result<Option<String>> {
+        let Some(expected_dataset_sha256) = self.declared_dataset_content_sha256.clone() else {
+            return Ok(None);
+        };
 
-          manifest_method = '''    pub fn manifest(&self) -> &DatasetManifest {
-                  &self.manifest
-              }
-          '''
-          records_method = '''
-              pub(crate) fn records(&self) -> &[Arc<Record>] {
-                  &self.records
-              }
-          '''
-          assert "pub(crate) fn records(&self)" not in text
-          text = text.replace(manifest_method, manifest_method + records_method, 1)
+        let mut records: Vec<_> = self.records.iter().collect();
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut verified_regions = Vec::new();
+        for record in records {
+            let expected_source_sha256 = record.source_sha256.as_deref().ok_or_else(|| {
+                RuntimeError::Validation(
+                    "declared dataset content identity requires every record source hash".into(),
+                )
+            })?;
+            let (path, required_end) = self.resolve_record_source(record)?;
+            let (region, _) = self.map_source(&path, None)?;
+            let mapped_size = mapped_size_bytes(&region)?;
+            if mapped_size < required_end {
+                return Err(RuntimeError::SourceTooShort {
+                    path,
+                    actual: mapped_size,
+                    required: required_end,
+                });
+            }
+            let actual = Self::verify_mapped_sha256(&path, &region.mmap, expected_source_sha256)?;
+            let mut state = region.verified_source_sha256.lock().map_err(|_| {
+                RuntimeError::Validation("source verification cache lock was poisoned".into())
+            })?;
+            *state = Some(actual);
+            drop(state);
+            verified_regions.push(region);
+        }
 
-          verify_end = '''        *state = Some(expected_dataset_sha256.clone());
-                  Ok(Some(expected_dataset_sha256))
-              }
+        let mut state = self.verified_dataset_content_sha256.lock().map_err(|_| {
+            RuntimeError::Validation("dataset verification state lock was poisoned".into())
+        })?;
+        *state = Some(expected_dataset_sha256.clone());
+        Ok(Some(expected_dataset_sha256))
+    }
 
-              pub fn plan_windows(
-          '''
-          fresh_verify = '''        *state = Some(expected_dataset_sha256.clone());
-                  Ok(Some(expected_dataset_sha256))
-              }
+'''
+          if "pub(crate) fn verify_content_fresh" in text:
+              raise RuntimeError("fresh verification hook already present before bootstrap")
+          text = replace_once(
+              text,
+              plan_windows_anchor,
+              fresh_verify + plan_windows_anchor,
+              "fresh verification hook",
+          )
 
-              /// Re-hash every declared source even when a prior verification cache exists.
-              ///
-              /// Exact aligned execution uses this at worker authorization time so a source
-              /// changed after planning cannot inherit an older cached verification result.
-              pub(crate) fn verify_content_fresh(&self) -> Result<Option<String>> {
-                  let Some(expected_dataset_sha256) = self.declared_dataset_content_sha256.clone()
-                  else {
-                      return Ok(None);
-                  };
+          open_window_anchor = "    fn open_window(&self, descriptor: WindowDescriptor) -> Result<WindowHandle> {\n"
+          open_record_window = '''    pub(crate) fn open_record_window(
+        &self,
+        record: Arc<Record>,
+        start_frame: usize,
+        length_frames: usize,
+    ) -> Result<WindowHandle> {
+        if length_frames == 0 {
+            return Err(RuntimeError::InvalidWindow(
+                "aligned child window length must be positive".into(),
+            ));
+        }
+        let end_frame_exclusive = start_frame.checked_add(length_frames).ok_or_else(|| {
+            RuntimeError::InvalidWindow("aligned child frame extent overflowed usize".into())
+        })?;
+        if end_frame_exclusive > record.shape[0] {
+            return Err(RuntimeError::InvalidWindow(format!(
+                "aligned child window [{start_frame}, {end_frame_exclusive}) exceeds record {:?} with {} frames",
+                record.id, record.shape[0]
+            )));
+        }
+        let frame_elements = record.frame_elements()?;
+        self.open_window(WindowDescriptor {
+            record,
+            start_frame,
+            length_frames,
+            frame_elements,
+        })
+    }
 
-                  let mut records: Vec<_> = self.records.iter().collect();
-                  records.sort_by(|left, right| left.id.cmp(&right.id));
-                  let mut verified_regions = Vec::new();
-                  for record in records {
-                      let expected_source_sha256 = record.source_sha256.as_deref().ok_or_else(|| {
-                          RuntimeError::Validation(
-                              "declared dataset content identity requires every record source hash"
-                                  .into(),
-                          )
-                      })?;
-                      let (path, required_end) = self.resolve_record_source(record)?;
-                      let (region, _) = self.map_source(&path, None)?;
-                      let mapped_size = mapped_size_bytes(&region)?;
-                      if mapped_size < required_end {
-                          return Err(RuntimeError::SourceTooShort {
-                              path,
-                              actual: mapped_size,
-                              required: required_end,
-                          });
-                      }
-                      let actual =
-                          Self::verify_mapped_sha256(&path, &region.mmap, expected_source_sha256)?;
-                      let mut state = region.verified_source_sha256.lock().map_err(|_| {
-                          RuntimeError::Validation(
-                              "source verification cache lock was poisoned".into(),
-                          )
-                      })?;
-                      *state = Some(actual);
-                      drop(state);
-                      verified_regions.push(region);
-                  }
-
-                  let mut state = self.verified_dataset_content_sha256.lock().map_err(|_| {
-                      RuntimeError::Validation("dataset verification state lock was poisoned".into())
-                  })?;
-                  *state = Some(expected_dataset_sha256.clone());
-                  Ok(Some(expected_dataset_sha256))
-              }
-
-              pub fn plan_windows(
-          '''
-          assert "pub(crate) fn verify_content_fresh" not in text
-          assert verify_end in text
-          text = text.replace(verify_end, fresh_verify, 1)
-
-          open_marker = '''    fn open_window(&self, descriptor: WindowDescriptor) -> Result<WindowHandle> {
-          '''
-          open_record = '''    pub(crate) fn open_record_window(
-                  &self,
-                  record: Arc<Record>,
-                  start_frame: usize,
-                  length_frames: usize,
-              ) -> Result<WindowHandle> {
-                  if length_frames == 0 {
-                      return Err(RuntimeError::InvalidWindow(
-                          "aligned child window length must be positive".into(),
-                      ));
-                  }
-                  let end_frame_exclusive = start_frame.checked_add(length_frames).ok_or_else(|| {
-                      RuntimeError::InvalidWindow(
-                          "aligned child frame extent overflowed usize".into(),
-                      )
-                  })?;
-                  if end_frame_exclusive > record.shape[0] {
-                      return Err(RuntimeError::InvalidWindow(format!(
-                          "aligned child window [{start_frame}, {end_frame_exclusive}) exceeds record {:?} with {} frames",
-                          record.id, record.shape[0]
-                      )));
-                  }
-                  let frame_elements = record.frame_elements()?;
-                  self.open_window(WindowDescriptor {
-                      record,
-                      start_frame,
-                      length_frames,
-                      frame_elements,
-                  })
-              }
-
-          '''
-          assert "pub(crate) fn open_record_window" not in text
-          text = text.replace(open_marker, open_record + open_marker, 1)
-          path.write_text(text)
+'''
+          if "pub(crate) fn open_record_window" in text:
+              raise RuntimeError("open-record-window hook already present before bootstrap")
+          text = replace_once(
+              text,
+              open_window_anchor,
+              open_record_window + open_window_anchor,
+              "open-record-window hook",
+          )
+          dataset.write_text(text)
 
           lib = Path("rust/neuros-runtime/src/lib.rs")
           text = lib.read_text()
-          assert "mod aligned;" not in text
-          text = text.replace("mod content_identity;\n", "mod aligned;\nmod content_identity;\n", 1)
-          export_marker = "pub use content_identity::{DATASET_CONTENT_DOMAIN, declared_dataset_content_sha256};\n"
-          text = text.replace(
-              export_marker,
-              "pub use aligned::{AlignedBatch, AlignedBatchStream};\n" + export_marker,
-              1,
+          if "mod aligned;" in text:
+              raise RuntimeError("aligned module already wired before bootstrap")
+          text = replace_once(
+              text,
+              "mod content_identity;\n",
+              "mod aligned;\nmod content_identity;\n",
+              "aligned module declaration",
+          )
+          export_anchor = "pub use content_identity::{DATASET_CONTENT_DOMAIN, declared_dataset_content_sha256};\n"
+          text = replace_once(
+              text,
+              export_anchor,
+              "pub use aligned::{AlignedBatch, AlignedBatchStream};\n" + export_anchor,
+              "aligned public exports",
           )
           lib.write_text(text)
           PY
