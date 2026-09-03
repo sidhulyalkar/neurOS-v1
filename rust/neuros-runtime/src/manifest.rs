@@ -193,7 +193,7 @@ fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 #[cfg(test)]
