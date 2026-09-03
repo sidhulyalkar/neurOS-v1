@@ -8,10 +8,10 @@ pub const DATASET_CONTENT_DOMAIN: &str = "neuros.dataset_content.v1";
 /// Return the canonical dataset byte/interpretation identity when every record
 /// declares a source SHA-256.
 ///
-/// The identity intentionally excludes path, sampling rate, and clock metadata.
-/// Those remain bound by the manifest SHA-256. This content identity instead
-/// binds the stable record ID, full-file source digest, record byte offset,
-/// dtype, and shape using a domain-separated length-prefixed encoding.
+/// The identity intentionally excludes path, sampling rate, synchronization group,
+/// and clock metadata. Those remain bound by the manifest SHA-256. This content
+/// identity instead binds the stable record ID, full-file source digest, record
+/// byte offset, dtype, and shape using a domain-separated length-prefixed encoding.
 pub fn declared_dataset_content_sha256(manifest: &DatasetManifest) -> Result<Option<String>> {
     let mut records: Vec<_> = manifest.records.iter().collect();
     records.sort_by(|left, right| left.id.cmp(&right.id));
@@ -64,6 +64,7 @@ mod tests {
             id: id.into(),
             subject: "sub-01".into(),
             modality: "fmri".into(),
+            sync_group: None,
             path: path.into(),
             source_sha256: source_sha256.map(str::to_owned),
             offset_bytes: 0,
@@ -97,6 +98,18 @@ mod tests {
         assert_eq!(
             declared_dataset_content_sha256(&first).unwrap(),
             declared_dataset_content_sha256(&renamed_reordered).unwrap()
+        );
+    }
+
+    #[test]
+    fn sync_group_does_not_redefine_dataset_byte_identity() {
+        let hash = "d".repeat(64);
+        let first = manifest(vec![record("r1", "shared.f32", Some(&hash))]);
+        let mut regrouped = first.clone();
+        regrouped.records[0].sync_group = Some("sub-01/run-02".into());
+        assert_eq!(
+            declared_dataset_content_sha256(&first).unwrap(),
+            declared_dataset_content_sha256(&regrouped).unwrap()
         );
     }
 
