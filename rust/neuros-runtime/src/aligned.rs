@@ -121,9 +121,8 @@ impl Dataset {
             ));
         }
 
-        let declared_dataset_content_sha256 = self
-            .declared_dataset_content_sha256()
-            .ok_or_else(|| {
+        let declared_dataset_content_sha256 =
+            self.declared_dataset_content_sha256().ok_or_else(|| {
                 RuntimeError::Alignment(
                     "aligned execution requires a complete declared dataset content identity"
                         .into(),
@@ -138,7 +137,9 @@ impl Dataset {
         let mut seen_records = HashSet::with_capacity(plan.entries.len());
         let mut seen_modalities = HashSet::with_capacity(plan.entries.len());
         let mut previous_key: Option<(&str, &str)> = None;
+        let mut overlap_start = i128::MIN;
         let mut overlap_end = i128::MAX;
+        let mut common_period = 1i128;
         let start_ns = i128::from(plan.start_ns);
         let duration_ns = i128::from(plan.duration_ns);
         let stride_ns = i128::from(plan.stride_ns);
@@ -206,6 +207,8 @@ impl Dataset {
             }
 
             let period_ns = i128::from(clock.period_ns);
+            overlap_start = overlap_start.max(i128::from(clock.start_ns));
+            common_period = checked_lcm(common_period, period_ns)?;
             let frame_offset_ns = start_ns
                 .checked_sub(i128::from(clock.start_ns))
                 .ok_or_else(|| {
@@ -223,9 +226,10 @@ impl Dataset {
                     entry.record_id
                 )));
             }
-            let expected_start_frame = usize::try_from(frame_offset_ns / period_ns).map_err(|_| {
-                RuntimeError::Alignment("alignment plan start frame overflowed usize".into())
-            })?;
+            let expected_start_frame =
+                usize::try_from(frame_offset_ns / period_ns).map_err(|_| {
+                    RuntimeError::Alignment("alignment plan start frame overflowed usize".into())
+                })?;
             let expected_length = usize::try_from(duration_ns / period_ns).map_err(|_| {
                 RuntimeError::Alignment("alignment plan frames-per-window overflowed usize".into())
             })?;
@@ -289,6 +293,17 @@ impl Dataset {
             });
         }
 
+        let previous_common_boundary = start_ns.checked_sub(common_period).ok_or_else(|| {
+            RuntimeError::Alignment(
+                "alignment plan previous common boundary overflowed clock arithmetic".into(),
+            )
+        })?;
+        if start_ns < overlap_start || previous_common_boundary >= overlap_start {
+            return Err(RuntimeError::Alignment(
+                "alignment plan does not begin at the earliest exact common boundary".into(),
+            ));
+        }
+
         let expected_overlap_end = i64::try_from(overlap_end).map_err(|_| {
             RuntimeError::Alignment(
                 "aligned overlap end falls outside signed 64-bit clock domain".into(),
@@ -308,12 +323,9 @@ impl Dataset {
             ));
         }
         let expected_window_count = usize::try_from(
-            latest_start
-                .checked_sub(start_ns)
-                .ok_or_else(|| {
-                    RuntimeError::Alignment("aligned window-count arithmetic underflowed".into())
-                })?
-                / stride_ns
+            latest_start.checked_sub(start_ns).ok_or_else(|| {
+                RuntimeError::Alignment("aligned window-count arithmetic underflowed".into())
+            })? / stride_ns
                 + 1,
         )
         .map_err(|_| RuntimeError::Alignment("aligned window count overflowed usize".into()))?;
@@ -356,17 +368,14 @@ impl Dataset {
         sender: Sender<AlignedStreamMessage>,
     ) {
         for window_index in 0..execution.window_count {
-            let start_ns = match aligned_window_time(
-                execution.start_ns,
-                execution.stride_ns,
-                window_index,
-            ) {
-                Ok(value) => value,
-                Err(error) => {
-                    send_terminal_error(&sender, error);
-                    return;
-                }
-            };
+            let start_ns =
+                match aligned_window_time(execution.start_ns, execution.stride_ns, window_index) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        send_terminal_error(&sender, error);
+                        return;
+                    }
+                };
             let end_ns = match i128::from(start_ns)
                 .checked_add(i128::from(execution.duration_ns))
                 .and_then(|value| i64::try_from(value).ok())
@@ -496,6 +505,26 @@ fn aligned_window_time(start_ns: i64, stride_ns: u64, index: usize) -> Result<i6
         })
 }
 
+fn checked_lcm(left: i128, right: i128) -> Result<i128> {
+    let divisor = gcd_positive(left, right);
+    left.checked_div(divisor)
+        .and_then(|value| value.checked_mul(right))
+        .ok_or_else(|| {
+            RuntimeError::Alignment(
+                "alignment plan common clock period overflowed integer arithmetic".into(),
+            )
+        })
+}
+
+fn gcd_positive(mut left: i128, mut right: i128) -> i128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left.abs()
+}
+
 fn send_terminal_error(sender: &Sender<AlignedStreamMessage>, error: RuntimeError) {
     if sender.send(AlignedStreamMessage::Batch(Err(error))).is_ok() {
         let _ = sender.send(AlignedStreamMessage::Finished);
@@ -622,11 +651,19 @@ mod tests {
         assert_eq!(middle.windows()[1].start_frame(), 3);
         assert_eq!(middle.windows()[1].end_frame_exclusive(), 5);
         assert_eq!(
-            middle.windows()[0].arrow_values().unwrap().values().as_ref(),
+            middle.windows()[0]
+                .arrow_values()
+                .unwrap()
+                .values()
+                .as_ref(),
             &[112.0, 113.0, 114.0, 115.0, 116.0, 117.0, 118.0, 119.0]
         );
         assert_eq!(
-            middle.windows()[1].arrow_values().unwrap().values().as_ref(),
+            middle.windows()[1]
+                .arrow_values()
+                .unwrap()
+                .values()
+                .as_ref(),
             &[12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0]
         );
 
@@ -661,13 +698,26 @@ mod tests {
         let (_directory, dataset, plan) = aligned_fixture();
         let mut tampered = plan.clone();
         tampered.entries[0].start_frame += 1;
-        let error = dataset.stream_aligned(&tampered, 1).unwrap_err();
-        assert!(error.to_string().contains("derived frame arithmetic is stale"));
+        let error = dataset.stream_aligned(&tampered, 1).err().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains("derived frame arithmetic is stale")
+        );
 
         let mut truncated = plan.clone();
         truncated.window_count -= 1;
-        let error = dataset.stream_aligned(&truncated, 1).unwrap_err();
+        let error = dataset.stream_aligned(&truncated, 1).err().unwrap();
         assert!(error.to_string().contains("not maximal exact count"));
+
+        let mut delayed = plan.clone();
+        delayed.start_ns += delayed.stride_ns as i64;
+        delayed.window_count -= 1;
+        for entry in &mut delayed.entries {
+            entry.start_frame += entry.frame_stride;
+        }
+        let error = dataset.stream_aligned(&delayed, 1).err().unwrap();
+        assert!(error.to_string().contains("earliest exact common boundary"));
     }
 
     #[test]
@@ -678,14 +728,14 @@ mod tests {
         bytes[0] ^= 0xff;
         std::fs::write(&path, bytes).unwrap();
 
-        let error = dataset.stream_aligned(&plan, 1).unwrap_err();
+        let error = dataset.stream_aligned(&plan, 1).err().unwrap();
         assert!(matches!(error, RuntimeError::SourceHashMismatch { .. }));
     }
 
     #[test]
     fn aligned_stream_rejects_zero_prefetch() {
         let (_directory, dataset, plan) = aligned_fixture();
-        let error = dataset.stream_aligned(&plan, 0).unwrap_err();
+        let error = dataset.stream_aligned(&plan, 0).err().unwrap();
         assert!(matches!(error, RuntimeError::InvalidWindow(_)));
     }
 }

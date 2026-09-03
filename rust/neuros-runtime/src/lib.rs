@@ -9,12 +9,14 @@
 //! semantics remain in the Python control plane unless promoted into explicit,
 //! versioned runtime adapters.
 
+mod aligned;
 mod content_identity;
 mod dataset;
 mod error;
 mod manifest;
 mod sync;
 
+pub use aligned::{AlignedBatch, AlignedBatchStream};
 pub use content_identity::{DATASET_CONTENT_DOMAIN, declared_dataset_content_sha256};
 pub use dataset::{
     Dataset, SourceVerificationState, StreamSelector, WindowHandle, WindowSpec, WindowStream,

@@ -151,6 +151,10 @@ impl Dataset {
         &self.manifest
     }
 
+    pub(crate) fn records(&self) -> &[Arc<Record>] {
+        &self.records
+    }
+
     pub fn manifest_sha256(&self) -> &str {
         &self.manifest_sha256
     }
@@ -206,6 +210,50 @@ impl Dataset {
                     "source verification completed without the declared digest".into(),
                 ));
             }
+            verified_regions.push(region);
+        }
+
+        let mut state = self.verified_dataset_content_sha256.lock().map_err(|_| {
+            RuntimeError::Validation("dataset verification state lock was poisoned".into())
+        })?;
+        *state = Some(expected_dataset_sha256.clone());
+        Ok(Some(expected_dataset_sha256))
+    }
+
+    /// Re-hash every declared source even when a prior verification cache exists.
+    ///
+    /// Exact aligned execution uses this at worker authorization time so a source
+    /// changed after planning cannot inherit an older cached verification result.
+    pub(crate) fn verify_content_fresh(&self) -> Result<Option<String>> {
+        let Some(expected_dataset_sha256) = self.declared_dataset_content_sha256.clone() else {
+            return Ok(None);
+        };
+
+        let mut records: Vec<_> = self.records.iter().collect();
+        records.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut verified_regions = Vec::new();
+        for record in records {
+            let expected_source_sha256 = record.source_sha256.as_deref().ok_or_else(|| {
+                RuntimeError::Validation(
+                    "declared dataset content identity requires every record source hash".into(),
+                )
+            })?;
+            let (path, required_end) = self.resolve_record_source(record)?;
+            let (region, _) = self.map_source(&path, None)?;
+            let mapped_size = mapped_size_bytes(&region)?;
+            if mapped_size < required_end {
+                return Err(RuntimeError::SourceTooShort {
+                    path,
+                    actual: mapped_size,
+                    required: required_end,
+                });
+            }
+            let actual = Self::verify_mapped_sha256(&path, &region.mmap, expected_source_sha256)?;
+            let mut state = region.verified_source_sha256.lock().map_err(|_| {
+                RuntimeError::Validation("source verification cache lock was poisoned".into())
+            })?;
+            *state = Some(actual);
+            drop(state);
             verified_regions.push(region);
         }
 
@@ -341,6 +389,35 @@ impl Dataset {
                 }
             }
         }
+    }
+
+    pub(crate) fn open_record_window(
+        &self,
+        record: Arc<Record>,
+        start_frame: usize,
+        length_frames: usize,
+    ) -> Result<WindowHandle> {
+        if length_frames == 0 {
+            return Err(RuntimeError::InvalidWindow(
+                "aligned child window length must be positive".into(),
+            ));
+        }
+        let end_frame_exclusive = start_frame.checked_add(length_frames).ok_or_else(|| {
+            RuntimeError::InvalidWindow("aligned child frame extent overflowed usize".into())
+        })?;
+        if end_frame_exclusive > record.shape[0] {
+            return Err(RuntimeError::InvalidWindow(format!(
+                "aligned child window [{start_frame}, {end_frame_exclusive}) exceeds record {:?} with {} frames",
+                record.id, record.shape[0]
+            )));
+        }
+        let frame_elements = record.frame_elements()?;
+        self.open_window(WindowDescriptor {
+            record,
+            start_frame,
+            length_frames,
+            frame_elements,
+        })
     }
 
     fn open_window(&self, descriptor: WindowDescriptor) -> Result<WindowHandle> {
