@@ -80,7 +80,7 @@ impl ExactAlignmentPlan {
         let mut digest = Sha256::new();
         digest.update(PLAN_HASH_DOMAIN);
         digest.update(payload);
-        Ok(format!("{digest:x}"))
+        Ok(format!("{:x}", digest.finalize()))
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -243,16 +243,28 @@ pub fn plan_exact_alignment(
             spec.duration_ns
         )));
     }
-    let count_minus_one = (latest_start - first_start) / stride;
-    let window_count = usize::try_from(count_minus_one + 1).map_err(|_| {
-        RuntimeError::Alignment("aligned window count overflowed usize".into())
+    let count_span = latest_start.checked_sub(first_start).ok_or_else(|| {
+        RuntimeError::Alignment("aligned window count span underflowed clock arithmetic".into())
     })?;
+    let count_minus_one = count_span / stride;
+    let window_count = usize::try_from(count_minus_one + 1)
+        .map_err(|_| RuntimeError::Alignment("aligned window count overflowed usize".into()))?;
 
     let mut entries = Vec::with_capacity(records.len());
     for record in records {
-        let clock = record.clock.as_ref().expect("clock presence validated above");
+        let clock = record
+            .clock
+            .as_ref()
+            .expect("clock presence validated above");
         let period = i128::from(clock.period_ns);
-        let frame_offset = first_start - i128::from(clock.start_ns);
+        let frame_offset = first_start
+            .checked_sub(i128::from(clock.start_ns))
+            .ok_or_else(|| {
+                RuntimeError::Alignment(format!(
+                    "record {:?} frame offset overflowed clock arithmetic",
+                    record.id
+                ))
+            })?;
         if frame_offset < 0 || frame_offset % period != 0 {
             return Err(RuntimeError::Alignment(format!(
                 "internal exact-alignment invariant failed for record {:?}",
@@ -260,7 +272,10 @@ pub fn plan_exact_alignment(
             )));
         }
         let start_frame = usize::try_from(frame_offset / period).map_err(|_| {
-            RuntimeError::Alignment(format!("record {:?} start frame overflowed usize", record.id))
+            RuntimeError::Alignment(format!(
+                "record {:?} start frame overflowed usize",
+                record.id
+            ))
         })?;
         let frames_per_window = usize::try_from(duration / period).map_err(|_| {
             RuntimeError::Alignment(format!(
@@ -269,7 +284,10 @@ pub fn plan_exact_alignment(
             ))
         })?;
         let frame_stride = usize::try_from(stride / period).map_err(|_| {
-            RuntimeError::Alignment(format!("record {:?} frame stride overflowed usize", record.id))
+            RuntimeError::Alignment(format!(
+                "record {:?} frame stride overflowed usize",
+                record.id
+            ))
         })?;
 
         entries.push(AlignedRecordPlan {
@@ -292,7 +310,9 @@ pub fn plan_exact_alignment(
         manifest_sha256: manifest_sha256.to_owned(),
         sync_group: sync_group.to_owned(),
         start_ns: i64::try_from(first_start).map_err(|_| {
-            RuntimeError::Alignment("aligned start_ns falls outside the signed 64-bit clock domain".into())
+            RuntimeError::Alignment(
+                "aligned start_ns falls outside the signed 64-bit clock domain".into(),
+            )
         })?,
         overlap_end_ns: i64::try_from(overlap_end).map_err(|_| {
             RuntimeError::Alignment(
@@ -320,10 +340,12 @@ fn combine_congruence(
 
     let left_reduced = left_modulus / gcd;
     let right_reduced = right_modulus / gcd;
-    let (_, inverse, _) = extended_gcd(left_reduced, right_reduced);
+    let (_, inverse, _) = checked_extended_gcd(left_reduced, right_reduced)?;
     let step = (difference / gcd)
         .checked_mul(inverse)
-        .ok_or_else(|| RuntimeError::Alignment("clock congruence multiplication overflowed".into()))?
+        .ok_or_else(|| {
+            RuntimeError::Alignment("clock congruence multiplication overflowed".into())
+        })?
         .rem_euclid(right_reduced);
     let modulus = left_modulus.checked_mul(right_reduced).ok_or_else(|| {
         RuntimeError::Alignment("exact common clock period overflowed integer arithmetic".into())
@@ -338,8 +360,11 @@ fn combine_congruence(
 }
 
 fn first_congruent_at_or_after(start: i128, residue: i128, modulus: i128) -> Result<i128> {
+    let delta = residue.checked_sub(start).ok_or_else(|| {
+        RuntimeError::Alignment("aligned boundary delta overflowed integer arithmetic".into())
+    })?;
     start
-        .checked_add((residue - start).rem_euclid(modulus))
+        .checked_add(delta.rem_euclid(modulus))
         .ok_or_else(|| RuntimeError::Alignment("aligned boundary search overflowed".into()))
 }
 
@@ -352,28 +377,29 @@ fn gcd(mut left: i128, mut right: i128) -> i128 {
     left.abs()
 }
 
-fn extended_gcd(left: i128, right: i128) -> (i128, i128, i128) {
+fn checked_extended_gcd(left: i128, right: i128) -> Result<(i128, i128, i128)> {
     if right == 0 {
-        (left, 1, 0)
-    } else {
-        let (gcd, x1, y1) = extended_gcd(right, left % right);
-        (gcd, y1, x1 - (left / right) * y1)
+        return Ok((left, 1, 0));
     }
+
+    let (gcd, x1, y1) = checked_extended_gcd(right, left % right)?;
+    let quotient_times_y1 = (left / right).checked_mul(y1).ok_or_else(|| {
+        RuntimeError::Alignment("extended clock congruence multiplication overflowed".into())
+    })?;
+    let y = x1.checked_sub(quotient_times_y1).ok_or_else(|| {
+        RuntimeError::Alignment("extended clock congruence subtraction overflowed".into())
+    })?;
+    Ok((gcd, y1, y))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::manifest::{ClockSpec, DType};
     use std::path::PathBuf;
 
-    fn record(
-        id: &str,
-        modality: &str,
-        frames: usize,
-        start_ns: i64,
-        period_ns: u64,
-    ) -> Record {
+    use super::*;
+    use crate::manifest::{ClockSpec, DType};
+
+    fn record(id: &str, modality: &str, frames: usize, start_ns: i64, period_ns: u64) -> Record {
         Record {
             id: id.into(),
             subject: "sub-01".into(),
@@ -541,5 +567,22 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn exact_common_period_overflow_rejects_explicitly() {
+        let manifest = manifest(vec![
+            record("a", "fmri", 2, 0, u64::MAX),
+            record("b", "behavior", 2, 0, u64::MAX - 1),
+        ]);
+        let error = plan_exact_alignment(
+            &manifest,
+            "1".repeat(64).as_str(),
+            "sub-01/run-01",
+            &["fmri".into(), "behavior".into()],
+            ExactAlignmentSpec::new(u64::MAX, u64::MAX).unwrap(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("common clock period overflowed"));
     }
 }
