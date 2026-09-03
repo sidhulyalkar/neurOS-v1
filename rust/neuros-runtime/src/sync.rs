@@ -597,7 +597,10 @@ mod tests {
         let left_plan = raw_plan(&left, &"5".repeat(64), spec);
         let right_plan = raw_plan(&right, &"6".repeat(64), spec);
         assert_eq!(left_plan.entries, right_plan.entries);
-        assert_eq!(left_plan.dataset_content_sha256, right_plan.dataset_content_sha256);
+        assert_eq!(
+            left_plan.dataset_content_sha256,
+            right_plan.dataset_content_sha256
+        );
         assert_ne!(left_plan.manifest_sha256, right_plan.manifest_sha256);
         assert_ne!(left_plan.sha256().unwrap(), right_plan.sha256().unwrap());
     }
