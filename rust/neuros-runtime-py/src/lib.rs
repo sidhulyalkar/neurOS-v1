@@ -37,6 +37,25 @@ impl NativeDataset {
     }
 
     #[getter]
+    fn declared_dataset_content_sha256(&self) -> Option<String> {
+        self.inner
+            .declared_dataset_content_sha256()
+            .map(str::to_owned)
+    }
+
+    #[getter]
+    fn verified_dataset_content_sha256(&self) -> PyResult<Option<String>> {
+        self.inner
+            .verified_dataset_content_sha256()
+            .map_err(runtime_error)
+    }
+
+    fn verify_content(&self, py: Python<'_>) -> PyResult<Option<String>> {
+        py.detach(|| self.inner.verify_content())
+            .map_err(runtime_error)
+    }
+
+    #[getter]
     fn record_count(&self) -> usize {
         self.inner.manifest().records.len()
     }
@@ -120,6 +139,11 @@ impl NativeWindow {
     }
 
     #[getter]
+    fn end_frame_exclusive(&self) -> usize {
+        self.inner.end_frame_exclusive()
+    }
+
+    #[getter]
     fn shape(&self) -> Vec<usize> {
         self.inner.shape()
     }
@@ -137,6 +161,45 @@ impl NativeWindow {
     #[getter]
     fn source_size_bytes(&self) -> u64 {
         self.inner.source_size_bytes()
+    }
+
+    #[getter]
+    fn record_byte_start(&self) -> u64 {
+        self.inner.record_byte_start()
+    }
+
+    #[getter]
+    fn record_byte_end_exclusive(&self) -> u64 {
+        self.inner.record_byte_end_exclusive()
+    }
+
+    #[getter]
+    fn declared_source_sha256(&self) -> Option<String> {
+        self.inner.declared_source_sha256().map(str::to_owned)
+    }
+
+    #[getter]
+    fn verified_source_sha256(&self) -> Option<String> {
+        self.inner.verified_source_sha256().map(str::to_owned)
+    }
+
+    #[getter]
+    fn source_verification_state(&self) -> &'static str {
+        self.inner.source_verification_state().as_str()
+    }
+
+    #[getter]
+    fn declared_dataset_content_sha256(&self) -> Option<String> {
+        self.inner
+            .declared_dataset_content_sha256()
+            .map(str::to_owned)
+    }
+
+    #[getter]
+    fn verified_dataset_content_sha256(&self) -> Option<String> {
+        self.inner
+            .verified_dataset_content_sha256()
+            .map(str::to_owned)
     }
 
     /// Return an arro3 Array backed directly by the memory-mapped source bytes.

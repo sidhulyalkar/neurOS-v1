@@ -22,6 +22,8 @@ pub struct Record {
     pub modality: String,
     pub path: PathBuf,
     #[serde(default)]
+    pub source_sha256: Option<String>,
+    #[serde(default)]
     pub offset_bytes: u64,
     pub dtype: DType,
     pub shape: Vec<usize>,
@@ -93,6 +95,14 @@ impl Record {
                 "record {:?} path must be a safe relative path: {:?}",
                 self.id, self.path
             )));
+        }
+        if let Some(source_sha256) = &self.source_sha256 {
+            if !is_lowercase_sha256(source_sha256) {
+                return Err(RuntimeError::Validation(format!(
+                    "record {:?} source_sha256 must contain exactly 64 lowercase hexadecimal characters",
+                    self.id
+                )));
+            }
         }
         if self.shape.is_empty() || self.shape.contains(&0) {
             return Err(RuntimeError::Validation(format!(
@@ -179,6 +189,13 @@ fn is_safe_relative_path(path: &Path) -> bool {
             .all(|component| matches!(component, Component::Normal(_) | Component::CurDir))
 }
 
+fn is_lowercase_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +206,7 @@ mod tests {
             subject: "sub-01".into(),
             modality: "fmri".into(),
             path: "sub-01/fmri.f32".into(),
+            source_sha256: None,
             offset_bytes: 0,
             dtype: DType::Float32Le,
             shape: vec![10, 4],
@@ -209,6 +227,23 @@ mod tests {
         let mut candidate = record();
         candidate.offset_bytes = 2;
         assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_source_sha256() {
+        let mut candidate = record();
+        candidate.source_sha256 = Some("A".repeat(64));
+        assert!(candidate.validate().is_err());
+
+        candidate.source_sha256 = Some("a".repeat(63));
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_strict_lowercase_source_sha256() {
+        let mut candidate = record();
+        candidate.source_sha256 = Some("0123456789abcdef".repeat(4));
+        assert!(candidate.validate().is_ok());
     }
 
     #[test]

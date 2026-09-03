@@ -8,7 +8,7 @@ multimodal batches.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -51,6 +51,10 @@ class DataWindow:
         return int(self._native_window.start_frame)
 
     @property
+    def end_frame_exclusive(self) -> int:
+        return int(self._native_window.end_frame_exclusive)
+
+    @property
     def shape(self) -> tuple[int, ...]:
         return tuple(int(value) for value in self._native_window.shape)
 
@@ -72,15 +76,51 @@ class DataWindow:
 
     @property
     def provenance(self) -> dict[str, Any]:
+        """Return explicit source, dataset, and interval identity for this window.
+
+        ``verified_at_open`` means the complete mapped regular file matched the
+        SHA-256 declared by the dataset manifest when the native runtime verified
+        that mapping. It does not claim the surrounding filesystem is immutable
+        against later external writers.
+        """
+
+        declared_source = self._native_window.declared_source_sha256
+        verified_source = self._native_window.verified_source_sha256
+        declared_dataset = self._native_window.declared_dataset_content_sha256
+        verified_dataset = self._native_window.verified_dataset_content_sha256
         return {
             "record_id": self.record_id,
             "subject": self.subject,
             "modality": self.modality,
             "start_frame": self.start_frame,
+            "end_frame_exclusive": self.end_frame_exclusive,
             "shape": self.shape,
             "sampling_hz": self.sampling_hz,
             "manifest_sha256": str(self._native_window.manifest_sha256),
             "source_size_bytes": int(self._native_window.source_size_bytes),
+            "declared_source_sha256": (
+                None if declared_source is None else str(declared_source)
+            ),
+            "verified_source_sha256": (
+                None if verified_source is None else str(verified_source)
+            ),
+            "source_verification_state": str(
+                self._native_window.source_verification_state
+            ),
+            "declared_dataset_content_sha256": (
+                None if declared_dataset is None else str(declared_dataset)
+            ),
+            "verified_dataset_content_sha256": (
+                None if verified_dataset is None else str(verified_dataset)
+            ),
+            "record_byte_interval": {
+                "start": int(self._native_window.record_byte_start),
+                "end_exclusive": int(self._native_window.record_byte_end_exclusive),
+            },
+            "window_frame_interval": {
+                "start": self.start_frame,
+                "end_exclusive": self.end_frame_exclusive,
+            },
         }
 
     def __getattr__(self, name: str) -> Any:
@@ -114,8 +154,93 @@ class Dataset:
         return str(self._native_dataset.manifest_sha256)
 
     @property
+    def declared_content_sha256(self) -> str | None:
+        value = self._native_dataset.declared_dataset_content_sha256
+        return None if value is None else str(value)
+
+    @property
+    def verified_content_sha256(self) -> str | None:
+        value = self._native_dataset.verified_dataset_content_sha256
+        return None if value is None else str(value)
+
+    @property
     def record_count(self) -> int:
         return int(self._native_dataset.record_count)
+
+    def verify_content(self) -> str | None:
+        """Verify every source needed by the canonical dataset content identity.
+
+        Returns ``None`` when at least one manifest record does not declare a
+        source hash. In that case neurOS intentionally refuses to invent a
+        partially verified dataset content identity.
+        """
+
+        value = self._native_dataset.verify_content()
+        return None if value is None else str(value)
+
+    def to_orion_lineage(
+        self,
+        *,
+        upstream_source: str,
+        version: str | None = None,
+        revision: str | None = None,
+        parent_dataset_ids: Sequence[str] = (),
+        identity_sets: Sequence[Any] = (),
+        preprocessing_history: Sequence[str] = (),
+        sampling_assumptions: Mapping[str, Any] | None = None,
+        license: str | None = None,
+        citation: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Bridge fully verified native content into conservative ORION lineage.
+
+        The bridge always emits ``LineageCompleteness.UNKNOWN``. Content hashes
+        establish the local bytes/interpretation consumed by neurOS, not upstream
+        acquisition, preprocessing ancestry, or entity-identity completeness.
+        Callers with stronger external evidence may construct a richer ORION
+        ``DatasetLineage`` separately.
+        """
+
+        content_sha256 = self.verified_content_sha256
+        if content_sha256 is None:
+            raise ValueError(
+                "ORION lineage requires a fully verified native dataset; call "
+                "Dataset.verify_content() and require a non-None digest first"
+            )
+        try:
+            from orion.scientific import DatasetLineage, LineageCompleteness
+        except ImportError as exc:  # pragma: no cover - optional extra
+            raise ImportError(
+                "The ORION bridge requires the optional `neuros[orion]` extra."
+            ) from exc
+
+        bridge_metadata = dict(metadata or {})
+        if "neuros_runtime" in bridge_metadata:
+            raise ValueError("metadata key 'neuros_runtime' is reserved by neurOS")
+        bridge_metadata["neuros_runtime"] = {
+            "manifest_sha256": self.manifest_sha256,
+            "declared_dataset_content_sha256": self.declared_content_sha256,
+            "verified_dataset_content_sha256": content_sha256,
+            "content_verification": "verified_at_open",
+            "lineage_boundary": (
+                "local content verification does not establish upstream lineage completeness"
+            ),
+        }
+        return DatasetLineage(
+            dataset_id=self.dataset_id,
+            upstream_source=upstream_source,
+            version=version,
+            revision=revision,
+            content_sha256=content_sha256,
+            parent_dataset_ids=tuple(parent_dataset_ids),
+            identity_sets=tuple(identity_sets),
+            preprocessing_history=tuple(preprocessing_history),
+            sampling_assumptions=dict(sampling_assumptions or {}),
+            license=license,
+            citation=citation,
+            lineage_completeness=LineageCompleteness.UNKNOWN,
+            metadata=bridge_metadata,
+        )
 
     def stream(
         self,

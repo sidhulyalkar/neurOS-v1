@@ -24,6 +24,12 @@ pub enum RuntimeError {
         actual: u64,
         required: u64,
     },
+    #[error("source SHA-256 mismatch at {path}: expected {expected}, got {actual}")]
+    SourceHashMismatch {
+        path: PathBuf,
+        expected: String,
+        actual: String,
+    },
     #[error("runtime worker terminated before producing all requested windows")]
     WorkerTerminated,
 }
