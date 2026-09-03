@@ -1,11 +1,10 @@
 """High-level dataset API backed by the optional neurOS Rust data plane.
 
-Single-modality streaming remains the v0 execution contract. Multimodal v1
-starts with a provenance-bound exact-clock planning authority: neurOS verifies
-the complete declared dataset content and proves a cross-modal frame mapping
-before it is allowed to execute one. Interpolation, nearest-neighbor matching,
-phase correction, and resampling remain separate future policies rather than
-implicit behavior.
+Single-modality streaming remains the v0 execution contract. Multimodal v1 uses
+a provenance-bound exact-clock planning authority followed by an executor that
+consumes that exact plan. Interpolation, nearest-neighbor matching, phase
+correction, and resampling remain separate future policies rather than implicit
+behavior.
 """
 
 from __future__ import annotations
@@ -33,8 +32,8 @@ class AlignmentPlan:
     Creating a plan verifies the complete dataset content identity but does not
     return source arrays. The plan binds verified dataset/source identity, the
     exact manifest, acquisition group, clock mapping, and derived frame arithmetic.
-    A later execution layer can therefore consume this exact authority rather than
-    silently recomputing synchronization.
+    Aligned execution consumes this exact authority rather than silently
+    recomputing synchronization.
     """
 
     _native_plan: Any
@@ -271,6 +270,85 @@ class DataWindow:
         raise AttributeError(name)
 
 
+@dataclass(frozen=True, slots=True)
+class AlignedWindow:
+    """One exact multimodal execution window produced from a frozen plan.
+
+    Each modality remains a separate :class:`DataWindow` backed by its own mmap.
+    neurOS does not concatenate, interpolate, resample, or otherwise transform the
+    scientific arrays when constructing this envelope.
+    """
+
+    _native_window: Any
+
+    @property
+    def plan_sha256(self) -> str:
+        return str(self._native_window.plan_sha256)
+
+    @property
+    def dataset_content_sha256(self) -> str:
+        return str(self._native_window.dataset_content_sha256)
+
+    @property
+    def manifest_sha256(self) -> str:
+        return str(self._native_window.manifest_sha256)
+
+    @property
+    def sync_group(self) -> str:
+        return str(self._native_window.sync_group)
+
+    @property
+    def window_index(self) -> int:
+        return int(self._native_window.window_index)
+
+    @property
+    def start_ns(self) -> int:
+        return int(self._native_window.start_ns)
+
+    @property
+    def end_ns(self) -> int:
+        return int(self._native_window.end_ns)
+
+    @property
+    def modalities(self) -> tuple[str, ...]:
+        return tuple(str(value) for value in self._native_window.modalities)
+
+    def window(self, modality: str) -> DataWindow:
+        """Return the zero-copy modality window selected by the qualified plan."""
+
+        native_window = self._native_window.window(str(modality))
+        if native_window is None:
+            raise KeyError(f"aligned window does not contain modality {modality!r}")
+        return DataWindow(native_window)
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        """Return the exact execution envelope and per-modality source evidence."""
+
+        return {
+            "plan_sha256": self.plan_sha256,
+            "dataset_content_sha256": self.dataset_content_sha256,
+            "manifest_sha256": self.manifest_sha256,
+            "sync_group": self.sync_group,
+            "window_index": self.window_index,
+            "start_ns": self.start_ns,
+            "end_ns": self.end_ns,
+            "modalities": {
+                modality: self.window(modality).provenance
+                for modality in self.modalities
+            },
+        }
+
+    def __getattr__(self, name: str) -> Any:
+        """Allow ``batch.fmri`` / ``batch.behavior`` zero-copy access."""
+
+        normalized = name.lower()
+        for modality in self.modalities:
+            if modality.replace("-", "_").lower() == normalized:
+                return self.window(modality).values
+        raise AttributeError(name)
+
+
 class Dataset:
     """A validated study directory opened through the neurOS native data plane."""
 
@@ -362,6 +440,38 @@ class Dataset:
         )
         return AlignmentPlan(native_plan)
 
+    def stream_aligned(
+        self,
+        plan: AlignmentPlan,
+        *,
+        prefetch: int = 8,
+    ) -> Iterator[AlignedWindow]:
+        """Execute one frozen exact plan with bounded native prefetch.
+
+        The native executor validates the supplied plan directly rather than
+        replanning synchronization. Before the stream is accepted, it re-reads the
+        current physical source files and verifies their whole-file SHA-256 values
+        independently of the mmap verification cache. This is an execution-start
+        integrity check, not a claim that external writers cannot mutate files
+        afterwards.
+        """
+
+        if not isinstance(plan, AlignmentPlan):
+            raise TypeError("stream_aligned requires an AlignmentPlan from plan_aligned()")
+        if prefetch <= 0:
+            raise ValueError("prefetch must be at least one")
+        if plan.dataset_id != self.dataset_id:
+            raise ValueError("alignment plan belongs to a different dataset")
+        if plan.manifest_sha256 != self.manifest_sha256:
+            raise ValueError("alignment plan does not match the currently opened manifest")
+
+        stream = self._native_dataset.stream_aligned(
+            plan=plan._native_plan,
+            prefetch=prefetch,
+        )
+        for native_window in stream:
+            yield AlignedWindow(native_window)
+
     def to_orion_lineage(
         self,
         *,
@@ -440,8 +550,8 @@ class Dataset:
         v0 execution requires exactly one selected modality. This remains an
         intentional scientific guardrail: fMRI, behavior, EEG, and video clocks
         cannot be safely aligned merely by zipping sample indices. Use
-        :meth:`plan_aligned` to establish a verified exact multimodal plan; an
-        aligned execution API will consume such a plan in a separate qualified layer.
+        :meth:`plan_aligned` followed by :meth:`stream_aligned` for qualified exact
+        multimodal execution.
         """
 
         native = _require_native()
@@ -478,6 +588,7 @@ def _require_native() -> Any:
 
 
 __all__ = [
+    "AlignedWindow",
     "AlignmentPlan",
     "DataWindow",
     "Dataset",
