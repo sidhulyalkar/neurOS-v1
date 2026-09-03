@@ -1,0 +1,234 @@
+name: Harden Clock Sync V1 Selectors
+
+on:
+  push:
+    branches:
+      - automation/harden-clock-sync-v1-selectors
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: feat/rust-clock-sync-v1
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Enforce canonical selectors and globally subject-local acquisition groups
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "neurOS integration bot"
+          git config user.email "actions@users.noreply.github.com"
+          BASE="$(git rev-parse HEAD)"
+          printf '%s\n' "${BASE}" > /tmp/base_sha
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/neuros-runtime/src/manifest.rs")
+          text = path.read_text()
+          text = text.replace(
+              "use std::collections::HashSet;",
+              "use std::collections::{HashMap, HashSet};",
+              1,
+          )
+          old = """        let mut ids = HashSet::with_capacity(self.records.len());
+        for record in &self.records {
+            record.validate()?;
+            if !ids.insert(record.id.as_str()) {
+                return Err(RuntimeError::Validation(format!(
+                    \"duplicate record id {:?}\",
+                    record.id
+                )));
+            }
+        }
+"""
+          new = """        let mut ids = HashSet::with_capacity(self.records.len());
+        let mut sync_group_subjects = HashMap::new();
+        for record in &self.records {
+            record.validate()?;
+            if !ids.insert(record.id.as_str()) {
+                return Err(RuntimeError::Validation(format!(
+                    \"duplicate record id {:?}\",
+                    record.id
+                )));
+            }
+            if let Some(sync_group) = record.sync_group.as_deref() {
+                match sync_group_subjects.get(sync_group) {
+                    Some(subject) if *subject != record.subject.as_str() => {
+                        return Err(RuntimeError::Validation(format!(
+                            \"sync_group {sync_group:?} crosses subjects {:?} and {:?}; acquisition groups must be subject-local\",
+                            subject, record.subject
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        sync_group_subjects.insert(sync_group, record.subject.as_str());
+                    }
+                }
+            }
+        }
+"""
+          if old not in text:
+              raise SystemExit("manifest validation insertion point changed")
+          text = text.replace(old, new, 1)
+          test_anchor = """    #[test]
+    fn rejects_misaligned_offset() {
+"""
+          test = """    #[test]
+    fn rejects_cross_subject_sync_group() {
+        let mut first = record();
+        first.id = \"fmri-01\".into();
+        first.sync_group = Some(\"run-01\".into());
+
+        let mut second = record();
+        second.id = \"behavior-01\".into();
+        second.subject = \"sub-02\".into();
+        second.modality = \"behavior\".into();
+        second.sync_group = Some(\"run-01\".into());
+
+        let manifest = DatasetManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            dataset_id: \"cross-subject\".into(),
+            records: vec![first, second],
+        };
+        let error = manifest.validate().unwrap_err();
+        assert!(error.to_string().contains(\"crosses subjects\"));
+    }
+
+"""
+          if test_anchor not in text:
+              raise SystemExit("manifest test insertion point changed")
+          text = text.replace(test_anchor, test + test_anchor, 1)
+          path.write_text(text)
+
+          path = Path("rust/neuros-runtime/src/sync.rs")
+          text = path.read_text()
+          old = """    let sync_group = sync_group.trim();
+    if sync_group.is_empty() {
+        return Err(RuntimeError::Alignment(
+            \"sync_group must be non-empty\".into(),
+        ));
+    }
+"""
+          new = """    if sync_group.is_empty() || sync_group != sync_group.trim() {
+        return Err(RuntimeError::Alignment(
+            \"sync_group must be a non-empty canonical identifier with no surrounding whitespace\"
+                .into(),
+        ));
+    }
+"""
+          if old not in text:
+              raise SystemExit("sync_group selector validation point changed")
+          text = text.replace(old, new, 1)
+
+          old = """    for modality in modalities {
+        let normalized = modality.trim();
+        if normalized.is_empty() {
+            return Err(RuntimeError::Alignment(
+                \"requested modalities must be non-empty\".into(),
+            ));
+        }
+        if !requested.insert(normalized) {
+            return Err(RuntimeError::Alignment(format!(
+                \"requested modality {normalized:?} is duplicated\"
+            )));
+        }
+    }
+"""
+          new = """    for modality in modalities {
+        if modality.is_empty() || modality != modality.trim() {
+            return Err(RuntimeError::Alignment(
+                \"requested modalities must be non-empty canonical identifiers with no surrounding whitespace\"
+                    .into(),
+            ));
+        }
+        if !requested.insert(modality.as_str()) {
+            return Err(RuntimeError::Alignment(format!(
+                \"requested modality {modality:?} is duplicated\"
+            )));
+        }
+    }
+"""
+          if old not in text:
+              raise SystemExit("modality selector validation point changed")
+          text = text.replace(old, new, 1)
+
+          anchor = """    #[test]
+    fn duplicate_modality_in_group_is_ambiguous() {
+"""
+          test = """    #[test]
+    fn noncanonical_request_identifiers_reject() {
+        let manifest = manifest(vec![
+            record(\"fmri\", \"fmri\", 10, 0, 2_000_000_000),
+            record(\"behavior\", \"behavior\", 40, 0, 500_000_000),
+        ]);
+        let spec = ExactAlignmentSpec::new(4_000_000_000, 2_000_000_000).unwrap();
+
+        assert!(plan_exact_alignment_from_manifest(
+            &manifest,
+            &\"4\".repeat(64),
+            &\"d\".repeat(64),
+            \" sub-01/run-01\",
+            &[\"fmri\".into(), \"behavior\".into()],
+            spec,
+        )
+        .is_err());
+        assert!(plan_exact_alignment_from_manifest(
+            &manifest,
+            &\"4\".repeat(64),
+            &\"d\".repeat(64),
+            \"sub-01/run-01\",
+            &[\" fmri\".into(), \"behavior\".into()],
+            spec,
+        )
+        .is_err());
+    }
+
+"""
+          if anchor not in text:
+              raise SystemExit("sync test insertion point changed")
+          text = text.replace(anchor, test + anchor, 1)
+          path.write_text(text)
+          PY
+
+      - name: Qualify authority hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p neuros-runtime --all-features
+          git diff --check
+
+          EXPECTED=$(cat <<'EOF'
+          rust/neuros-runtime/src/manifest.rs
+          rust/neuros-runtime/src/sync.rs
+          EOF
+          )
+          ACTUAL="$(git diff --name-only | sort)"
+          EXPECTED_SORTED="$(printf '%s\n' "${EXPECTED}" | sed 's/^ *//' | sort)"
+          test "${ACTUAL}" = "${EXPECTED_SORTED}"
+
+      - name: Publish hardened candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="$(cat /tmp/base_sha)"
+          test "$(git rev-parse HEAD)" = "${BASE}"
+          git add rust/neuros-runtime/src/manifest.rs rust/neuros-runtime/src/sync.rs
+          git diff --cached --check
+          git commit -m "fix(runtime): harden exact alignment acquisition authority"
+          test "$(git rev-parse HEAD^)" = "${BASE}"
+          git push --force origin HEAD:automation/clock-sync-v1-hardened-output
+          echo "candidate_sha=$(git rev-parse HEAD)"
