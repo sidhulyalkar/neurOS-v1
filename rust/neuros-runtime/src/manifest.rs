@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,7 @@ impl DatasetManifest {
         }
 
         let mut ids = HashSet::with_capacity(self.records.len());
+        let mut sync_group_subjects = HashMap::new();
         for record in &self.records {
             record.validate()?;
             if !ids.insert(record.id.as_str()) {
@@ -75,6 +76,20 @@ impl DatasetManifest {
                     "duplicate record id {:?}",
                     record.id
                 )));
+            }
+            if let Some(sync_group) = record.sync_group.as_deref() {
+                match sync_group_subjects.get(sync_group) {
+                    Some(subject) if *subject != record.subject.as_str() => {
+                        return Err(RuntimeError::Validation(format!(
+                            "sync_group {sync_group:?} crosses subjects {:?} and {:?}; acquisition groups must be subject-local",
+                            subject, record.subject
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        sync_group_subjects.insert(sync_group, record.subject.as_str());
+                    }
+                }
             }
         }
         Ok(())
@@ -244,6 +259,27 @@ mod tests {
         assert!(candidate.validate().is_err());
         candidate.sync_group = Some("sub-01/run-01 ".into());
         assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_cross_subject_sync_group() {
+        let mut first = record();
+        first.id = "fmri-01".into();
+        first.sync_group = Some("run-01".into());
+
+        let mut second = record();
+        second.id = "behavior-01".into();
+        second.subject = "sub-02".into();
+        second.modality = "behavior".into();
+        second.sync_group = Some("run-01".into());
+
+        let manifest = DatasetManifest {
+            schema_version: MANIFEST_SCHEMA_VERSION,
+            dataset_id: "cross-subject".into(),
+            records: vec![first, second],
+        };
+        let error = manifest.validate().unwrap_err();
+        assert!(error.to_string().contains("crosses subjects"));
     }
 
     #[test]

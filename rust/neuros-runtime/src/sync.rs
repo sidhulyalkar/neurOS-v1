@@ -134,10 +134,10 @@ fn plan_exact_alignment_from_manifest(
     spec: ExactAlignmentSpec,
 ) -> Result<ExactAlignmentPlan> {
     manifest.validate()?;
-    let sync_group = sync_group.trim();
-    if sync_group.is_empty() {
+    if sync_group.is_empty() || sync_group != sync_group.trim() {
         return Err(RuntimeError::Alignment(
-            "sync_group must be non-empty".into(),
+            "sync_group must be a non-empty canonical identifier with no surrounding whitespace"
+                .into(),
         ));
     }
     if modalities.len() < 2 {
@@ -148,15 +148,15 @@ fn plan_exact_alignment_from_manifest(
 
     let mut requested = HashSet::with_capacity(modalities.len());
     for modality in modalities {
-        let normalized = modality.trim();
-        if normalized.is_empty() {
+        if modality.is_empty() || modality != modality.trim() {
             return Err(RuntimeError::Alignment(
-                "requested modalities must be non-empty".into(),
+                "requested modalities must be non-empty canonical identifiers with no surrounding whitespace"
+                    .into(),
             ));
         }
-        if !requested.insert(normalized) {
+        if !requested.insert(modality.as_str()) {
             return Err(RuntimeError::Alignment(format!(
-                "requested modality {normalized:?} is duplicated"
+                "requested modality {modality:?} is duplicated"
             )));
         }
     }
@@ -561,6 +561,38 @@ mod tests {
         assert_eq!(plan.start_ns, 2_000_000_000);
         assert_eq!(plan.overlap_end_ns, 20_000_000_000);
         assert_eq!(plan.window_count, 8);
+    }
+
+    #[test]
+    fn noncanonical_request_identifiers_reject() {
+        let manifest = manifest(vec![
+            record("fmri", "fmri", 10, 0, 2_000_000_000),
+            record("behavior", "behavior", 40, 0, 500_000_000),
+        ]);
+        let spec = ExactAlignmentSpec::new(4_000_000_000, 2_000_000_000).unwrap();
+
+        assert!(
+            plan_exact_alignment_from_manifest(
+                &manifest,
+                &"4".repeat(64),
+                &"d".repeat(64),
+                " sub-01/run-01",
+                &["fmri".into(), "behavior".into()],
+                spec,
+            )
+            .is_err()
+        );
+        assert!(
+            plan_exact_alignment_from_manifest(
+                &manifest,
+                &"4".repeat(64),
+                &"d".repeat(64),
+                "sub-01/run-01",
+                &[" fmri".into(), "behavior".into()],
+                spec,
+            )
+            .is_err()
+        );
     }
 
     #[test]
