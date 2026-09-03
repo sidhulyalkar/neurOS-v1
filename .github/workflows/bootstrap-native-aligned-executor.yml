@@ -19,6 +19,114 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           components: rustfmt, clippy
+
+      - name: Harden staged aligned-plan validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("rust/neuros-runtime/src/aligned.rs")
+          text = path.read_text()
+
+          old = '''        let mut previous_key: Option<(&str, &str)> = None;
+                  let mut overlap_end = i128::MAX;
+          '''
+          new = '''        let mut previous_key: Option<(&str, &str)> = None;
+                  let mut overlap_start = i128::MIN;
+                  let mut overlap_end = i128::MAX;
+                  let mut common_period = 1i128;
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''            let period_ns = i128::from(clock.period_ns);
+                  let frame_offset_ns = start_ns
+          '''
+          new = '''            let period_ns = i128::from(clock.period_ns);
+                  overlap_start = overlap_start.max(i128::from(clock.start_ns));
+                  common_period = checked_lcm(common_period, period_ns)?;
+                  let frame_offset_ns = start_ns
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          marker = '''        let expected_overlap_end = i64::try_from(overlap_end).map_err(|_| {
+          '''
+          earliest = '''        let previous_common_boundary = start_ns.checked_sub(common_period).ok_or_else(|| {
+                  RuntimeError::Alignment(
+                      "alignment plan previous common boundary overflowed clock arithmetic".into(),
+                  )
+              })?;
+              if start_ns < overlap_start || previous_common_boundary >= overlap_start {
+                  return Err(RuntimeError::Alignment(
+                      "alignment plan does not begin at the earliest exact common boundary".into(),
+                  ));
+              }
+
+          '''
+          assert marker in text
+          text = text.replace(marker, earliest + marker, 1)
+
+          helper_marker = '''fn send_terminal_error(sender: &Sender<AlignedStreamMessage>, error: RuntimeError) {
+          '''
+          helpers = '''fn checked_lcm(left: i128, right: i128) -> Result<i128> {
+              let divisor = gcd_positive(left, right);
+              left.checked_div(divisor)
+                  .and_then(|value| value.checked_mul(right))
+                  .ok_or_else(|| {
+                      RuntimeError::Alignment(
+                          "alignment plan common clock period overflowed integer arithmetic".into(),
+                      )
+                  })
+          }
+
+          fn gcd_positive(mut left: i128, mut right: i128) -> i128 {
+              while right != 0 {
+                  let remainder = left % right;
+                  left = right;
+                  right = remainder;
+              }
+              left.abs()
+          }
+
+          '''
+          assert "fn checked_lcm(" not in text
+          assert helper_marker in text
+          text = text.replace(helper_marker, helpers + helper_marker, 1)
+
+          text = text.replace(".unwrap_err();", ".err().unwrap();")
+          assert ".unwrap_err();" not in text
+
+          old = '''        let mut truncated = plan.clone();
+                  truncated.window_count -= 1;
+                  let error = dataset.stream_aligned(&truncated, 1).err().unwrap();
+                  assert!(error.to_string().contains("not maximal exact count"));
+              }
+          '''
+          new = '''        let mut truncated = plan.clone();
+                  truncated.window_count -= 1;
+                  let error = dataset.stream_aligned(&truncated, 1).err().unwrap();
+                  assert!(error.to_string().contains("not maximal exact count"));
+
+                  let mut delayed = plan.clone();
+                  delayed.start_ns += delayed.stride_ns as i64;
+                  delayed.window_count -= 1;
+                  for entry in &mut delayed.entries {
+                      entry.start_frame += entry.frame_stride;
+                  }
+                  let error = dataset.stream_aligned(&delayed, 1).err().unwrap();
+                  assert!(error
+                      .to_string()
+                      .contains("earliest exact common boundary"));
+              }
+          '''
+          assert old in text
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
       - name: Wire aligned executor into qualified data plane
         shell: bash
         run: |
