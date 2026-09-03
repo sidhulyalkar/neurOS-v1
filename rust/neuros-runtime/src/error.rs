@@ -18,6 +18,8 @@ pub enum RuntimeError {
     Validation(String),
     #[error("invalid window request: {0}")]
     InvalidWindow(String),
+    #[error("exact alignment failed: {0}")]
+    Alignment(String),
     #[error("source {path} is {actual} bytes but at least {required} bytes are required")]
     SourceTooShort {
         path: PathBuf,
