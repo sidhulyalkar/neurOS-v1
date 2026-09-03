@@ -1,0 +1,406 @@
+name: Rebase Clock Sync V1
+
+on:
+  push:
+    branches:
+      - automation/rebase-clock-sync-v1-c6dd
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Integrate alignment branch onto current provenance authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          SNAPSHOT="snapshot/rust-clock-sync-v1-d894bc"
+          git config user.name "neurOS integration bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin main "${SNAPSHOT}" --force
+          git checkout -B clock-sync-rebase origin/main
+
+          # Let Git perform the ordinary three-way merge first. For overlapping
+          # hunks, preserve current main, then restore the alignment contract below
+          # with explicit semantic edits. This prevents the older branch from
+          # clobbering the newly promoted provenance authority.
+          git merge --no-commit --no-ff -Xours "origin/${SNAPSHOT}"
+
+          # New, non-overlapping alignment surfaces come directly from the frozen
+          # exact-qualified snapshot.
+          git checkout "origin/${SNAPSHOT}" -- \
+            docs/EXACT_ALIGNMENT_V1.md \
+            packages/neuros/src/neuros/__init__.py \
+            rust/neuros-runtime/src/sync.rs
+
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+
+          SNAP = "origin/snapshot/rust-clock-sync-v1-d894bc"
+
+          def read(path: str) -> str:
+              return Path(path).read_text()
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text)
+
+          def frozen(path: str) -> str:
+              return subprocess.check_output(
+                  ["git", "show", f"{SNAP}:{path}"], text=True
+              )
+
+          def extract(source: str, start: str, end: str) -> str:
+              begin = source.index(start)
+              finish = source.index(end, begin)
+              return source[begin:finish]
+
+          # ------------------------------------------------------------------
+          # Rust manifest: preserve source_sha256 from main while restoring the
+          # explicit acquisition sync_group contract from the qualified branch.
+          # ------------------------------------------------------------------
+          path = "rust/neuros-runtime/src/manifest.rs"
+          current = read(path)
+          feature = frozen(path)
+          if "pub sync_group: Option<String>" not in current:
+              current = current.replace(
+                  "    pub modality: String,\n",
+                  "    pub modality: String,\n    #[serde(default)]\n    pub sync_group: Option<String>,\n",
+                  1,
+              )
+          if "sync_group must be non-empty when supplied" not in current:
+              validation = extract(
+                  feature,
+                  "        if self\n            .sync_group",
+                  "        if self.path.as_os_str()",
+              )
+              current = current.replace(
+                  "        if self.path.as_os_str()", validation + "        if self.path.as_os_str()", 1
+              )
+          if "fn rejects_empty_sync_group()" not in current:
+              test_block = extract(
+                  feature,
+                  "    #[test]\n    fn rejects_empty_sync_group()",
+                  "    #[test]\n    fn rejects_misaligned_offset()",
+              )
+              current = current.replace(
+                  "    #[test]\n    fn rejects_misaligned_offset()",
+                  test_block + "    #[test]\n    fn rejects_misaligned_offset()",
+                  1,
+              )
+          write(path, current)
+
+          # Integration normalization: main introduced source_sha256 while the
+          # alignment branch introduced sync_group. Any Rust Record literal added
+          # on either side must initialize both fields after the rebase.
+          for path in [
+              "rust/neuros-runtime/src/manifest.rs",
+              "rust/neuros-runtime/src/dataset.rs",
+              "rust/neuros-runtime/src/content_identity.rs",
+              "rust/neuros-runtime/src/sync.rs",
+          ]:
+              text = read(path)
+              text = re.sub(
+                  r'(?m)^(\s*)modality: ([^,\n]+),\n(\s*)path:',
+                  lambda m: (
+                      f"{m.group(1)}modality: {m.group(2)},\n"
+                      f"{m.group(3)}sync_group: None,\n"
+                      f"{m.group(3)}path:"
+                  ),
+                  text,
+              )
+              text = re.sub(
+                  r'(?m)^(\s*)path: ([^\n]+),\n(\s*)offset_bytes:',
+                  lambda m: (
+                      f"{m.group(1)}path: {m.group(2)},\n"
+                      f"{m.group(3)}source_sha256: None,\n"
+                      f"{m.group(3)}offset_bytes:"
+                  ),
+                  text,
+              )
+              write(path, text)
+
+          # Rust error authority: retain provenance mismatch failures and add the
+          # distinct exact-alignment failure domain.
+          path = "rust/neuros-runtime/src/error.rs"
+          current = read(path)
+          if "Alignment(String)" not in current:
+              current = current.replace(
+                  '    #[error("invalid window request: {0}")]\n    InvalidWindow(String),\n',
+                  '    #[error("invalid window request: {0}")]\n    InvalidWindow(String),\n'
+                  '    #[error("exact alignment failed: {0}")]\n    Alignment(String),\n',
+                  1,
+              )
+          write(path, current)
+
+          # Rust public surface: content provenance and exact synchronization are
+          # peers in the runtime, not alternatives.
+          path = "rust/neuros-runtime/src/lib.rs"
+          current = read(path)
+          feature = frozen(path)
+          if "mod sync;" not in current:
+              current = current.replace("mod manifest;\n", "mod manifest;\nmod sync;\n", 1)
+          if "pub use sync::{" not in current:
+              export = extract(feature, "pub use sync::{", "};\n") + "};\n"
+              marker = "pub use manifest::{\n"
+              begin = current.index(marker)
+              end = current.index("};\n", begin) + 3
+              current = current[:end] + export + current[end:]
+          current = current.replace(
+              "bounded prefetch, zero-copy Arrow views, and content provenance.",
+              "bounded prefetch, zero-copy Arrow views, content provenance, and exact clock-domain synchronization.",
+          )
+          write(path, current)
+
+          # PyO3 facade: preserve content-verification getters/methods from main,
+          # then splice in the qualified alignment planner and plan object.
+          path = "rust/neuros-runtime-py/src/lib.rs"
+          current = read(path)
+          feature = frozen(path)
+          if "ExactAlignmentPlan" not in current.split("use pyo3::exceptions", 1)[0]:
+              feature_import = extract(feature, "use neuros_runtime::{", "};\n") + "};\n"
+              current = re.sub(
+                  r"use neuros_runtime::\{[^\n]+\};\n",
+                  feature_import,
+                  current,
+                  count=1,
+              )
+          if "fn plan_aligned(" not in current:
+              method = extract(
+                  feature,
+                  "    #[pyo3(signature = (*, sync_group",
+                  "    #[pyo3(signature = (*, subjects",
+              )
+              current = current.replace(
+                  "    #[pyo3(signature = (*, subjects", method + "    #[pyo3(signature = (*, subjects", 1
+              )
+          if "struct NativeAlignmentPlan" not in current:
+              plan_class = extract(
+                  feature,
+                  "#[pyclass]\nstruct NativeAlignmentPlan",
+                  "#[pyclass]\nstruct NativeWindowStream",
+              )
+              current = current.replace(
+                  "#[pyclass]\nstruct NativeWindowStream",
+                  plan_class + "#[pyclass]\nstruct NativeWindowStream",
+                  1,
+              )
+          if "module.add_class::<NativeAlignmentPlan>()?;" not in current:
+              current = current.replace(
+                  "    module.add_class::<NativeDataset>()?;\n",
+                  "    module.add_class::<NativeDataset>()?;\n    module.add_class::<NativeAlignmentPlan>()?;\n",
+                  1,
+              )
+          write(path, current)
+
+          # High-level Python facade: preserve ORION lineage/content verification
+          # while adding metadata-only exact alignment planning.
+          path = "packages/neuros/src/neuros/dataset.py"
+          current = read(path)
+          feature = frozen(path)
+          feature_header = feature[: feature.index("from __future__ import annotations")]
+          current = feature_header + current[current.index("from __future__ import annotations") :]
+          if "import json\n" not in current:
+              current = current.replace(
+                  "from __future__ import annotations\n\n",
+                  "from __future__ import annotations\n\nimport json\n",
+                  1,
+              )
+          if "class AlignmentPlan:" not in current:
+              plan_class = extract(
+                  feature,
+                  "@dataclass(frozen=True, slots=True)\nclass AlignmentPlan:",
+                  "@dataclass(frozen=True, slots=True)\nclass DataWindow:",
+              )
+              current = current.replace(
+                  "@dataclass(frozen=True, slots=True)\nclass DataWindow:",
+                  plan_class + "@dataclass(frozen=True, slots=True)\nclass DataWindow:",
+                  1,
+              )
+          if "    def plan_aligned(" not in current:
+              method = extract(feature, "    def plan_aligned(\n", "    def stream(\n")
+              current = current.replace("    def stream(\n", method + "    def stream(\n", 1)
+          current = current.replace(
+              "safely aligned merely by zipping sample indices.\n        \"\"\"",
+              "safely aligned merely by zipping sample indices. Use :meth:`plan_aligned`\n        to preflight a multimodal exact-clock mapping.\n        \"\"\"",
+          )
+          current = current.replace(
+              '"explicit multimodal clock synchronization is the next runtime contract"',
+              '"use plan_aligned() to establish an explicit multimodal clock contract"',
+          )
+          if '    "AlignmentPlan",\n' not in current:
+              current = current.replace(
+                  "__all__ = [\n", "__all__ = [\n    \"AlignmentPlan\",\n", 1
+              )
+          write(path, current)
+
+          # Keep the newly promoted provenance workflow intact and add alignment as
+          # an additional independent smoke gate instead of replacing provenance.
+          path = ".github/workflows/rust-runtime-ci.yml"
+          current = read(path)
+          feature = frozen(path)
+          if "Native Arrow and exact-clock smoke test" not in current:
+              step = extract(
+                  feature,
+                  "      - name: Native Arrow and exact-clock smoke test",
+                  "          PY\n",
+              ) + "          PY\n"
+              current = current.replace(
+                  "      - name: Measure provenance verification and warm iteration",
+                  step + "      - name: Measure provenance verification and warm iteration",
+                  1,
+              )
+          write(path, current)
+
+          # Explain the now-promoted provenance layer without overclaiming it as
+          # byte verification by the metadata-only planner itself.
+          path = "docs/EXACT_ALIGNMENT_V1.md"
+          current = read(path)
+          if "## Interaction with content provenance" not in current:
+              current += """
+
+          ## Interaction with content provenance
+
+          neurOS now also supports declared and verified source-content identities. The exact
+          alignment plan remains metadata-only: it binds the complete manifest SHA-256, so any
+          declared `source_sha256` values in that manifest are transitively part of the plan's
+          identity, but planning does **not** open source files or claim that those hashes were
+          verified. A later aligned executor must separately require the appropriate content
+          verification state before treating source bytes as execution-authorized evidence.
+          """
+          write(path, current)
+          PY
+
+      - name: Format and unit-qualify merged Rust runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p neuros-runtime --all-features
+          python -m compileall -q packages/neuros/src/neuros/dataset.py
+
+      - name: Build and integration-smoke native wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "maturin==1.15.0"
+          maturin build --release --manifest-path rust/neuros-runtime-py/Cargo.toml --interpreter python
+          python -m pip install target/wheels/*.whl
+          python - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          import struct
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          import neuros_runtime_native as native
+
+          def source_bytes(count: int) -> bytes:
+              return b"".join(struct.pack("<f", float(value)) for value in range(count))
+
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              fmri = source_bytes(40)
+              behavior = source_bytes(40)
+              (root / "fmri.f32").write_bytes(fmri)
+              (root / "behavior.f32").write_bytes(behavior)
+              manifest = {
+                  "schema_version": 1,
+                  "dataset_id": "rebase-integration-smoke",
+                  "records": [
+                      {
+                          "id": "fmri-run-01",
+                          "subject": "sub-01",
+                          "modality": "fmri",
+                          "sync_group": "sub-01/run-01",
+                          "path": "fmri.f32",
+                          "source_sha256": hashlib.sha256(fmri).hexdigest(),
+                          "dtype": "float32-le",
+                          "shape": [10, 4],
+                          "sampling_hz": 0.5,
+                          "clock": {"id": "scanner", "start_ns": 0, "period_ns": 2_000_000_000},
+                      },
+                      {
+                          "id": "behavior-run-01",
+                          "subject": "sub-01",
+                          "modality": "behavior",
+                          "sync_group": "sub-01/run-01",
+                          "path": "behavior.f32",
+                          "source_sha256": hashlib.sha256(behavior).hexdigest(),
+                          "dtype": "float32-le",
+                          "shape": [40, 1],
+                          "sampling_hz": 2.0,
+                          "clock": {"id": "behavior", "start_ns": 0, "period_ns": 500_000_000},
+                      },
+                  ],
+              }
+              (root / "neuros.dataset.json").write_text(json.dumps(manifest))
+              dataset = native.NativeDataset.open(root)
+              declared = dataset.declared_dataset_content_sha256
+              assert declared is not None
+              assert dataset.verify_content() == declared
+              plan = dataset.plan_aligned(
+                  sync_group="sub-01/run-01",
+                  modalities=["fmri", "behavior"],
+                  duration_ns=4_000_000_000,
+                  stride_ns=2_000_000_000,
+              )
+              payload = json.loads(plan.to_json())
+              assert payload["window_count"] == 9
+              assert payload["manifest_sha256"] == dataset.manifest_sha256
+              assert len(plan.sha256) == 64
+
+              first = next(dataset.stream(modalities=["fmri"], window=2, stride=2, prefetch=2))
+              assert first.verified_source_sha256 == hashlib.sha256(fmri).hexdigest()
+              assert first.verified_dataset_content_sha256 == declared
+
+              module_path = Path("packages/neuros/src/neuros/dataset.py").resolve()
+              spec = importlib.util.spec_from_file_location("merged_runtime_dataset", module_path)
+              assert spec is not None and spec.loader is not None
+              module = importlib.util.module_from_spec(spec)
+              sys.modules[spec.name] = module
+              spec.loader.exec_module(module)
+              public_dataset = module.Dataset.open(root)
+              public_plan = public_dataset.plan_aligned(
+                  sync_group="sub-01/run-01",
+                  modalities=["fmri", "behavior"],
+                  duration_ns=4_000_000_000,
+                  stride_ns=2_000_000_000,
+              )
+              assert public_plan.sha256 == plan.sha256
+              assert public_plan.window(3)["start_ns"] == 6_000_000_000
+              assert public_dataset.verify_content() == declared
+          PY
+
+      - name: Publish isolated candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git diff --cached --check
+          git status --short
+          git commit -m "feat(runtime): integrate exact-clock planning with provenance authority"
+          git push --force origin HEAD:automation/clock-sync-v1-rebased-output
+          echo "candidate_sha=$(git rev-parse HEAD)"
