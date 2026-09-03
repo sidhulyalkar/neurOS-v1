@@ -92,13 +92,11 @@ impl Record {
                 self.id
             )));
         }
-        if self
-            .sync_group
-            .as_deref()
-            .is_some_and(|group| group.trim().is_empty())
-        {
+        if self.sync_group.as_deref().is_some_and(|group| {
+            group.trim().is_empty() || group != group.trim()
+        }) {
             return Err(RuntimeError::Validation(format!(
-                "record {:?} sync_group must be non-empty when supplied",
+                "record {:?} sync_group must be non-empty and have no surrounding whitespace",
                 self.id
             )));
         }
@@ -236,9 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_empty_sync_group() {
+    fn rejects_noncanonical_sync_group() {
         let mut candidate = record();
         candidate.sync_group = Some("   ".into());
+        assert!(candidate.validate().is_err());
+        candidate.sync_group = Some(" sub-01/run-01".into());
+        assert!(candidate.validate().is_err());
+        candidate.sync_group = Some("sub-01/run-01 ".into());
         assert!(candidate.validate().is_err());
     }
 
