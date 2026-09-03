@@ -20,6 +20,8 @@ pub struct Record {
     pub id: String,
     pub subject: String,
     pub modality: String,
+    #[serde(default)]
+    pub sync_group: Option<String>,
     pub path: PathBuf,
     #[serde(default)]
     pub source_sha256: Option<String>,
@@ -87,6 +89,16 @@ impl Record {
         {
             return Err(RuntimeError::Validation(format!(
                 "record {:?} requires non-empty id, subject, and modality",
+                self.id
+            )));
+        }
+        if self
+            .sync_group
+            .as_deref()
+            .is_some_and(|group| group.trim().is_empty())
+        {
+            return Err(RuntimeError::Validation(format!(
+                "record {:?} sync_group must be non-empty when supplied",
                 self.id
             )));
         }
@@ -205,6 +217,7 @@ mod tests {
             id: "fmri-01".into(),
             subject: "sub-01".into(),
             modality: "fmri".into(),
+            sync_group: None,
             path: "sub-01/fmri.f32".into(),
             source_sha256: None,
             offset_bytes: 0,
@@ -219,6 +232,13 @@ mod tests {
     fn rejects_path_escape() {
         let mut candidate = record();
         candidate.path = "../outside.f32".into();
+        assert!(candidate.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_empty_sync_group() {
+        let mut candidate = record();
+        candidate.sync_group = Some("   ".into());
         assert!(candidate.validate().is_err());
     }
 
