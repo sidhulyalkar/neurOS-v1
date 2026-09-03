@@ -11,6 +11,7 @@ __path__ = extend_path(__path__, __name__)
 
 from neuros.contracts import DecoderOutput, SignalFrame, StreamDescriptor  # noqa: E402,F401
 from neuros.dataset import (  # noqa: E402,F401
+    AlignedWindow,
     AlignmentPlan,
     DataWindow,
     Dataset,
@@ -28,6 +29,7 @@ from neuros.processing.feature_extraction import BandPowerExtractor  # noqa: E40
 from neuros.processing.filters import BandpassFilter, SmoothingFilter  # noqa: E402,F401
 
 __all__ = [
+    "AlignedWindow",
     "AlignmentPlan",
     "BandPowerExtractor",
     "BandpassFilter",
