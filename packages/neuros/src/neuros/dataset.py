@@ -1,13 +1,16 @@
 """High-level dataset API backed by the optional neurOS Rust data plane.
 
-The v0 contract deliberately supports one modality per stream. Cross-modal
-synchronization is not inferred from array position; a future runtime revision
-will require explicit clock and resampling policy before returning aligned
-multimodal batches.
+Single-modality streaming remains the v0 execution contract. Multimodal v1
+starts with a provenance-bound exact-clock planning authority: neurOS verifies
+the complete declared dataset content and proves a cross-modal frame mapping
+before it is allowed to execute one. Interpolation, nearest-neighbor matching,
+phase correction, and resampling remain separate future policies rather than
+implicit behavior.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +24,142 @@ except ImportError:  # pragma: no cover - depends on optional native wheel
 
 class NativeRuntimeUnavailable(ImportError):
     """Raised when a native Dataset operation is requested without the Rust wheel."""
+
+
+@dataclass(frozen=True, slots=True)
+class AlignmentPlan:
+    """Compact, deterministic, provenance-bound exact-clock alignment authority.
+
+    Creating a plan verifies the complete dataset content identity but does not
+    return source arrays. The plan binds verified dataset/source identity, the
+    exact manifest, acquisition group, clock mapping, and derived frame arithmetic.
+    A later execution layer can therefore consume this exact authority rather than
+    silently recomputing synchronization.
+    """
+
+    _native_plan: Any
+
+    @property
+    def dataset_id(self) -> str:
+        return str(self._native_plan.dataset_id)
+
+    @property
+    def dataset_content_sha256(self) -> str:
+        """Verified canonical dataset byte/interpretation identity."""
+
+        return str(self._native_plan.dataset_content_sha256)
+
+    @property
+    def manifest_sha256(self) -> str:
+        """Exact serialized manifest identity that authorized this plan."""
+
+        return str(self._native_plan.manifest_sha256)
+
+    @property
+    def sync_group(self) -> str:
+        return str(self._native_plan.sync_group)
+
+    @property
+    def start_ns(self) -> int:
+        return int(self._native_plan.start_ns)
+
+    @property
+    def overlap_end_ns(self) -> int:
+        return int(self._native_plan.overlap_end_ns)
+
+    @property
+    def duration_ns(self) -> int:
+        return int(self._native_plan.duration_ns)
+
+    @property
+    def stride_ns(self) -> int:
+        return int(self._native_plan.stride_ns)
+
+    @property
+    def window_count(self) -> int:
+        return int(self._native_plan.window_count)
+
+    @property
+    def sha256(self) -> str:
+        """Domain-separated identity of this exact temporal execution plan."""
+
+        return str(self._native_plan.sha256)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the complete stable-ordered plan payload."""
+
+        payload = json.loads(self._native_plan.to_json())
+        if not isinstance(payload, dict):  # pragma: no cover - native invariant
+            raise RuntimeError("native alignment plan did not serialize to an object")
+        return payload
+
+    @property
+    def entries(self) -> tuple[dict[str, Any], ...]:
+        payload = self.to_dict()
+        return tuple(dict(entry) for entry in payload["entries"])
+
+    @property
+    def provenance(self) -> dict[str, Any]:
+        """Return plan-level identities without materializing a window."""
+
+        return {
+            "plan_sha256": self.sha256,
+            "dataset_id": self.dataset_id,
+            "dataset_content_sha256": self.dataset_content_sha256,
+            "manifest_sha256": self.manifest_sha256,
+            "sync_group": self.sync_group,
+            "policy": "exact",
+            "start_ns": self.start_ns,
+            "overlap_end_ns": self.overlap_end_ns,
+            "duration_ns": self.duration_ns,
+            "stride_ns": self.stride_ns,
+            "window_count": self.window_count,
+        }
+
+    def window(self, index: int) -> dict[str, Any]:
+        """Materialize one window's exact time/frame mapping for inspection.
+
+        This does not read source data. It derives selected frame intervals from
+        the compact plan and carries the source/record descriptors needed to audit
+        the later execution result independently.
+        """
+
+        if index < 0 or index >= self.window_count:
+            raise IndexError(
+                f"alignment window index {index} outside [0, {self.window_count})"
+            )
+        start_ns = self.start_ns + index * self.stride_ns
+        slices: list[dict[str, Any]] = []
+        for entry in self.entries:
+            start_frame = int(entry["start_frame"]) + index * int(entry["frame_stride"])
+            frame_count = int(entry["frames_per_window"])
+            slices.append(
+                {
+                    "record_id": str(entry["record_id"]),
+                    "subject": str(entry["subject"]),
+                    "modality": str(entry["modality"]),
+                    "source_sha256": str(entry["source_sha256"]),
+                    "offset_bytes": int(entry["offset_bytes"]),
+                    "dtype": str(entry["dtype"]),
+                    "shape": tuple(int(value) for value in entry["shape"]),
+                    "clock_id": str(entry["clock_id"]),
+                    "clock_start_ns": int(entry["clock_start_ns"]),
+                    "period_ns": int(entry["period_ns"]),
+                    "start_frame": start_frame,
+                    "stop_frame": start_frame + frame_count,
+                    "frame_count": frame_count,
+                }
+            )
+        return {
+            "plan_sha256": self.sha256,
+            "dataset_content_sha256": self.dataset_content_sha256,
+            "manifest_sha256": self.manifest_sha256,
+            "sync_group": self.sync_group,
+            "window_index": index,
+            "start_ns": start_ns,
+            "end_ns": start_ns + self.duration_ns,
+            "slices": slices,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,6 +317,51 @@ class Dataset:
         value = self._native_dataset.verify_content()
         return None if value is None else str(value)
 
+    def plan_aligned(
+        self,
+        *,
+        sync_group: str,
+        modalities: Sequence[str],
+        duration_ns: int,
+        stride_ns: int | None = None,
+        policy: str = "exact",
+    ) -> AlignmentPlan:
+        """Verify content and prove an exact multimodal frame mapping.
+
+        ``policy="exact"`` is currently the only accepted policy. Every window
+        boundary must be representable on every selected modality's integer clock.
+        The complete dataset must declare valid source SHA-256 values; planning
+        verifies those bytes before returning. Requests that would require
+        interpolation, extrapolation, tolerance matching, or implicit phase repair
+        are rejected.
+        """
+
+        if policy != "exact":
+            raise ValueError(
+                "only policy='exact' is implemented; resampling policies must be explicit"
+            )
+        if not sync_group or sync_group != sync_group.strip():
+            raise ValueError("sync_group must be non-empty and have no surrounding whitespace")
+        selected = tuple(str(modality) for modality in modalities)
+        if len(selected) < 2:
+            raise ValueError("plan_aligned requires at least two modalities")
+        if any(not modality or modality != modality.strip() for modality in selected):
+            raise ValueError("plan_aligned modalities must be non-empty canonical identifiers")
+        if len(set(selected)) != len(selected):
+            raise ValueError("plan_aligned modalities cannot contain duplicates")
+        if duration_ns <= 0:
+            raise ValueError("duration_ns must be positive")
+        if stride_ns is not None and stride_ns <= 0:
+            raise ValueError("stride_ns must be positive when supplied")
+
+        native_plan = self._native_dataset.plan_aligned(
+            sync_group=sync_group,
+            modalities=list(selected),
+            duration_ns=duration_ns,
+            stride_ns=stride_ns,
+        )
+        return AlignmentPlan(native_plan)
+
     def to_orion_lineage(
         self,
         *,
@@ -251,19 +435,21 @@ class Dataset:
         stride: int | None = None,
         prefetch: int = 8,
     ) -> Iterator[DataWindow]:
-        """Stream deterministic windows with bounded native prefetch.
+        """Stream deterministic single-modality windows with bounded native prefetch.
 
-        v0 requires exactly one selected modality. This is an intentional
-        scientific guardrail: fMRI, behavior, EEG, and video clocks cannot be
-        safely aligned merely by zipping sample indices.
+        v0 execution requires exactly one selected modality. This remains an
+        intentional scientific guardrail: fMRI, behavior, EEG, and video clocks
+        cannot be safely aligned merely by zipping sample indices. Use
+        :meth:`plan_aligned` to establish a verified exact multimodal plan; an
+        aligned execution API will consume such a plan in a separate qualified layer.
         """
 
         native = _require_native()
         selected_modalities = tuple(modalities or ())
         if len(selected_modalities) != 1:
             raise ValueError(
-                "neuros-runtime v0 requires exactly one modality per stream; "
-                "explicit multimodal clock synchronization is the next runtime contract"
+                "neuros-runtime v0 execution requires exactly one modality per stream; "
+                "use plan_aligned() to establish an exact multimodal clock contract"
             )
         native.require_single_modality(list(selected_modalities))
         stream = self._native_dataset.stream(
@@ -292,6 +478,7 @@ def _require_native() -> Any:
 
 
 __all__ = [
+    "AlignmentPlan",
     "DataWindow",
     "Dataset",
     "NativeRuntimeUnavailable",
