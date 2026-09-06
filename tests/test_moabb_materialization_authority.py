@@ -175,7 +175,7 @@ def test_kumar_materialization_fails_if_frozen_bar_run_count_changes(tmp_path: P
     root = _fixture_root(tmp_path)
     first_session = next(
         path
-        for path in root.rglob("*")
+        for path in sorted(root.rglob("*"))
         if path.is_dir() and "Session_001_Offline" in path.name
     )
     (first_session / "unexpected-extra.gdf").write_bytes(b"unexpected")
@@ -187,7 +187,7 @@ def test_kumar_materialization_fails_when_one_consumed_session_is_missing(tmp_pa
     root = _fixture_root(tmp_path)
     target = next(
         path
-        for path in root.rglob("*")
+        for path in sorted(root.rglob("*"))
         if path.is_dir() and "Session_006_Online" in path.name
     )
     for child in target.iterdir():
