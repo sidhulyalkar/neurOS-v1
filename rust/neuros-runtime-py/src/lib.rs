@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use arrow_array::ArrayRef;
 use arrow_schema::{DataType, Field};
 use neuros_runtime::{
-    Dataset, ExactAlignmentPlan, ExactAlignmentSpec, StreamSelector, WindowHandle, WindowSpec,
-    WindowStream, plan_exact_alignment,
+    AlignedWindowHandle, AlignedWindowStream, Dataset, ExactAlignmentPlan, ExactAlignmentSpec,
+    StreamSelector, WindowHandle, WindowSpec, WindowStream, plan_exact_alignment,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -78,6 +78,21 @@ impl NativeDataset {
             .detach(|| plan_exact_alignment(self.inner.as_ref(), &sync_group, &modalities, spec))
             .map_err(runtime_error)?;
         Ok(NativeAlignmentPlan { inner: plan })
+    }
+
+    #[pyo3(signature = (*, plan, prefetch=8))]
+    fn stream_aligned(
+        &self,
+        plan: PyRef<'_, NativeAlignmentPlan>,
+        prefetch: usize,
+    ) -> PyResult<NativeAlignedWindowStream> {
+        let stream = self
+            .inner
+            .stream_aligned(&plan.inner, prefetch)
+            .map_err(runtime_error)?;
+        Ok(NativeAlignedWindowStream {
+            inner: Mutex::new(stream),
+        })
     }
 
     #[pyo3(signature = (*, subjects=None, modalities=None, window, stride=None, prefetch=8))]
@@ -173,6 +188,103 @@ impl NativeAlignmentPlan {
             self.inner.duration_ns,
             self.inner.stride_ns,
             self.inner.window_count,
+        )
+    }
+}
+
+#[pyclass]
+struct NativeAlignedWindowStream {
+    inner: Mutex<AlignedWindowStream>,
+}
+
+#[pymethods]
+impl NativeAlignedWindowStream {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&self, py: Python<'_>) -> PyResult<Option<NativeAlignedWindow>> {
+        let next = py.detach(|| {
+            self.inner
+                .lock()
+                .map_err(|_| "native aligned stream lock was poisoned".to_owned())
+                .map(|mut stream| stream.next())
+        });
+        let next = next.map_err(PyRuntimeError::new_err)?;
+        match next {
+            None => Ok(None),
+            Some(Ok(window)) => Ok(Some(NativeAlignedWindow { inner: window })),
+            Some(Err(error)) => Err(runtime_error(error)),
+        }
+    }
+}
+
+#[pyclass]
+struct NativeAlignedWindow {
+    inner: AlignedWindowHandle,
+}
+
+#[pymethods]
+impl NativeAlignedWindow {
+    #[getter]
+    fn plan_sha256(&self) -> String {
+        self.inner.plan_sha256().to_owned()
+    }
+
+    #[getter]
+    fn dataset_content_sha256(&self) -> String {
+        self.inner.dataset_content_sha256().to_owned()
+    }
+
+    #[getter]
+    fn manifest_sha256(&self) -> String {
+        self.inner.manifest_sha256().to_owned()
+    }
+
+    #[getter]
+    fn sync_group(&self) -> String {
+        self.inner.sync_group().to_owned()
+    }
+
+    #[getter]
+    fn window_index(&self) -> usize {
+        self.inner.window_index()
+    }
+
+    #[getter]
+    fn start_ns(&self) -> i64 {
+        self.inner.start_ns()
+    }
+
+    #[getter]
+    fn end_ns(&self) -> i64 {
+        self.inner.end_ns()
+    }
+
+    #[getter]
+    fn modalities(&self) -> Vec<String> {
+        self.inner
+            .windows()
+            .iter()
+            .map(|window| window.modality().to_owned())
+            .collect()
+    }
+
+    fn window(&self, modality: &str) -> Option<NativeWindow> {
+        self.inner
+            .window(modality)
+            .cloned()
+            .map(|inner| NativeWindow { inner })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "NativeAlignedWindow(sync_group={:?}, index={}, start_ns={}, end_ns={}, modalities={:?})",
+            self.inner.sync_group(),
+            self.inner.window_index(),
+            self.inner.start_ns(),
+            self.inner.end_ns(),
+            self.modalities(),
         )
     }
 }
@@ -345,6 +457,8 @@ fn require_single_modality(modalities: Vec<String>) -> PyResult<()> {
 fn neuros_runtime_native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeDataset>()?;
     module.add_class::<NativeAlignmentPlan>()?;
+    module.add_class::<NativeAlignedWindowStream>()?;
+    module.add_class::<NativeAlignedWindow>()?;
     module.add_class::<NativeWindowStream>()?;
     module.add_class::<NativeWindow>()?;
     module.add_function(wrap_pyfunction!(runtime_version, module)?)?;

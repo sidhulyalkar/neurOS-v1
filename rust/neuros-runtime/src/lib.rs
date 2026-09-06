@@ -4,20 +4,34 @@
 //!
 //! The crate intentionally owns only transport and representation concerns:
 //! validated dataset manifests, memory mapping, deterministic window planning,
-//! bounded prefetch, zero-copy Arrow views, content provenance, and exact
-//! integer-clock synchronization planning. Scientific transforms and model
-//! semantics remain in the Python control plane unless promoted into explicit,
-//! versioned runtime adapters.
+//! bounded prefetch, zero-copy Arrow views, content provenance, exact
+//! integer-clock synchronization planning, and execution of already-qualified
+//! exact alignment plans. Scientific transforms and model semantics remain in
+//! the Python control plane unless promoted into explicit, versioned runtime
+//! adapters.
 
 mod content_identity;
-mod dataset;
+mod dataset {
+    include!("dataset.rs");
+
+    mod aligned_fresh {
+        include!("aligned_fresh.rs");
+    }
+
+    mod aligned {
+        include!("aligned.rs");
+    }
+
+    pub use aligned::{AlignedWindowHandle, AlignedWindowStream};
+}
 mod error;
 mod manifest;
 mod sync;
 
 pub use content_identity::{DATASET_CONTENT_DOMAIN, declared_dataset_content_sha256};
 pub use dataset::{
-    Dataset, SourceVerificationState, StreamSelector, WindowHandle, WindowSpec, WindowStream,
+    AlignedWindowHandle, AlignedWindowStream, Dataset, SourceVerificationState, StreamSelector,
+    WindowHandle, WindowSpec, WindowStream,
 };
 pub use error::{Result, RuntimeError};
 pub use manifest::{
@@ -36,6 +50,15 @@ impl std::fmt::Debug for WindowHandle {
             .field("record_id", &self.record_id())
             .field("start_frame", &self.start_frame())
             .field("end_frame_exclusive", &self.end_frame_exclusive())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for AlignedWindowStream {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AlignedWindowStream")
             .finish_non_exhaustive()
     }
 }
