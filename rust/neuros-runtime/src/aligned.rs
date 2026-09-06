@@ -246,6 +246,7 @@ fn prepare_alignment_plan(dataset: &Dataset, plan: &ExactAlignmentPlan) -> Resul
     let mut records = Vec::with_capacity(plan.entries.len());
     let mut overlap_start = i128::MIN;
     let mut overlap_end = i128::MAX;
+    let mut common_period = 1i128;
 
     for (index, entry) in plan.entries.iter().enumerate() {
         if !seen_records.insert(entry.record_id.as_str()) {
@@ -285,6 +286,8 @@ fn prepare_alignment_plan(dataset: &Dataset, plan: &ExactAlignmentPlan) -> Resul
         validate_entry(plan, entry, record)?;
 
         let clock = record.clock.as_ref().expect("validated by validate_entry");
+        let period_ns = i128::from(clock.period_ns);
+        common_period = checked_lcm(common_period, period_ns)?;
         let record_start = i128::from(clock.start_ns);
         let record_frames = i128::try_from(record.shape[0]).map_err(|_| {
             RuntimeError::Alignment(format!(
@@ -293,7 +296,7 @@ fn prepare_alignment_plan(dataset: &Dataset, plan: &ExactAlignmentPlan) -> Resul
             ))
         })?;
         let record_span = record_frames
-            .checked_mul(i128::from(clock.period_ns))
+            .checked_mul(period_ns)
             .ok_or_else(|| {
                 RuntimeError::Alignment(format!(
                     "record {:?} clock span overflowed during execution validation",
@@ -316,9 +319,20 @@ fn prepare_alignment_plan(dataset: &Dataset, plan: &ExactAlignmentPlan) -> Resul
         });
     }
 
-    if overlap_start > i128::from(plan.start_ns) {
+    let plan_start = i128::from(plan.start_ns);
+    if overlap_start > plan_start {
         return Err(RuntimeError::Alignment(
             "alignment plan starts before the selected records' common overlap".into(),
+        ));
+    }
+    let previous_common_boundary = plan_start.checked_sub(common_period).ok_or_else(|| {
+        RuntimeError::Alignment(
+            "alignment plan previous common boundary overflowed clock arithmetic".into(),
+        )
+    })?;
+    if previous_common_boundary >= overlap_start {
+        return Err(RuntimeError::Alignment(
+            "alignment plan does not begin at the earliest exact common boundary".into(),
         ));
     }
     if overlap_end != i128::from(plan.overlap_end_ns) {
@@ -510,6 +524,26 @@ fn validate_entry(
     Ok(())
 }
 
+fn checked_lcm(left: i128, right: i128) -> Result<i128> {
+    let divisor = gcd_positive(left, right);
+    left.checked_div(divisor)
+        .and_then(|value| value.checked_mul(right))
+        .ok_or_else(|| {
+            RuntimeError::Alignment(
+                "alignment plan common clock period overflowed integer arithmetic".into(),
+            )
+        })
+}
+
+fn gcd_positive(mut left: i128, mut right: i128) -> i128 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left
+}
+
 fn checked_window_start_ns(plan: &ExactAlignmentPlan, window_index: usize) -> Result<i64> {
     let index = i128::try_from(window_index)
         .map_err(|_| RuntimeError::Alignment("window index overflowed i128".into()))?;
@@ -662,6 +696,30 @@ mod tests {
         plan.entries[0].frame_stride += 1;
         let error = dataset.stream_aligned(&plan, 1).unwrap_err();
         assert!(error.to_string().contains("frame stride"));
+    }
+
+    #[test]
+    fn delayed_but_exact_common_boundary_rejects_as_noncanonical() {
+        let (_directory, dataset, mut plan) = build_fixture();
+        let common_period_ns = 2_000_000_000i64;
+
+        plan.start_ns += common_period_ns;
+        plan.window_count -= 1;
+        for entry in &mut plan.entries {
+            let frame_shift = usize::try_from(
+                i128::from(common_period_ns) / i128::from(entry.period_ns),
+            )
+            .unwrap();
+            entry.start_frame += frame_shift;
+        }
+
+        // This tampering preserves every existing start-frame, duration, stride,
+        // final-bound, and window-count equation. It is invalid only because the
+        // supplied plan skipped an earlier legal exact common boundary.
+        let error = dataset.stream_aligned(&plan, 1).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("earliest exact common boundary"));
     }
 
     #[test]
