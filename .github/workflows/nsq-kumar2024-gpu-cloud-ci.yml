@@ -1,0 +1,59 @@
+name: NSQ Kumar2024 GPU cloud contracts
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros/src/neuros/evidence/kumar2024_gpu_cloud.py"
+      - "scripts/evidence/kaggle_kumar2024_gpu_runner.py"
+      - "tests/test_kumar2024_gpu_cloud.py"
+      - ".github/workflows/nsq-kumar2024-gpu-cloud-ci.yml"
+      - ".github/workflows/nsq-kumar2024-kaggle-preflight.yml"
+      - "docs/NSQ_KUMAR2024_KAGGLE_GPU.md"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros/src/neuros/evidence/kumar2024_gpu_cloud.py"
+      - "scripts/evidence/kaggle_kumar2024_gpu_runner.py"
+      - "tests/test_kumar2024_gpu_cloud.py"
+      - ".github/workflows/nsq-kumar2024-gpu-cloud-ci.yml"
+      - ".github/workflows/nsq-kumar2024-kaggle-preflight.yml"
+      - "docs/NSQ_KUMAR2024_KAGGLE_GPU.md"
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-cloud-contracts:
+    name: GPU cloud authority contracts / Python 3.11
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11.16"
+          cache: pip
+      - name: Install authority stack
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e packages/neuros-core
+          python -m pip install -e packages/neuros-drivers
+          python -m pip install -e packages/neuros-models
+          python -m pip install -e packages/neuros-foundation
+          python -m pip install -e packages/orion
+          python -m pip install -e packages/neuros pytest pytest-asyncio
+      - name: Run GPU cloud authority tests
+        run: pytest -q tests/test_kumar2024_gpu_cloud.py
+      - name: Compile cloud execution surfaces
+        run: |
+          python -m compileall -q \
+            packages/neuros/src/neuros/evidence/kumar2024_gpu_cloud.py \
+            scripts/evidence/kaggle_kumar2024_gpu_runner.py
+      - name: Assert cloud runner never reads scientific score artifacts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("scripts/evidence/kaggle_kumar2024_gpu_runner.py").read_text()
+          for forbidden in ("case_result.json", "shard_result.json", "balanced_accuracy"):
+              assert forbidden not in text, forbidden
+          PY
