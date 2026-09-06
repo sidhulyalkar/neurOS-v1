@@ -9,6 +9,11 @@ from pkgutil import extend_path
 
 __path__ = extend_path(__path__, __name__)
 
+from neuros.authority import (  # noqa: E402,F401
+    alignment_authority_provenance,
+    runtime_dataset_binding,
+    to_research_dataset_authority,
+)
 from neuros.contracts import DecoderOutput, SignalFrame, StreamDescriptor  # noqa: E402,F401
 from neuros.dataset import (  # noqa: E402,F401
     AlignedWindow,
@@ -48,6 +53,9 @@ __all__ = [
     "SimpleClassifier",
     "SmoothingFilter",
     "StreamDescriptor",
+    "alignment_authority_provenance",
     "load_plugin",
     "native_runtime_available",
+    "runtime_dataset_binding",
+    "to_research_dataset_authority",
 ]

@@ -25,6 +25,12 @@ from .prospective import (
     evaluate_prospective_geometry_gain,
 )
 from .registry import ResearchRegistry
+from .runtime_bridge import (
+    RUNTIME_ALIGNMENT_AUTHORITY_SCHEMA,
+    RUNTIME_ALIGNMENT_METADATA_KEY,
+    RUNTIME_DATASET_BINDING_SCHEMA,
+    bind_runtime_alignment,
+)
 from .semantics import (
     ALGORITHMIC_METRIC_REGISTRY,
     DecisionCriterion,
@@ -62,9 +68,13 @@ __all__ = [
     "ProspectiveGeometryPlan",
     "ProspectiveGeometryReveal",
     "ProspectiveOutcome",
+    "RUNTIME_ALIGNMENT_AUTHORITY_SCHEMA",
+    "RUNTIME_ALIGNMENT_METADATA_KEY",
+    "RUNTIME_DATASET_BINDING_SCHEMA",
     "ResearchAgent",
     "ResearchRegistry",
     "SemanticResearchProposal",
+    "bind_runtime_alignment",
     "evaluate_prospective_geometry_gain",
     "ingest_algonaut_prospective_geometry",
     "materialize_g1_packet",
