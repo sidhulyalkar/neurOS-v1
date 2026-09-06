@@ -8,4 +8,20 @@ Study modules must keep heavyweight scientific imports local to execution paths
 so the base neurOS runtime remains dependency-light.
 """
 
-__all__: list[str] = []
+from .claims import (
+    ClaimEvidenceRef,
+    EvidenceRelation,
+    EvidenceRequirement,
+    EvidenceTier,
+    ScientificClaimBundle,
+    ScientificClaimSpec,
+)
+
+__all__ = [
+    "ClaimEvidenceRef",
+    "EvidenceRelation",
+    "EvidenceRequirement",
+    "EvidenceTier",
+    "ScientificClaimBundle",
+    "ScientificClaimSpec",
+]

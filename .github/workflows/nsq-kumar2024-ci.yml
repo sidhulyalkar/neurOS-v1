@@ -13,6 +13,7 @@ on:
       - "packages/neuros/src/neuros/evidence/**"
       - "packages/neuros/pyproject.toml"
       - "tests/test_moabb_epoch_evidence.py"
+      - "tests/test_scientific_claim_spec.py"
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
@@ -37,6 +38,7 @@ on:
       - "packages/neuros/src/neuros/evidence/**"
       - "packages/neuros/pyproject.toml"
       - "tests/test_moabb_epoch_evidence.py"
+      - "tests/test_scientific_claim_spec.py"
       - "tests/test_kumar2024_nsq_study.py"
       - "tests/test_kumar2024_comparison_authority.py"
       - "tests/test_kumar2024_promoted_execution_authority.py"
@@ -87,6 +89,7 @@ jobs:
             tests/test_moabb_materialization_authority.py \
             tests/test_kumar2024_materialization_roles.py \
             tests/test_kumar2024_bundle_v2.py \
+            tests/test_scientific_claim_spec.py \
             tests/test_kumar2024_nsq_study.py \
             tests/test_kumar2024_comparison_authority.py \
             tests/test_kumar2024_promoted_execution_authority.py \
@@ -100,6 +103,7 @@ jobs:
             packages/neuros-foundation/src/neuros/foundation_models/moabb_epochs.py \
             packages/neuros-foundation/src/neuros/foundation_models/materialization_authority.py \
             packages/neuros-foundation/src/neuros/foundation_models/moabb_materialization.py \
+            packages/neuros/src/neuros/evidence/claims.py \
             packages/neuros/src/neuros/evidence/kumar2024.py \
             packages/neuros/src/neuros/evidence/kumar2024_materialization.py \
             packages/neuros/src/neuros/evidence/kumar2024_materialized_study.py \
