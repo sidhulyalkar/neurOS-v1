@@ -37,7 +37,11 @@ jobs:
           set -euo pipefail
           git config user.name "neurOS integration bot"
           git config user.email "actions@users.noreply.github.com"
+          # The GitHub Actions token intentionally does not carry workflows permission.
+          # Preserve the already-qualified runtime-CI edit for publication through the
+          # repository connector, and publish only code/API files from this worker.
+          git restore .github/workflows/rust-runtime-ci.yml
           git rm .github/workflows/bootstrap-aligned-python.yml scripts/_bootstrap_aligned_python.py
-          git add rust/neuros-runtime-py/src/lib.rs packages/neuros/src/neuros/dataset.py packages/neuros/src/neuros/__init__.py .github/workflows/rust-runtime-ci.yml
+          git add rust/neuros-runtime-py/src/lib.rs packages/neuros/src/neuros/dataset.py packages/neuros/src/neuros/__init__.py
           git commit -m "feat(runtime): expose exact aligned execution to Python"
           git push origin HEAD:feat/rust-aligned-execution-v1
