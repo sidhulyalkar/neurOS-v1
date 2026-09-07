@@ -23,6 +23,11 @@ environment authority before model execution.
 ```text
 qualified neurOS source revision
         |
+        +--> isolated Kaggle quota gate
+        |      +-- credentials present
+        |      +-- >= 1.0 free GPU-hour
+        |      +-- content-addressed systems receipt
+        |
         v
 canonical promoted comparison plan
         |
@@ -46,6 +51,11 @@ canonical promoted atomic worker bundle
         v
 GPU systems receipt
 ```
+
+The quota gate and scientific binding execute in separate GitHub Actions jobs.
+This separation is deliberate: the Kaggle CLI needed to inspect account quota
+must never become an installed distribution inside the environment captured by
+the promoted scientific `EnvironmentAuthority`.
 
 The CUDA adapter is deliberately separate from the canonical CPU path. Its
 compatibility scope temporarily projects `promoted_materialization_config()` to
@@ -71,6 +81,36 @@ GPU authority additionally seals the cuBLAS and TF32 policy.
 Actual accelerator identity is observed at worker time. The first tranche fails
 closed unless the device name is T4-class.
 
+## Free-GPU quota gate
+
+Before the 18-participant binding is materialized, a separate control-plane job
+uses the pinned Kaggle CLI to query the account's current weekly accelerator
+quota. The workflow requires exactly one GPU quota row and a predeclared launch
+floor of at least `1.0` remaining GPU-hour.
+
+The gate records only systems metadata:
+
+- used GPU hours;
+- remaining GPU hours;
+- total weekly GPU hours;
+- quota refresh time when supplied by Kaggle;
+- the fixed minimum launch threshold;
+- a domain-separated SHA-256 of the normalized quota snapshot.
+
+It explicitly records `scientific_result_used=false`. No dataset values, worker
+predictions, scores, rankings, or method results are available to this job.
+
+The raw CSV and normalized quota receipt are retained as a separate GitHub
+Actions artifact. Only the quota-receipt SHA, remaining-hours value and refresh
+time cross into the later launch manifest. This makes the claim "the preflight
+was started with free GPU quota available" auditable without allowing quota
+inspection to alter scientific authority.
+
+A quota failure stops the workflow before the expensive binding. This includes
+missing Kaggle credentials, a missing/ambiguous GPU quota row, malformed quota
+units, zero weekly allowance, or less than the predeclared one-hour launch
+floor.
+
 ## Systems-preflight shard
 
 The first cloud run is fixed before execution:
@@ -94,7 +134,8 @@ The GitHub/Kaggle orchestration may use only:
 - worker-bundle verification;
 - elapsed wall-clock time;
 - accelerator identity;
-- environment identity.
+- environment identity;
+- accelerator quota availability and refresh metadata.
 
 It may not use balanced accuracy, scientific score, method ranking, final
 assessment metrics, external-floor status or ORION comparison as a go/no-go
@@ -112,18 +153,24 @@ The manual workflow is:
 
 It performs the following in one provenance chain:
 
-1. requires an exact clean `main` checkout;
-2. creates the CUDA-bound no-model binding in the pinned Python environment;
-3. selects the fixed preflight shard;
-4. creates a unique private Kaggle Dataset containing only the sealed launch
+1. in an isolated control-plane job, requires Kaggle credentials and queries the
+   current weekly GPU quota;
+2. requires at least `1.0` remaining free GPU-hour and seals the quota receipt;
+3. in a fresh job, requires an exact clean `main` checkout;
+4. installs only the exact promoted scientific environment and creates the
+   CUDA-bound no-model binding;
+5. selects the fixed preflight shard;
+6. binds the quota-receipt SHA and safe quota metadata into the systems launch
+   manifest;
+7. creates a unique private Kaggle Dataset containing only the sealed launch
    pack, not redistributed Kumar2024 raw data;
-5. creates a unique private Kaggle script kernel with T4 + internet enabled;
-6. polls the official Kaggle CLI to terminal state;
-7. downloads the zipped systems output;
-8. structurally verifies the returned worker bundle on GitHub without reading
-   score fields;
-9. uploads the binding, systems summary, quarantined worker ZIP and verification
-   record as a 90-day GitHub Actions artifact.
+8. creates a unique private Kaggle script kernel with T4 + internet enabled;
+9. polls the official Kaggle CLI to terminal state;
+10. downloads the zipped systems output;
+11. structurally verifies the returned worker bundle on GitHub without reading
+    score fields;
+12. uploads the binding, systems summary, quarantined worker ZIP and verification
+    record as a 90-day GitHub Actions artifact.
 
 The Kaggle kernel itself is
 `scripts/evidence/kaggle_kumar2024_gpu_runner.py`.
@@ -167,4 +214,5 @@ This tranche does not:
 - generate an external-floor claim;
 - permit ORION comparison;
 - automatically inspect a preflight score;
-- claim CUDA numerical identity with CPU execution.
+- claim CUDA numerical identity with CPU execution;
+- treat quota availability as scientific evidence.

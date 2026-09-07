@@ -9,16 +9,127 @@ permissions:
 env:
   PROMOTED_CONSTRAINTS: requirements/nsq-kumar2024-promoted-py311.constraints.txt
   KAGGLE_CLI_VERSION: "2.2.4"
+  MIN_FREE_GPU_HOURS: "1.0"
 
 jobs:
+  quota-gate:
+    name: Verify free Kaggle GPU quota before binding
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    env:
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+    outputs:
+      gpu_remaining_hours: ${{ steps.quota.outputs.gpu_remaining_hours }}
+      quota_snapshot_sha256: ${{ steps.quota.outputs.quota_snapshot_sha256 }}
+      quota_refresh_at: ${{ steps.quota.outputs.quota_refresh_at }}
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11.16"
+      - name: Require Kaggle credentials before expensive binding
+        run: |
+          set -euo pipefail
+          test -n "${KAGGLE_USERNAME:-}" || { echo "Missing repository secret KAGGLE_USERNAME" >&2; exit 2; }
+          test -n "${KAGGLE_KEY:-}" || { echo "Missing repository secret KAGGLE_KEY" >&2; exit 2; }
+      - name: Install pinned Kaggle quota client
+        run: python -m pip install --disable-pip-version-check "kaggle==${KAGGLE_CLI_VERSION}"
+      - name: Capture and require free weekly GPU quota
+        id: quota
+        run: |
+          set -euo pipefail
+          QUOTA_CSV="${RUNNER_TEMP}/kaggle_accelerator_quota.csv"
+          QUOTA_JSON="${RUNNER_TEMP}/kaggle_accelerator_quota.json"
+          kaggle quota --csv > "${QUOTA_CSV}"
+          QUOTA_CSV="${QUOTA_CSV}" QUOTA_JSON="${QUOTA_JSON}" python - <<'PY'
+          import csv
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          csv_path = Path(os.environ["QUOTA_CSV"])
+          rows = list(csv.DictReader(csv_path.read_text(encoding="utf-8").splitlines()))
+          gpu_rows = [row for row in rows if str(row.get("resource", "")).upper() == "GPU"]
+          if len(gpu_rows) != 1:
+              raise SystemExit("Kaggle quota must expose exactly one GPU row")
+          row = gpu_rows[0]
+
+          def hours(name: str) -> float:
+              text = str(row.get(name, "")).strip()
+              if not text.endswith("h"):
+                  raise SystemExit(f"Kaggle GPU quota {name} must be expressed in hours")
+              try:
+                  value = float(text[:-1])
+              except ValueError as exc:
+                  raise SystemExit(f"Kaggle GPU quota {name} is not numeric") from exc
+              if value < 0:
+                  raise SystemExit(f"Kaggle GPU quota {name} cannot be negative")
+              return value
+
+          used = hours("used")
+          remaining = hours("remaining")
+          total = hours("total")
+          minimum = float(os.environ["MIN_FREE_GPU_HOURS"])
+          if total <= 0:
+              raise SystemExit("Kaggle reports no positive weekly GPU allowance")
+          if remaining < minimum:
+              raise SystemExit(
+                  f"Kaggle free GPU quota is below launch floor: "
+                  f"remaining={remaining:.2f}h required={minimum:.2f}h"
+              )
+          payload = {
+              "schema_version": 1,
+              "resource": "GPU",
+              "used_hours": used,
+              "remaining_hours": remaining,
+              "total_hours": total,
+              "refresh_at": row.get("refreshAt") or None,
+              "minimum_launch_hours": minimum,
+              "source": "kaggle quota --csv",
+              "scientific_result_used": False,
+          }
+          encoded = json.dumps(
+              {"schema": "neuros.kaggle_accelerator_quota.v1", "payload": payload},
+              sort_keys=True,
+              separators=(",", ":"),
+              allow_nan=False,
+          ).encode("utf-8")
+          digest = hashlib.sha256(encoded).hexdigest()
+          receipt = {**payload, "quota_snapshot_sha256": digest}
+          Path(os.environ["QUOTA_JSON"]).write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
+              stream.write(f"gpu_remaining_hours={remaining:.2f}\n")
+              stream.write(f"quota_snapshot_sha256={digest}\n")
+              stream.write(f"quota_refresh_at={row.get('refreshAt') or ''}\n")
+          print(json.dumps(receipt, sort_keys=True))
+          PY
+      - name: Upload systems-only quota receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nsq-kumar2024-kaggle-quota-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/kaggle_accelerator_quota.csv
+            ${{ runner.temp }}/kaggle_accelerator_quota.json
+          if-no-files-found: error
+          retention-days: 90
+
   kaggle-t4-preflight:
     name: Sealed binding -> private Kaggle T4 -> verified worker receipt
+    needs: quota-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     if: github.ref == 'refs/heads/main'
     env:
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_GPU_REMAINING_HOURS: ${{ needs.quota-gate.outputs.gpu_remaining_hours }}
+      KAGGLE_GPU_QUOTA_SHA256: ${{ needs.quota-gate.outputs.quota_snapshot_sha256 }}
+      KAGGLE_GPU_QUOTA_REFRESH_AT: ${{ needs.quota-gate.outputs.quota_refresh_at }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -100,7 +211,7 @@ jobs:
               "shard_spec_sha256": shard["shard_spec_sha256"],
           }, sort_keys=True))
           PY
-      - name: Require Kaggle credentials only after binding is sealed
+      - name: Reconfirm Kaggle credentials before publication
         run: |
           set -euo pipefail
           test -n "${KAGGLE_USERNAME:-}" || { echo "Missing repository secret KAGGLE_USERNAME" >&2; exit 2; }
@@ -140,6 +251,9 @@ jobs:
               "python_version": "3.11.16",
               "uv_version": "0.12.10",
               "machine_shape": "NvidiaTeslaT4",
+              "kaggle_gpu_quota_snapshot_sha256": os.environ["KAGGLE_GPU_QUOTA_SHA256"],
+              "kaggle_gpu_remaining_hours_at_gate": float(os.environ["KAGGLE_GPU_REMAINING_HOURS"]),
+              "kaggle_gpu_quota_refresh_at": os.environ.get("KAGGLE_GPU_QUOTA_REFRESH_AT") or None,
               "numerical_result_interpretable": False,
               "continuation_policy": "systems-only; scientific scores forbidden as go/no-go inputs",
           }
@@ -258,6 +372,8 @@ jobs:
               "elapsed_seconds": summary["elapsed_seconds"],
               "gpu_worker_receipt_sha256": summary["gpu_worker_receipt_sha256"],
               "worker_bundle_sha256": summary["worker_bundle_sha256"],
+              "kaggle_gpu_quota_snapshot_sha256": os.environ["KAGGLE_GPU_QUOTA_SHA256"],
+              "kaggle_gpu_remaining_hours_at_gate": float(os.environ["KAGGLE_GPU_REMAINING_HOURS"]),
               "numerical_result_interpretable": False,
           }, sort_keys=True))
           PY

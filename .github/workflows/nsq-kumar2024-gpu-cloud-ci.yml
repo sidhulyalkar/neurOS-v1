@@ -57,3 +57,30 @@ jobs:
           for forbidden in ("case_result.json", "shard_result.json", "balanced_accuracy"):
               assert forbidden not in text, forbidden
           PY
+      - name: Assert free-quota gate is isolated from scientific binding
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path(".github/workflows/nsq-kumar2024-kaggle-preflight.yml").read_text()
+          assert "  quota-gate:" in text
+          assert "  kaggle-t4-preflight:" in text
+          quota = text.split("  quota-gate:", 1)[1].split("  kaggle-t4-preflight:", 1)[0]
+          preflight = text.split("  kaggle-t4-preflight:", 1)[1]
+          binding_prefix = preflight.split(
+              "      - name: Build CUDA-bound no-model authority", 1
+          )[0]
+
+          assert "kaggle quota --csv" in quota
+          assert '"kaggle==${KAGGLE_CLI_VERSION}"' in quota
+          assert "MIN_FREE_GPU_HOURS" in text
+          assert "scientific_result_used" in quota
+          assert "neuros.evidence.kumar2024_gpu_cloud bind" not in quota
+          assert "needs: quota-gate" in preflight
+          assert "kaggle quota" not in binding_prefix
+          assert '"kaggle==${KAGGLE_CLI_VERSION}"' not in binding_prefix
+          assert "KAGGLE_GPU_QUOTA_SHA256" in preflight
+          assert "KAGGLE_GPU_REMAINING_HOURS" in preflight
+          assert "kaggle_gpu_quota_snapshot_sha256" in preflight
+          assert "kaggle_gpu_remaining_hours_at_gate" in preflight
+          PY
