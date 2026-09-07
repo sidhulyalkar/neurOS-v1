@@ -1,0 +1,177 @@
+name: NSQ Kumar2024 owner preflight bridge
+
+run-name: NSQ Kumar2024 owner preflight bridge / ${{ github.sha }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: nsq-kumar2024-owner-preflight-bridge
+  cancel-in-progress: false
+
+env:
+  TARGET_WORKFLOW: nsq-kumar2024-kaggle-preflight.yml
+
+jobs:
+  dispatch:
+    name: Authorize owner command and dispatch fixed T4 preflight
+    if: >-
+      github.event.issue.number == 167 &&
+      github.event.issue.pull_request != null &&
+      github.actor == github.repository_owner &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.body == '/nsq-kumar2024-t4-preflight'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reconfirm exact default-branch authority
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          MAIN_SHA="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/branches/main" \
+            --jq '.commit.sha')"
+          if [[ "${MAIN_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "Default branch moved before command authorization: event=${GITHUB_SHA} main=${MAIN_SHA}" >&2
+            exit 1
+          fi
+          echo "Authorized exact main source: ${GITHUB_SHA}"
+
+      - name: Reject duplicate or concurrent T4 preflight
+        run: |
+          set -euo pipefail
+          RUNS_JSON="${RUNNER_TEMP}/target_workflow_runs.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?branch=main&event=workflow_dispatch&per_page=100" \
+            > "${RUNS_JSON}"
+          RUNS_JSON="${RUNS_JSON}" SOURCE_SHA="${GITHUB_SHA}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["RUNS_JSON"]).read_text(encoding="utf-8"))
+          source_sha = os.environ["SOURCE_SHA"]
+          active = []
+          successful_same_sha = []
+          for run in payload.get("workflow_runs", []):
+              status = str(run.get("status") or "")
+              conclusion = str(run.get("conclusion") or "")
+              run_id = run.get("id")
+              head_sha = str(run.get("head_sha") or "")
+              if status != "completed":
+                  active.append((run_id, status, head_sha))
+              if head_sha == source_sha and conclusion == "success":
+                  successful_same_sha.append(run_id)
+
+          if active:
+              raise SystemExit(f"A T4 preflight is already active: {active}")
+          if successful_same_sha:
+              raise SystemExit(
+                  "A successful T4 preflight already exists for this exact source SHA: "
+                  f"{successful_same_sha}"
+              )
+          print("No active preflight and no successful same-SHA preflight found")
+          PY
+
+      - name: Dispatch fixed systems-only T4 preflight
+        id: dispatch
+        run: |
+          set -euo pipefail
+          PAYLOAD="${RUNNER_TEMP}/dispatch.json"
+          RESPONSE="${RUNNER_TEMP}/dispatch_response.json"
+          printf '%s\n' '{"ref":"main"}' > "${PAYLOAD}"
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            --input "${PAYLOAD}" > "${RESPONSE}"
+          RUN_ID="$(RESPONSE="${RESPONSE}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["RESPONSE"]).read_text(encoding="utf-8"))
+          run_id = payload.get("workflow_run_id")
+          if not isinstance(run_id, int) or run_id <= 0:
+              raise SystemExit("Workflow dispatch response did not include workflow_run_id")
+          print(run_id)
+          PY
+          )"
+          echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          echo "Dispatched workflow run ${RUN_ID}"
+
+      - name: Verify dispatched run resolved to captured main SHA
+        env:
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="${RUNNER_TEMP}/dispatched_run.json"
+          fetched=0
+          for _ in $(seq 1 10); do
+            if gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > "${RUN_JSON}"; then
+              fetched=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${fetched}" != "1" ]]; then
+            echo "Could not read dispatched workflow run ${RUN_ID}" >&2
+            exit 1
+          fi
+
+          if ! RUN_JSON="${RUN_JSON}" SOURCE_SHA="${GITHUB_SHA}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run = json.loads(Path(os.environ["RUN_JSON"]).read_text(encoding="utf-8"))
+          expected_sha = os.environ["SOURCE_SHA"]
+          observed = {
+              "id": run.get("id"),
+              "event": run.get("event"),
+              "head_branch": run.get("head_branch"),
+              "head_sha": run.get("head_sha"),
+          }
+          if observed["event"] != "workflow_dispatch":
+              raise SystemExit(f"Unexpected dispatched event: {observed}")
+          if observed["head_branch"] != "main":
+              raise SystemExit(f"Unexpected dispatched branch: {observed}")
+          if observed["head_sha"] != expected_sha:
+              raise SystemExit(
+                  "Dispatch/main race detected: "
+                  f"expected={expected_sha} observed={observed['head_sha']}"
+              )
+          print(json.dumps(observed, sort_keys=True))
+          PY
+          then
+            gh api --method POST \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel" >/dev/null 2>&1 || true
+            echo "Cancelled mismatched dispatched run ${RUN_ID}" >&2
+            exit 1
+          fi
+
+          {
+            echo "### Kumar2024 T4 preflight dispatched"
+            echo ""
+            echo "- command source: PR #167 owner comment"
+            echo "- exact source SHA: \`${GITHUB_SHA}\`"
+            echo "- target workflow run: \`${RUN_ID}\`"
+            echo "- scientific launch inputs: none"
+          } >> "${GITHUB_STEP_SUMMARY}"

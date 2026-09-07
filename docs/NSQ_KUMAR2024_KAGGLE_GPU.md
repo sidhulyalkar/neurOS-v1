@@ -147,7 +147,7 @@ completeness rules are satisfied.
 
 ## Orchestration
 
-The manual workflow is:
+The execution workflow is:
 
 `.github/workflows/nsq-kumar2024-kaggle-preflight.yml`
 
@@ -175,16 +175,62 @@ It performs the following in one provenance chain:
 The Kaggle kernel itself is
 `scripts/evidence/kaggle_kumar2024_gpu_runner.py`.
 
+## Owner-only command bridge
+
+The repository also contains a deliberately narrow orchestration bridge:
+
+`.github/workflows/nsq-kumar2024-owner-preflight-bridge.yml`
+
+It exists so an authorized repository-owner comment can trigger the already
+fixed systems preflight without exposing workflow-dispatch controls or any
+scientific parameter surface. The bridge listens only for a newly created
+comment on merged control PR `#167`, and the complete comment body must be
+exactly:
+
+```text
+/nsq-kumar2024-t4-preflight
+```
+
+Authorization is redundant by design. The comment actor, comment author and
+repository owner must all be the same account, and GitHub must report the
+comment author's association as `OWNER`. The event must refer to PR `#167`, not
+an arbitrary issue.
+
+The bridge has no Kaggle credentials and contains no subject, session, split,
+method, model-seed, budget or score inputs. Its `GITHUB_TOKEN` is limited to
+`actions: write` and `contents: read`, which are used only to inspect the current
+`main` authority, inspect existing target-workflow runs, dispatch the fixed
+preflight, verify the resulting workflow run, and cancel that run if GitHub
+resolved the dispatch to a different source SHA.
+
+The `issue_comment` event captures the latest default-branch SHA. Before
+launch, the bridge independently reads `main` and requires that SHA to remain
+identical. It then rejects:
+
+- any already queued or running T4 preflight;
+- any second successful T4 preflight for the same exact source SHA.
+
+Bridge command handling is serialized. After dispatch, the returned workflow
+run ID is read back and must report all three of:
+
+- event `workflow_dispatch`;
+- branch `main`;
+- `head_sha` exactly equal to the SHA captured by the owner-comment event.
+
+A mismatch is treated as a dispatch/main race: the bridge attempts to cancel
+the target run and fails closed. This makes the comment a control-plane action,
+not a mechanism for choosing science.
+
 ## One-time account boundary
 
-The workflow needs these GitHub Actions repository secrets:
+The execution workflow needs these GitHub Actions repository secrets:
 
 - `KAGGLE_USERNAME`
 - `KAGGLE_KEY`
 
 They are account credentials and must not be committed or pasted into issue/PR
 text. Once present, the workflow uses Kaggle's official CLI; no browser-session
-automation is needed.
+automation is needed. The owner-command bridge does not read either secret.
 
 ## Expansion gate
 
@@ -215,4 +261,5 @@ This tranche does not:
 - permit ORION comparison;
 - automatically inspect a preflight score;
 - claim CUDA numerical identity with CPU execution;
-- treat quota availability as scientific evidence.
+- treat quota availability as scientific evidence;
+- allow issue/PR comments to choose scientific execution parameters.

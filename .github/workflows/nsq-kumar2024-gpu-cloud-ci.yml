@@ -8,6 +8,7 @@ on:
       - "tests/test_kumar2024_gpu_cloud.py"
       - ".github/workflows/nsq-kumar2024-gpu-cloud-ci.yml"
       - ".github/workflows/nsq-kumar2024-kaggle-preflight.yml"
+      - ".github/workflows/nsq-kumar2024-owner-preflight-bridge.yml"
       - "docs/NSQ_KUMAR2024_KAGGLE_GPU.md"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "tests/test_kumar2024_gpu_cloud.py"
       - ".github/workflows/nsq-kumar2024-gpu-cloud-ci.yml"
       - ".github/workflows/nsq-kumar2024-kaggle-preflight.yml"
+      - ".github/workflows/nsq-kumar2024-owner-preflight-bridge.yml"
       - "docs/NSQ_KUMAR2024_KAGGLE_GPU.md"
 
 permissions:
@@ -83,4 +85,52 @@ jobs:
           assert "KAGGLE_GPU_REMAINING_HOURS" in preflight
           assert "kaggle_gpu_quota_snapshot_sha256" in preflight
           assert "kaggle_gpu_remaining_hours_at_gate" in preflight
+          PY
+      - name: Assert owner-only command bridge cannot choose scientific inputs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          bridge = Path(
+              ".github/workflows/nsq-kumar2024-owner-preflight-bridge.yml"
+          ).read_text()
+          target = Path(
+              ".github/workflows/nsq-kumar2024-kaggle-preflight.yml"
+          ).read_text()
+
+          assert "issue_comment:" in bridge
+          assert "types: [created]" in bridge
+          assert "actions: write" in bridge
+          assert "contents: read" in bridge
+          assert "github.event.issue.number == 167" in bridge
+          assert "github.event.issue.pull_request != null" in bridge
+          assert "github.actor == github.repository_owner" in bridge
+          assert "github.event.comment.user.login == github.repository_owner" in bridge
+          assert "github.event.comment.author_association == 'OWNER'" in bridge
+          assert "github.event.comment.body == '/nsq-kumar2024-t4-preflight'" in bridge
+          assert "nsq-kumar2024-kaggle-preflight.yml" in bridge
+          assert "event=workflow_dispatch" in bridge
+          assert 'printf \'%s\\n\' \'{"ref":"main"}\'' in bridge
+          assert "workflow_run_id" in bridge
+          assert 'observed["head_sha"] != expected_sha' in bridge
+          assert "/cancel" in bridge
+          assert "status != \"completed\"" in bridge
+          assert 'conclusion == "success"' in bridge
+          assert "cancel-in-progress: false" in bridge
+
+          for secret_name in ("KAGGLE_USERNAME", "KAGGLE_KEY"):
+              assert secret_name not in bridge, secret_name
+          for scientific_choice in (
+              "target_session",
+              "split_seed",
+              "method_id",
+              "model_seed",
+              "budgets_per_class",
+              "balanced_accuracy",
+              "scientific_score",
+          ):
+              assert scientific_choice not in bridge, scientific_choice
+
+          assert "workflow_dispatch:" in target
+          assert "subject: `1`" not in bridge
           PY
