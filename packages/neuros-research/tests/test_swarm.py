@@ -77,7 +77,39 @@ def test_task_detaches_context():
     context = {"a": [1]}
     sealed = _task(public_context=context)
     context["a"].append(2)
-    assert sealed.public_context == {"a": [1]}
+    assert sealed.to_dict()["public_context"] == {"a": [1]}
+
+
+def test_task_public_context_is_recursively_immutable():
+    sealed = _task(public_context={"nested": {"items": [1]}})
+    original_sha = sealed.sha256
+
+    try:
+        sealed.public_context["new"] = 1  # type: ignore[index]
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("sealed top-level context should be immutable")
+
+    nested = sealed.public_context["nested"]
+    try:
+        nested["new"] = 2
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("sealed nested context should be immutable")
+
+    assert nested["items"] == (1,)
+    assert sealed.sha256 == original_sha
+
+
+def test_task_to_dict_returns_detached_plain_json():
+    sealed = _task(public_context={"nested": {"items": [1]}})
+    payload = sealed.to_dict()
+    assert payload["public_context"] == {"nested": {"items": [1]}}
+
+    payload["public_context"]["nested"]["items"].append(2)
+    assert sealed.to_dict()["public_context"] == {"nested": {"items": [1]}}
 
 
 def test_task_rejects_secret_key_recursively():
