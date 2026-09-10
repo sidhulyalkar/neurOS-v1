@@ -7,11 +7,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from ._canonical import canonical_sha256, require_nonempty, require_sha256
+from ._canonical import (
+    canonical_sha256,
+    freeze_json,
+    require_nonempty,
+    require_sha256,
+    thaw_json,
+)
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
 Category = Literal[
@@ -49,7 +55,7 @@ _FORBIDDEN_TASK_KEYS = {
 
 
 def _contains_forbidden_key(value: Any) -> bool:
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         for key, item in value.items():
             if str(key).strip().lower() in _FORBIDDEN_TASK_KEYS:
                 return True
@@ -58,16 +64,6 @@ def _contains_forbidden_key(value: Any) -> bool:
     elif isinstance(value, (list, tuple)):
         return any(_contains_forbidden_key(item) for item in value)
     return False
-
-
-def _canonical_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +75,7 @@ class SealedSwarmTask:
     allowed_paths: tuple[str, ...] = ()
     authority_sha256s: tuple[str, ...] = ()
     forbidden_actions: tuple[str, ...] = ()
-    public_context: dict[str, Any] = field(default_factory=dict, repr=False)
+    public_context: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "repository", require_nonempty(self.repository, name="repository"))
@@ -105,7 +101,7 @@ class SealedSwarmTask:
         if len(set(hashes)) != len(hashes):
             raise ValueError("authority_sha256s values must be unique")
         object.__setattr__(self, "authority_sha256s", hashes)
-        context = json.loads(_canonical_bytes(self.public_context).decode("utf-8"))
+        context = freeze_json(self.public_context, path="swarm.public_context")
         if _contains_forbidden_key(context):
             raise ValueError("public_context contains a forbidden secret/private-data key")
         object.__setattr__(self, "public_context", context)
@@ -120,7 +116,7 @@ class SealedSwarmTask:
             "allowed_paths": list(self.allowed_paths),
             "authority_sha256s": list(self.authority_sha256s),
             "forbidden_actions": list(self.forbidden_actions),
-            "public_context": self.public_context,
+            "public_context": thaw_json(self.public_context),
             "llm_output_is_authority": False,
         }
 
