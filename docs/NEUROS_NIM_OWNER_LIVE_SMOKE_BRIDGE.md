@@ -35,9 +35,21 @@ Before dispatch, the issue-comment event SHA must still equal the current `main`
 
 If either file changes in the future, this command fails closed until the bridge is deliberately updated and independently requalified. An old owner comment therefore cannot authorize an evolved hosted workflow.
 
+## Fresh-main qualification gate
+
+Owner identity and frozen workflow bytes are not enough. Before any hosted dispatch, the bridge independently queries every push-triggered workflow observed for its captured `main` SHA.
+
+It requires the following critical workflows to exist:
+
+- `NIM Owner Live-Smoke Bridge Policy`;
+- `Public Trust Contracts`;
+- `neurOS CI`.
+
+Every observed push workflow for the captured SHA must be completed with `success`. A missing critical workflow, a queued/running workflow, or any non-success conclusion rejects the command. This removes the human assumption that the owner remembered to wait for fresh-main qualification before commenting.
+
 ## Dispatch semantics
 
-The bridge first rejects any active hosted smoke and any already-successful hosted smoke for the same exact source SHA. It then dispatches only `.github/workflows/nim-swarm-live-eval.yml` with the exact payload:
+After fresh-main qualification, the bridge rejects any active hosted smoke and any already-successful hosted smoke for the same exact source SHA. It then dispatches only `.github/workflows/nim-swarm-live-eval.yml` with the exact payload:
 
 ```json
 {"ref":"main"}
@@ -57,10 +69,10 @@ A mismatch is treated as a dispatch/main race or target substitution. The bridge
 
 ## Independent policy
 
-`.github/workflows/nim-owner-live-smoke-bridge-policy.yml` statically checks the exact owner command, authorization gates, no-input dispatch payload, race cancellation, absence of NVIDIA secrets/scientific controls, and the frozen target workflow identities. It also independently computes the checked-out Git blob SHA for the target live workflow and artifact-policy workflow and requires them to match the bridge constants.
+`.github/workflows/nim-owner-live-smoke-bridge-policy.yml` statically checks the exact owner command, authorization gates, fresh-main qualification gate, no-input dispatch payload, race cancellation, absence of NVIDIA secrets/scientific controls, and the frozen target workflow identities. It also independently computes the checked-out Git blob SHA for the target live workflow and artifact-policy workflow and requires them to match the bridge constants.
 
 ## Interpretation boundary
 
-Dispatch authorization is not scientific authority. A successful command means only that the frozen bounded hosted smoke may execute on one exact `main` SHA. Its three public cases remain operational transport/schema/telemetry qualification only. The bridge grants no merge authority, provider ranking, future provider-execution authority, Kumar2024 authorization, scientific promotion, clinical claim, or ORION comparison authority.
+Dispatch authorization is not scientific authority. A successful command means only that the frozen bounded hosted smoke may execute on one exact, fresh-main-qualified SHA. Its three public cases remain operational transport/schema/telemetry qualification only. The bridge grants no merge authority, provider ranking, future provider-execution authority, Kumar2024 authorization, scientific promotion, clinical claim, or ORION comparison authority.
 
 Tracks #178 and #183.
