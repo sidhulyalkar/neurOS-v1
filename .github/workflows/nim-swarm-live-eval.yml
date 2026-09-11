@@ -380,6 +380,10 @@ jobs:
           if key and key in raw:
               raise SystemExit("credential material leaked into raw live-evaluation artifact")
           PY
+          (
+            cd artifacts/nim-swarm-live-eval
+            sha256sum raw.json > RAW_SAFE.sha256
+          )
 
       - name: Score completed reviews without provider credential
         shell: bash
@@ -431,11 +435,33 @@ jobs:
           print(f"qualified bounded reviewer attempts: {expected_calls}")
           PY
 
-      - name: Preserve live smoke evidence
-        if: always()
+      - name: Prepare sealed evidence bundle
+        if: ${{ always() && hashFiles('artifacts/nim-swarm-live-eval/RAW_SAFE.sha256') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd artifacts/nim-swarm-live-eval
+            sha256sum -c RAW_SAFE.sha256
+          )
+          rm -rf artifacts/nim-swarm-live-eval-upload
+          mkdir -p artifacts/nim-swarm-live-eval-upload
+          cp artifacts/nim-swarm-live-eval/raw.json \
+            artifacts/nim-swarm-live-eval/RAW_SAFE.sha256 \
+            artifacts/nim-swarm-live-eval-upload/
+          for optional in scored.json SHA256SUMS; do
+            if [ -f "artifacts/nim-swarm-live-eval/${optional}" ]; then
+              cp "artifacts/nim-swarm-live-eval/${optional}" \
+                artifacts/nim-swarm-live-eval-upload/
+            fi
+          done
+          touch artifacts/nim-swarm-live-eval-upload/UPLOAD_READY
+
+      - name: Preserve sealed live smoke evidence
+        if: ${{ always() && hashFiles('artifacts/nim-swarm-live-eval-upload/UPLOAD_READY') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: nim-swarm-live-eval-${{ github.sha }}
-          path: artifacts/nim-swarm-live-eval/
-          if-no-files-found: warn
+          path: artifacts/nim-swarm-live-eval-upload/
+          if-no-files-found: error
           retention-days: 30
