@@ -106,7 +106,15 @@ jobs:
 
           payload = json.loads(Path(os.environ["RUNS_JSON"]).read_text(encoding="utf-8"))
           runs = payload.get("workflow_runs", [])
-          if not isinstance(runs, list) or not runs:
+          total_count = payload.get("total_count")
+          if isinstance(total_count, bool) or not isinstance(total_count, int):
+              raise SystemExit("Fresh-main qualification response lacks a valid total_count")
+          if not isinstance(runs, list) or total_count != len(runs):
+              raise SystemExit(
+                  "Fresh-main qualification run history is paginated or structurally incomplete: "
+                  f"total_count={total_count} returned={len(runs) if isinstance(runs, list) else 'invalid'}"
+              )
+          if not runs:
               raise SystemExit("No fresh-main push qualification exists for captured source SHA")
 
           required = {
@@ -145,10 +153,20 @@ jobs:
           from pathlib import Path
 
           payload = json.loads(Path(os.environ["RUNS_JSON"]).read_text(encoding="utf-8"))
+          runs = payload.get("workflow_runs", [])
+          total_count = payload.get("total_count")
+          if isinstance(total_count, bool) or not isinstance(total_count, int):
+              raise SystemExit("Hosted-smoke history response lacks a valid total_count")
+          if not isinstance(runs, list) or total_count != len(runs):
+              raise SystemExit(
+                  "Hosted-smoke run history is paginated or structurally incomplete: "
+                  f"total_count={total_count} returned={len(runs) if isinstance(runs, list) else 'invalid'}"
+              )
+
           source_sha = os.environ["SOURCE_SHA"]
           active = []
           successful_same_sha = []
-          for run in payload.get("workflow_runs", []):
+          for run in runs:
               status = str(run.get("status") or "")
               conclusion = str(run.get("conclusion") or "")
               run_id = run.get("id")
