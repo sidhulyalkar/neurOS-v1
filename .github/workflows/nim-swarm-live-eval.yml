@@ -1,0 +1,441 @@
+name: NVIDIA NIM Swarm Live Evaluation
+
+on:
+  pull_request:
+    paths:
+      - "packages/neuros-research/src/neuros/research/nim_observed.py"
+      - "packages/neuros-research/src/neuros/research/swarm_live_eval.py"
+      - "packages/neuros-research/examples/05_nim_swarm_live_eval.py"
+      - "packages/neuros-research/examples/06_score_nim_swarm_live_eval.py"
+      - "packages/neuros-research/tests/test_nim_observed.py"
+      - "packages/neuros-research/tests/test_swarm_live_eval.py"
+      - "docs/NEUROS_NIM_SWARM_LIVE_EVAL.md"
+      - ".github/workflows/nim-swarm-live-eval.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/neuros-research/src/neuros/research/nim_observed.py"
+      - "packages/neuros-research/src/neuros/research/swarm_live_eval.py"
+      - "packages/neuros-research/examples/05_nim_swarm_live_eval.py"
+      - "packages/neuros-research/examples/06_score_nim_swarm_live_eval.py"
+      - "packages/neuros-research/tests/test_nim_observed.py"
+      - "packages/neuros-research/tests/test_swarm_live_eval.py"
+      - "docs/NEUROS_NIM_SWARM_LIVE_EVAL.md"
+      - ".github/workflows/nim-swarm-live-eval.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nim-swarm-live-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-contract:
+    name: live-eval contract / py${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install deterministic test harness
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest==9.1.1" "pytest-asyncio==1.4.0" "ruff==0.16.7"
+
+      - name: Compile and lint additive telemetry surfaces
+        run: |
+          python -m py_compile \
+            packages/neuros-research/src/neuros/research/nim_observed.py \
+            packages/neuros-research/src/neuros/research/swarm_live_eval.py \
+            packages/neuros-research/examples/05_nim_swarm_live_eval.py \
+            packages/neuros-research/examples/06_score_nim_swarm_live_eval.py
+          python -m ruff check \
+            packages/neuros-research/src/neuros/research/nim_observed.py \
+            packages/neuros-research/src/neuros/research/swarm_live_eval.py \
+            packages/neuros-research/examples/05_nim_swarm_live_eval.py \
+            packages/neuros-research/examples/06_score_nim_swarm_live_eval.py \
+            packages/neuros-research/tests/test_nim_observed.py \
+            packages/neuros-research/tests/test_swarm_live_eval.py
+
+      - name: Run credential-free telemetry contracts
+        env:
+          PYTHONPATH: packages/neuros-research/src
+        run: |
+          python -m pytest -q \
+            packages/neuros-research/tests/test_nim_observed.py \
+            packages/neuros-research/tests/test_swarm_live_eval.py \
+            packages/neuros-research/tests/test_nim_swarm.py \
+            packages/neuros-research/tests/test_swarm_benchmark.py
+
+      - name: Audit model-facing answer-key isolation
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          paths = [
+              Path("packages/neuros-research/src/neuros/research/swarm_live_eval.py"),
+              Path("packages/neuros-research/examples/05_nim_swarm_live_eval.py"),
+          ]
+          forbidden_modules = {"neuros.research.swarm_benchmark"}
+          for path in paths:
+              source = path.read_text(encoding="utf-8")
+              if "_GROUND_TRUTH" in source:
+                  raise SystemExit(f"scorer answer key leaked into model-facing path: {path}")
+              tree = ast.parse(source)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.ImportFrom) and node.module in forbidden_modules:
+                      raise SystemExit(f"scorer module imported by model-facing path: {path}")
+          PY
+
+      - name: Exercise scorer CLI on synthetic credential-free raw evidence
+        env:
+          PYTHONPATH: packages/neuros-research/src
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from hashlib import sha256
+          from pathlib import Path
+
+          from neuros.research._canonical import canonical_sha256
+          from neuros.research.nim_observed import NimTokenUsage
+          from neuros.research.nim_provider import DOCUMENTED_NVIDIA_CHAT_MODELS
+          from neuros.research.nim_swarm import _user_prompt
+          from neuros.research.swarm import AgentReview, CouncilRun
+          from neuros.research.swarm_benchmark_cases import (
+              BENCHMARK_CORPUS_SHA256,
+              build_benchmark_task,
+          )
+          from neuros.research.swarm_live_eval import (
+              SCHEDULE_POLICY,
+              SMOKE_CASE_IDS,
+              EvaluationCallReceipt,
+              EvaluationRunManifest,
+              build_counterbalanced_schedule,
+              build_evaluation_configurations,
+          )
+
+          repository = "sidhulyalkar/neurOS-v1"
+          revision = "4" * 64
+          endpoint = "https://integrate.api.nvidia.com/v1"
+          selected_models = (DOCUMENTED_NVIDIA_CHAT_MODELS[0],)
+          configurations = build_evaluation_configurations(selected_models)
+          probes = []
+          for index, model in enumerate(DOCUMENTED_NVIDIA_CHAT_MODELS):
+              if index == 0:
+                  probes.append({
+                      "model": model,
+                      "status": "qualified",
+                      "status_code": None,
+                      "response_sha256": "6" * 64,
+                      "error_excerpt": None,
+                  })
+              else:
+                  probes.append({
+                      "model": model,
+                      "status": "transport_error",
+                      "status_code": None,
+                      "response_sha256": None,
+                      "error_excerpt": "synthetic offline unavailable route",
+                  })
+          qualification = {
+              "schema_version": 1,
+              "endpoint": endpoint,
+              "discovery_mode": "synthetic+bounded_chat_probe",
+              "documented_candidates": list(DOCUMENTED_NVIDIA_CHAT_MODELS),
+              "catalog_models_sha256": None,
+              "catalog_error": None,
+              "probes": probes,
+              "qualified_models": list(selected_models),
+              "discovery_budget": {
+                  "timeout_seconds_per_attempt": 20.0,
+                  "max_attempts_per_route": 2,
+              },
+              "authority_boundary": "synthetic offline qualification",
+          }
+          qualification["fingerprint"] = canonical_sha256(qualification)
+          provider = qualification["fingerprint"]
+          parsed_sha = canonical_sha256({"findings": []})
+          manifests = []
+          counter = 0
+          for configuration in configurations:
+              runs = []
+              receipts = []
+              timings = []
+              for case_index, case_id in enumerate(SMOKE_CASE_IDS, start=1):
+                  task = build_benchmark_task(
+                      case_id,
+                      repository=repository,
+                      source_revision=revision,
+                  )
+                  user_prompt = _user_prompt(task)
+                  reviews = []
+                  for member in configuration.members:
+                      counter += 1
+                      request_payload = {
+                          "model": member.model,
+                          "messages": [
+                              {"role": "system", "content": member.system_prompt},
+                              {"role": "user", "content": user_prompt},
+                          ],
+                          "temperature": 0.1,
+                          "max_tokens": 1200,
+                          "stream": False,
+                          "chat_template_kwargs": {"enable_thinking": False},
+                      }
+                      combined_prompt = f"{member.system_prompt}\n\n{user_prompt}"
+                      reviews.append(
+                          AgentReview(
+                              task_sha256=task.sha256,
+                              member_id=member.member_id,
+                              role=member.role,
+                              model=member.model,
+                              prompt_sha256=member.prompt_sha256,
+                              response_sha256=parsed_sha,
+                              findings=(),
+                          )
+                      )
+                      receipts.append(
+                          EvaluationCallReceipt(
+                              case_id=case_id,
+                              task_sha256=task.sha256,
+                              member_id=member.member_id,
+                              role=member.role,
+                              model=member.model,
+                              member_prompt_sha256=member.prompt_sha256,
+                              provider_qualification_fingerprint=provider,
+                              endpoint=endpoint,
+                              outcome="success",
+                              latency_ms=counter,
+                              call_prompt_sha256=sha256(
+                                  combined_prompt.encode("utf-8")
+                              ).hexdigest(),
+                              request_sha256=canonical_sha256(request_payload),
+                              response_sha256=f"{counter + 200:064x}",
+                              parsed_response_sha256=parsed_sha,
+                              token_usage=NimTokenUsage(
+                                  prompt_tokens=10,
+                                  completion_tokens=2,
+                                  total_tokens=12,
+                                  usage_sha256=f"{counter + 300:064x}",
+                              ),
+                          )
+                      )
+                  runs.append(
+                      (case_id, CouncilRun(task_sha256=task.sha256, reviews=tuple(reviews)))
+                  )
+                  timings.append((case_id, case_index * 5))
+              manifests.append(
+                  EvaluationRunManifest(
+                      repository=repository,
+                      source_revision=revision,
+                      configuration=configuration,
+                      provider_qualification_fingerprint=provider,
+                      case_ids=SMOKE_CASE_IDS,
+                      runs=tuple(runs),
+                      receipts=tuple(receipts),
+                      case_wall_latency_ms=tuple(timings),
+                  )
+              )
+
+          schedule = build_counterbalanced_schedule(configurations, SMOKE_CASE_IDS)
+          raw = {
+              "kind": "neuros_nim_swarm_live_eval_raw_v1",
+              "repository": repository,
+              "source_revision": revision,
+              "corpus_sha256": BENCHMARK_CORPUS_SHA256,
+              "case_ids": list(SMOKE_CASE_IDS),
+              "discovery_mode": qualification["discovery_mode"],
+              "selected_models": list(selected_models),
+              "provider_qualification": qualification,
+              "schedule_policy": SCHEDULE_POLICY,
+              "execution_schedule": [
+                  {"case_id": case_id, "configuration_id": configuration_id}
+                  for case_id, configuration_id in schedule
+              ],
+              "configurations": [manifest.to_dict() for manifest in manifests],
+              "review_call_count": sum(len(manifest.receipts) for manifest in manifests),
+              "smoke_is_full_benchmark": False,
+              "smoke_is_model_performance_claim": False,
+              "live_review_output_is_scientific_authority": False,
+              "merge_authority": False,
+              "provider_execution_authority": False,
+              "scientific_promotion_authority": False,
+          }
+          raw["artifact_sha256"] = canonical_sha256(raw)
+          Path("/tmp/nim-swarm-live-eval-raw.json").write_text(
+              json.dumps(raw, sort_keys=True, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          python packages/neuros-research/examples/06_score_nim_swarm_live_eval.py \
+            --input /tmp/nim-swarm-live-eval-raw.json \
+            --output /tmp/nim-swarm-live-eval-scored.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          scored = json.loads(
+              Path("/tmp/nim-swarm-live-eval-scored.json").read_text(encoding="utf-8")
+          )
+          expected = {"single-reference-v1", "homogeneous-five-role-v1"}
+          if scored.get("kind") != "neuros_nim_swarm_live_eval_scored_v1":
+              raise SystemExit("unexpected synthetic scored artifact kind")
+          if set(scored.get("reports", {})) != expected:
+              raise SystemExit("synthetic scorer lost frozen configuration identity")
+          if len(scored.get("comparisons", [])) != 1:
+              raise SystemExit("synthetic scorer did not compare council against reference")
+          for report in scored["reports"].values():
+              telemetry = report.get("telemetry", {})
+              if telemetry.get("reviewer_attempts", 0) <= 0:
+                  raise SystemExit("synthetic scorer omitted reviewer telemetry")
+              if "case_wall_latency_ms" not in telemetry:
+                  raise SystemExit("synthetic scorer omitted end-to-end latency telemetry")
+              if telemetry.get("dollar_cost_estimated") is not False:
+                  raise SystemExit("synthetic scorer fabricated dollar cost")
+          if scored.get("benchmark_output_is_scientific_authority") is not False:
+              raise SystemExit("synthetic scored artifact claimed scientific authority")
+          PY
+
+  live-smoke:
+    name: bounded hosted smoke / 3 cases
+    if: github.event_name == 'workflow_dispatch'
+    needs: offline-contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require exact qualified main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "main"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Install and requalify locally before network
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e "packages/neuros-research[dev]"
+          python -m compileall -q packages/neuros-research/src packages/neuros-research/examples
+          python -m ruff check \
+            packages/neuros-research/src/neuros/research/nim_observed.py \
+            packages/neuros-research/src/neuros/research/swarm_live_eval.py \
+            packages/neuros-research/examples/05_nim_swarm_live_eval.py \
+            packages/neuros-research/examples/06_score_nim_swarm_live_eval.py \
+            packages/neuros-research/tests/test_nim_observed.py \
+            packages/neuros-research/tests/test_swarm_live_eval.py
+          python -m pytest -q \
+            packages/neuros-research/tests/test_nim.py \
+            packages/neuros-research/tests/test_nim_provider.py \
+            packages/neuros-research/tests/test_nim_observed.py \
+            packages/neuros-research/tests/test_swarm.py \
+            packages/neuros-research/tests/test_nim_swarm.py \
+            packages/neuros-research/tests/test_swarm_benchmark.py \
+            packages/neuros-research/tests/test_swarm_live_eval.py
+
+      - name: Run bounded hosted reviewer smoke
+        shell: bash
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.NVIDIA_NIM_API_KEY || secrets.NVAPI_KEY }}
+          NVIDIA_NIM_ENDPOINT: https://integrate.api.nvidia.com/v1
+        run: |
+          set -euo pipefail
+          if [ -z "${NVIDIA_API_KEY:-}" ]; then
+            echo "::error::Expected repository secret NVIDIA_API_KEY, NVIDIA_NIM_API_KEY, or NVAPI_KEY."
+            exit 1
+          fi
+          echo "::add-mask::${NVIDIA_API_KEY}"
+          mkdir -p artifacts/nim-swarm-live-eval
+          python packages/neuros-research/examples/05_nim_swarm_live_eval.py \
+            --source-revision "${GITHUB_SHA}" \
+            --output artifacts/nim-swarm-live-eval/raw.json
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw = Path("artifacts/nim-swarm-live-eval/raw.json").read_text(encoding="utf-8")
+          key = os.environ["NVIDIA_API_KEY"]
+          if key and key in raw:
+              raise SystemExit("credential material leaked into raw live-evaluation artifact")
+          PY
+
+      - name: Score completed reviews without provider credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          python packages/neuros-research/examples/06_score_nim_swarm_live_eval.py \
+            --input artifacts/nim-swarm-live-eval/raw.json \
+            --output artifacts/nim-swarm-live-eval/scored.json
+          sha256sum artifacts/nim-swarm-live-eval/raw.json \
+            artifacts/nim-swarm-live-eval/scored.json \
+            > artifacts/nim-swarm-live-eval/SHA256SUMS
+
+      - name: Verify bounded non-authoritative smoke evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          raw = json.loads(Path("artifacts/nim-swarm-live-eval/raw.json").read_text())
+          scored = json.loads(Path("artifacts/nim-swarm-live-eval/scored.json").read_text())
+          if raw.get("source_revision") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("raw live-evaluation source revision mismatch")
+          if scored.get("source_revision") != os.environ["GITHUB_SHA"]:
+              raise SystemExit("scored live-evaluation source revision mismatch")
+          if raw.get("case_ids") != ["case-001", "case-015", "case-029"]:
+              raise SystemExit("unexpected live smoke case slice")
+          expected_calls = sum(
+              len(manifest["configuration"]["members"]) * len(raw["case_ids"])
+              for manifest in raw["configurations"]
+          )
+          if raw.get("review_call_count") != expected_calls or expected_calls > 33:
+              raise SystemExit("live smoke exceeded its frozen reviewer-call budget")
+          if raw.get("schedule_policy") != "deterministic_rotating_configuration_order_v1":
+              raise SystemExit("live smoke did not preserve frozen scheduling policy")
+          for report in scored.get("reports", {}).values():
+              telemetry = report.get("telemetry", {})
+              if "case_wall_latency_ms" not in telemetry or "per_call_latency_ms" not in telemetry:
+                  raise SystemExit("scored smoke omitted required latency telemetry")
+          for payload in (raw, scored):
+              if payload.get("merge_authority") is not False:
+                  raise SystemExit("live smoke artifact claimed merge authority")
+              if payload.get("provider_execution_authority") is not False:
+                  raise SystemExit("live smoke artifact claimed provider execution authority")
+              if payload.get("scientific_promotion_authority") is not False:
+                  raise SystemExit("live smoke artifact claimed scientific promotion authority")
+          print(f"qualified bounded reviewer attempts: {expected_calls}")
+          PY
+
+      - name: Preserve live smoke evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nim-swarm-live-eval-${{ github.sha }}
+          path: artifacts/nim-swarm-live-eval/
+          if-no-files-found: warn
+          retention-days: 30
