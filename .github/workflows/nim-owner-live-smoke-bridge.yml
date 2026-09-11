@@ -90,6 +90,46 @@ jobs:
           fi
           echo "Authorized exact main source ${GITHUB_SHA} with promoted live-workflow blobs"
 
+      - name: Require fresh-main push qualification
+        run: |
+          set -euo pipefail
+          RUNS_JSON="${RUNNER_TEMP}/source_push_runs.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100" \
+            > "${RUNS_JSON}"
+          RUNS_JSON="${RUNS_JSON}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["RUNS_JSON"]).read_text(encoding="utf-8"))
+          runs = payload.get("workflow_runs", [])
+          if not isinstance(runs, list) or not runs:
+              raise SystemExit("No fresh-main push qualification exists for captured source SHA")
+
+          required = {
+              "NIM Owner Live-Smoke Bridge Policy",
+              "Public Trust Contracts",
+              "neurOS CI",
+          }
+          names = {str(run.get("name") or "") for run in runs}
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"Required fresh-main qualification workflows are missing: {missing}")
+
+          incomplete = []
+          for run in runs:
+              status = str(run.get("status") or "")
+              conclusion = str(run.get("conclusion") or "")
+              if status != "completed" or conclusion != "success":
+                  incomplete.append((run.get("id"), run.get("name"), status, conclusion))
+          if incomplete:
+              raise SystemExit(f"Current main push qualification incomplete or non-successful: {incomplete}")
+          print(f"Fresh-main qualification complete across {len(runs)} observed push workflows")
+          PY
+
       - name: Reject duplicate or concurrent hosted smoke
         run: |
           set -euo pipefail
