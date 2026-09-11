@@ -192,7 +192,7 @@ jobs:
           set -euo pipefail
           PAYLOAD="${RUNNER_TEMP}/dispatch.json"
           RESPONSE="${RUNNER_TEMP}/dispatch_response.json"
-          printf '%s\n' '{"ref":"main"}' > "${PAYLOAD}"
+          printf '%s\n' '{"ref":"main","return_run_details":true}' > "${PAYLOAD}"
           gh api --method POST \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
@@ -207,6 +207,10 @@ jobs:
           run_id = payload.get("workflow_run_id")
           if not isinstance(run_id, int) or run_id <= 0:
               raise SystemExit("Workflow dispatch response did not include workflow_run_id")
+          if not isinstance(payload.get("run_url"), str) or not payload["run_url"].strip():
+              raise SystemExit("Workflow dispatch response did not include run_url")
+          if not isinstance(payload.get("html_url"), str) or not payload["html_url"].strip():
+              raise SystemExit("Workflow dispatch response did not include html_url")
           print(run_id)
           PY
           )"
