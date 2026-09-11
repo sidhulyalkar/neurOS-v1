@@ -180,7 +180,18 @@ The workflow reuses the existing repository secret aliases and prefers `NVIDIA_A
 - `NVAPI_KEY`.
 
 Never place a key in source, issue text, artifacts, or chat. The key is scoped only to the hosted
-review step, artifacts are scanned for leakage, and scoring executes without the credential.
+review step and scoring executes without the credential.
+
+Raw hosted evidence is fail-closed for preservation. After `raw.json` is written, the hosted step
+searches it for the exact active credential. Only a clean artifact receives `RAW_SAFE.sha256`.
+Later evidence preservation re-verifies that seal, copies only sealed files into a separate
+`nim-swarm-live-eval-upload/` staging directory, and creates `UPLOAD_READY` there only after the
+copy succeeds. The upload action can see only that staged directory. If credential leakage is
+detected, the safety seal is never created and **no raw evidence is uploaded**, even though the
+job fails. If a later scoring or verification step fails after the raw artifact was safely sealed,
+the sealed raw evidence may still be preserved for diagnosis without exposing the provider key.
+
+A separate CI policy workflow checks these upload invariants whenever the hosted workflow changes.
 
 ## Authority boundary
 
