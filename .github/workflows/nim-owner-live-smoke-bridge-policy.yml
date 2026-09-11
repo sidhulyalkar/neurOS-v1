@@ -1,0 +1,124 @@
+name: NIM Owner Live-Smoke Bridge Policy
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nim-owner-live-smoke-bridge.yml"
+      - ".github/workflows/nim-owner-live-smoke-bridge-policy.yml"
+      - ".github/workflows/nim-swarm-live-eval.yml"
+      - ".github/workflows/nim-live-artifact-policy.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nim-owner-live-smoke-bridge.yml"
+      - ".github/workflows/nim-owner-live-smoke-bridge-policy.yml"
+      - ".github/workflows/nim-swarm-live-eval.yml"
+      - ".github/workflows/nim-live-artifact-policy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require frozen owner-only no-input dispatch authority
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          bridge_path = Path(".github/workflows/nim-owner-live-smoke-bridge.yml")
+          source = bridge_path.read_text(encoding="utf-8")
+
+          required = (
+              "issue_comment:",
+              "types: [created]",
+              "actions: write",
+              "contents: read",
+              "github.event.issue.number == 183",
+              "github.event.issue.pull_request != null",
+              "github.event.issue.state == 'closed'",
+              "github.actor == github.repository_owner",
+              "github.event.comment.user.login == github.repository_owner",
+              "github.event.comment.author_association == 'OWNER'",
+              "github.event.comment.body == '/nim-swarm-live-smoke'",
+              'CONTROL_PR: "183"',
+              'TARGET_WORKFLOW: nim-swarm-live-eval.yml',
+              'TARGET_WORKFLOW_ID: "355385233"',
+              'PROMOTED_LIVE_WORKFLOW_BLOB_SHA: "71297f625419a38a85c0157c85ad86173290c180"',
+              'PROMOTED_ARTIFACT_POLICY_BLOB_SHA: "28e61cc9e450eb99d24c2c4b6b018a98ebbeabe8"',
+              "A hosted NIM smoke is already active",
+              "A successful hosted NIM smoke already exists for this exact source SHA",
+              "printf '%s\\n' '{\"ref\":\"main\"}'",
+              '"workflow_run_id"',
+              "/cancel",
+              'observed["event"] != "workflow_dispatch"',
+              'observed["head_branch"] != "main"',
+              'observed["path"] != ".github/workflows/nim-swarm-live-eval.yml"',
+          )
+          for token in required:
+              if token not in source:
+                  raise SystemExit(f"NIM owner bridge missing frozen authority token: {token}")
+
+          forbidden = (
+              "NVIDIA_API_KEY",
+              "NVIDIA_NIM_API_KEY",
+              "NVAPI_KEY",
+              "secrets.",
+              "case-001",
+              "case-015",
+              "case-029",
+              "temperature",
+              "max_tokens",
+              "selected_models",
+              "model_seed",
+              "split_seed",
+              "subject",
+              "session",
+          )
+          for token in forbidden:
+              if token in source:
+                  raise SystemExit(f"NIM owner bridge exposes forbidden execution/scientific surface: {token}")
+
+          payloads = re.findall(r"printf '%s\\n' '([^']+)' > \"\$\{PAYLOAD\}\"", source)
+          if payloads != ['{"ref":"main"}']:
+              raise SystemExit(f"bridge dispatch payload must be exactly ref=main, observed={payloads}")
+          PY
+
+      - name: Bind bridge constants to exact checked-out workflow blobs
+        run: |
+          set -euo pipefail
+          BRIDGE=.github/workflows/nim-owner-live-smoke-bridge.yml
+          LIVE=.github/workflows/nim-swarm-live-eval.yml
+          POLICY=.github/workflows/nim-live-artifact-policy.yml
+          EXPECTED_LIVE="$(sed -n 's/^  PROMOTED_LIVE_WORKFLOW_BLOB_SHA: "\([0-9a-f]*\)"$/\1/p' "${BRIDGE}")"
+          EXPECTED_POLICY="$(sed -n 's/^  PROMOTED_ARTIFACT_POLICY_BLOB_SHA: "\([0-9a-f]*\)"$/\1/p' "${BRIDGE}")"
+          test -n "${EXPECTED_LIVE}"
+          test -n "${EXPECTED_POLICY}"
+          test "$(git hash-object "${LIVE}")" = "${EXPECTED_LIVE}"
+          test "$(git hash-object "${POLICY}")" = "${EXPECTED_POLICY}"
+
+      - name: Require target workflow to remain manual and input-free
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path(".github/workflows/nim-swarm-live-eval.yml").read_text(encoding="utf-8")
+          marker = "  workflow_dispatch:\n"
+          if source.count(marker) != 1:
+              raise SystemExit("target live workflow must expose exactly one workflow_dispatch trigger")
+          tail = source.split(marker, 1)[1]
+          trigger_block = tail.split("\npermissions:", 1)[0]
+          if "inputs:" in trigger_block:
+              raise SystemExit("owner bridge target workflow must not expose dispatch inputs")
+          if "if: github.event_name == 'workflow_dispatch'" not in source:
+              raise SystemExit("hosted live-smoke job must remain workflow_dispatch-only")
+          PY
