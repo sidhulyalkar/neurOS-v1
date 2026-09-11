@@ -5,8 +5,11 @@ on:
     paths:
       - "packages/neuros-research/src/neuros/research/swarm.py"
       - "packages/neuros-research/src/neuros/research/nim_swarm.py"
+      - "packages/neuros-research/src/neuros/research/swarm_benchmark_cases.py"
+      - "packages/neuros-research/src/neuros/research/swarm_benchmark.py"
       - "packages/neuros-research/tests/test_swarm.py"
       - "packages/neuros-research/tests/test_nim_swarm.py"
+      - "packages/neuros-research/tests/test_swarm_benchmark.py"
       - "docs/NEUROS_SCIENTIFIC_ENGINEERING_SWARM.md"
       - ".github/workflows/neuros-scientific-engineering-swarm.yml"
   push:
@@ -14,8 +17,11 @@ on:
     paths:
       - "packages/neuros-research/src/neuros/research/swarm.py"
       - "packages/neuros-research/src/neuros/research/nim_swarm.py"
+      - "packages/neuros-research/src/neuros/research/swarm_benchmark_cases.py"
+      - "packages/neuros-research/src/neuros/research/swarm_benchmark.py"
       - "packages/neuros-research/tests/test_swarm.py"
       - "packages/neuros-research/tests/test_nim_swarm.py"
+      - "packages/neuros-research/tests/test_swarm_benchmark.py"
       - "docs/NEUROS_SCIENTIFIC_ENGINEERING_SWARM.md"
       - ".github/workflows/neuros-scientific-engineering-swarm.yml"
   workflow_dispatch:
@@ -50,7 +56,9 @@ jobs:
         run: |
           python -m py_compile \
             packages/neuros-research/src/neuros/research/swarm.py \
-            packages/neuros-research/src/neuros/research/nim_swarm.py
+            packages/neuros-research/src/neuros/research/nim_swarm.py \
+            packages/neuros-research/src/neuros/research/swarm_benchmark_cases.py \
+            packages/neuros-research/src/neuros/research/swarm_benchmark.py
 
       - name: Run offline adversarial tests
         env:
@@ -58,7 +66,8 @@ jobs:
         run: |
           python -m pytest -q \
             packages/neuros-research/tests/test_swarm.py \
-            packages/neuros-research/tests/test_nim_swarm.py
+            packages/neuros-research/tests/test_nim_swarm.py \
+            packages/neuros-research/tests/test_swarm_benchmark.py
 
       - name: Audit provider-neutral core boundary
         run: |
@@ -66,23 +75,30 @@ jobs:
           import ast
           from pathlib import Path
 
-          path = Path("packages/neuros-research/src/neuros/research/swarm.py")
-          tree = ast.parse(path.read_text(encoding="utf-8"))
+          paths = [
+              Path("packages/neuros-research/src/neuros/research/swarm.py"),
+              Path("packages/neuros-research/src/neuros/research/swarm_benchmark_cases.py"),
+              Path("packages/neuros-research/src/neuros/research/swarm_benchmark.py"),
+          ]
           forbidden = {
               "requests", "httpx", "urllib", "socket", "subprocess",
               "github", "torch", "braindecode", "moabb", "kaggle",
           }
           imports = set()
-          for node in ast.walk(tree):
-              if isinstance(node, ast.Import):
-                  imports.update(alias.name.split(".")[0] for alias in node.names)
-              elif isinstance(node, ast.ImportFrom) and node.module:
-                  imports.add(node.module.split(".")[0])
+          text = ""
+          for path in paths:
+              source = path.read_text(encoding="utf-8")
+              text += "\n" + source.lower()
+              tree = ast.parse(source)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      imports.update(alias.name.split(".")[0] for alias in node.names)
+                  elif isinstance(node, ast.ImportFrom) and node.module:
+                      imports.add(node.module.split(".")[0])
           unexpected = sorted(imports & forbidden)
           if unexpected:
               raise SystemExit(f"provider-neutral core imported forbidden modules: {unexpected}")
 
-          text = path.read_text(encoding="utf-8").lower()
           for token in ("nvidia_api_key", "kaggle_key", "authorization: bearer"):
               if token in text:
                   raise SystemExit(f"credential token leaked into provider-neutral core: {token}")
