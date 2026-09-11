@@ -47,17 +47,19 @@ It requires the following critical workflows to exist:
 
 Every observed push workflow for the captured SHA must be completed with `success`. A missing critical workflow, a queued/running workflow, or any non-success conclusion rejects the command. This removes the human assumption that the owner remembered to wait for fresh-main qualification before commenting.
 
+Both the fresh-main history query and the prior hosted-smoke history query request at most 100 runs and compare GitHub's `total_count` with the returned list length. If the result is paginated or otherwise incomplete, authorization fails closed rather than deciding from a truncated run set.
+
 ## Dispatch semantics
 
-After fresh-main qualification, the bridge rejects any active hosted smoke and any already-successful hosted smoke for the same exact source SHA. It then dispatches only `.github/workflows/nim-swarm-live-eval.yml` with the exact payload:
+After fresh-main qualification, the bridge rejects any active hosted smoke and any already-successful hosted smoke for the same exact source SHA. It then dispatches only `.github/workflows/nim-swarm-live-eval.yml` with the exact fixed control-plane payload:
 
 ```json
-{"ref":"main"}
+{"ref":"main","return_run_details":true}
 ```
 
-The target workflow exposes no dispatch inputs. All case selection, model qualification, reviewer roles, request parameters, and call limits remain owned by the promoted target workflow.
+`return_run_details` is not a hosted-review input. It explicitly asks GitHub's workflow-dispatch API to return the created run ID and URLs so dispatch correlation does not depend on a changing API default. The target workflow itself exposes no dispatch inputs. All case selection, model qualification, reviewer roles, request parameters, and call limits remain owned by the promoted target workflow.
 
-After dispatch, the bridge re-reads the returned workflow run and requires:
+The dispatch response must contain a positive `workflow_run_id` plus non-empty API and HTML run URLs. The bridge then independently re-reads that run and requires:
 
 - event `workflow_dispatch`;
 - branch `main`;
@@ -69,7 +71,7 @@ A mismatch is treated as a dispatch/main race or target substitution. The bridge
 
 ## Independent policy
 
-`.github/workflows/nim-owner-live-smoke-bridge-policy.yml` statically checks the exact owner command, authorization gates, fresh-main qualification gate, no-input dispatch payload, race cancellation, absence of NVIDIA secrets/scientific controls, and the frozen target workflow identities. It also independently computes the checked-out Git blob SHA for the target live workflow and artifact-policy workflow and requires them to match the bridge constants.
+`.github/workflows/nim-owner-live-smoke-bridge-policy.yml` statically checks the exact owner command, authorization gates, fresh-main qualification gate, complete run-history checks, fixed dispatch payload, explicit run-detail receipt, race cancellation, absence of NVIDIA secrets/scientific controls, and the frozen target workflow identities. It also independently computes the checked-out Git blob SHA for the target live workflow and artifact-policy workflow and requires them to match the bridge constants.
 
 ## Interpretation boundary
 
