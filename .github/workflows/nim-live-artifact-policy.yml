@@ -1,0 +1,58 @@
+name: NIM Live Artifact Policy
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/nim-swarm-live-eval.yml"
+      - ".github/workflows/nim-live-artifact-policy.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/nim-swarm-live-eval.yml"
+      - ".github/workflows/nim-live-artifact-policy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  artifact-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require fail-closed live-evidence upload policy
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path(".github/workflows/nim-swarm-live-eval.yml")
+          source = path.read_text(encoding="utf-8")
+
+          required = (
+              "RAW_SAFE.sha256",
+              "nim-swarm-live-eval-upload/UPLOAD_READY",
+              "hashFiles('artifacts/nim-swarm-live-eval-upload/UPLOAD_READY')",
+              "path: artifacts/nim-swarm-live-eval-upload/",
+          )
+          for token in required:
+              if token not in source:
+                  raise SystemExit(f"missing fail-closed artifact policy token: {token}")
+
+          leak_scan = source.find("credential material leaked into raw live-evaluation artifact")
+          safe_seal = source.find("RAW_SAFE.sha256")
+          if leak_scan < 0 or safe_seal < 0 or safe_seal <= leak_scan:
+              raise SystemExit("raw evidence must be credential-scanned before upload safety sealing")
+
+          upload_step = source.find("- name: Preserve sealed live smoke evidence")
+          if upload_step < 0:
+              raise SystemExit("sealed evidence upload step is missing")
+          upload_tail = source[upload_step:]
+          if "path: artifacts/nim-swarm-live-eval/\n" in upload_tail:
+              raise SystemExit("raw live-evaluation working directory must never be uploaded directly")
+          if "if: always()" in upload_tail.split("uses: actions/upload-artifact", 1)[0]:
+              raise SystemExit("unsealed always() artifact upload is forbidden")
+          PY
