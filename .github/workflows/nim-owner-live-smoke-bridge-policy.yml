@@ -53,7 +53,8 @@ jobs:
               "Hosted-smoke run history is paginated or structurally incomplete",
               "A hosted NIM smoke is already active",
               "A successful hosted NIM smoke already exists for this exact source SHA",
-              "printf '%s\\n' '{\"ref\":\"main\"}'", '"workflow_run_id"', "/cancel",
+              "printf '%s\\n' '{\"ref\":\"main\",\"return_run_details\":true}'",
+              '"workflow_run_id"', '"run_url"', '"html_url"', "/cancel",
               'observed["event"] != "workflow_dispatch"', 'observed["head_branch"] != "main"',
               'observed["path"] != ".github/workflows/nim-swarm-live-eval.yml"',
           )
@@ -71,8 +72,12 @@ jobs:
                   raise SystemExit(f"NIM owner bridge exposes forbidden execution/scientific surface: {token}")
 
           payloads = re.findall(r"printf '%s\\n' '([^']+)' > \"\$\{PAYLOAD\}\"", source)
-          if payloads != ['{"ref":"main"}']:
-              raise SystemExit(f"bridge dispatch payload must be exactly ref=main, observed={payloads}")
+          expected_payload = '{"ref":"main","return_run_details":true}'
+          if payloads != [expected_payload]:
+              raise SystemExit(
+                  "bridge dispatch payload must be exactly fixed main ref plus run-detail receipt: "
+                  f"observed={payloads}"
+              )
           if source.count("total_count != len(runs)") != 2:
               raise SystemExit("both Actions history decisions must reject truncated pagination")
           PY
