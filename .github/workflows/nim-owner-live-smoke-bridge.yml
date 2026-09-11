@@ -1,0 +1,223 @@
+name: NIM owner live-smoke bridge
+
+run-name: NIM owner live-smoke bridge / ${{ github.sha }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: nim-owner-live-smoke-bridge
+  cancel-in-progress: false
+
+env:
+  CONTROL_PR: "183"
+  CONTROL_PR_MERGE_SHA: "3fb2ab351cd26ee462495afaf2baa94fb6d0c7e8"
+  TARGET_WORKFLOW: nim-swarm-live-eval.yml
+  TARGET_WORKFLOW_ID: "355385233"
+  PROMOTED_LIVE_WORKFLOW_BLOB_SHA: "71297f625419a38a85c0157c85ad86173290c180"
+  PROMOTED_ARTIFACT_POLICY_BLOB_SHA: "28e61cc9e450eb99d24c2c4b6b018a98ebbeabe8"
+
+jobs:
+  dispatch:
+    name: Authorize owner command and dispatch frozen NIM smoke
+    if: >-
+      github.event.issue.number == 183 &&
+      github.event.issue.pull_request != null &&
+      github.event.issue.state == 'closed' &&
+      github.actor == github.repository_owner &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.body == '/nim-swarm-live-smoke'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Reconfirm exact main and frozen control-plane authority
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+
+          MAIN_SHA="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/branches/main" \
+            --jq '.commit.sha')"
+          if [[ "${MAIN_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "Default branch moved before command authorization: event=${GITHUB_SHA} main=${MAIN_SHA}" >&2
+            exit 1
+          fi
+
+          PR_JSON="${RUNNER_TEMP}/control_pr.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/pulls/${CONTROL_PR}" > "${PR_JSON}"
+          PR_JSON="${PR_JSON}" CONTROL_PR_MERGE_SHA="${CONTROL_PR_MERGE_SHA}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          pr = json.loads(Path(os.environ["PR_JSON"]).read_text(encoding="utf-8"))
+          if not pr.get("merged_at"):
+              raise SystemExit("control PR is not merged")
+          if pr.get("merge_commit_sha") != os.environ["CONTROL_PR_MERGE_SHA"]:
+              raise SystemExit("control PR merge identity differs from frozen authority")
+          PY
+
+          LIVE_BLOB="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/nim-swarm-live-eval.yml?ref=${GITHUB_SHA}" \
+            --jq '.sha')"
+          POLICY_BLOB="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/nim-live-artifact-policy.yml?ref=${GITHUB_SHA}" \
+            --jq '.sha')"
+          if [[ "${LIVE_BLOB}" != "${PROMOTED_LIVE_WORKFLOW_BLOB_SHA}" ]]; then
+            echo "Live workflow differs from promoted authority: ${LIVE_BLOB}" >&2
+            exit 1
+          fi
+          if [[ "${POLICY_BLOB}" != "${PROMOTED_ARTIFACT_POLICY_BLOB_SHA}" ]]; then
+            echo "Artifact policy differs from promoted authority: ${POLICY_BLOB}" >&2
+            exit 1
+          fi
+          echo "Authorized exact main source ${GITHUB_SHA} with promoted live-workflow blobs"
+
+      - name: Reject duplicate or concurrent hosted smoke
+        run: |
+          set -euo pipefail
+          RUNS_JSON="${RUNNER_TEMP}/target_workflow_runs.json"
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/runs?branch=main&event=workflow_dispatch&per_page=100" \
+            > "${RUNS_JSON}"
+          RUNS_JSON="${RUNS_JSON}" SOURCE_SHA="${GITHUB_SHA}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["RUNS_JSON"]).read_text(encoding="utf-8"))
+          source_sha = os.environ["SOURCE_SHA"]
+          active = []
+          successful_same_sha = []
+          for run in payload.get("workflow_runs", []):
+              status = str(run.get("status") or "")
+              conclusion = str(run.get("conclusion") or "")
+              run_id = run.get("id")
+              head_sha = str(run.get("head_sha") or "")
+              if status != "completed":
+                  active.append((run_id, status, head_sha))
+              if head_sha == source_sha and conclusion == "success":
+                  successful_same_sha.append(run_id)
+
+          if active:
+              raise SystemExit(f"A hosted NIM smoke is already active: {active}")
+          if successful_same_sha:
+              raise SystemExit(
+                  "A successful hosted NIM smoke already exists for this exact source SHA: "
+                  f"{successful_same_sha}"
+              )
+          print("No active smoke and no successful same-SHA smoke found")
+          PY
+
+      - name: Dispatch frozen three-case hosted smoke
+        id: dispatch
+        run: |
+          set -euo pipefail
+          PAYLOAD="${RUNNER_TEMP}/dispatch.json"
+          RESPONSE="${RUNNER_TEMP}/dispatch_response.json"
+          printf '%s\n' '{"ref":"main"}' > "${PAYLOAD}"
+          gh api --method POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+            --input "${PAYLOAD}" > "${RESPONSE}"
+          RUN_ID="$(RESPONSE="${RESPONSE}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path(os.environ["RESPONSE"]).read_text(encoding="utf-8"))
+          run_id = payload.get("workflow_run_id")
+          if not isinstance(run_id, int) or run_id <= 0:
+              raise SystemExit("Workflow dispatch response did not include workflow_run_id")
+          print(run_id)
+          PY
+          )"
+          echo "run_id=${RUN_ID}" >> "${GITHUB_OUTPUT}"
+          echo "Dispatched workflow run ${RUN_ID}"
+
+      - name: Verify dispatched run resolved to captured main SHA
+        env:
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="${RUNNER_TEMP}/dispatched_run.json"
+          fetched=0
+          for _ in $(seq 1 10); do
+            if gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}" > "${RUN_JSON}"; then
+              fetched=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${fetched}" != "1" ]]; then
+            echo "Could not read dispatched workflow run ${RUN_ID}" >&2
+            exit 1
+          fi
+
+          if ! RUN_JSON="${RUN_JSON}" SOURCE_SHA="${GITHUB_SHA}" TARGET_WORKFLOW_ID="${TARGET_WORKFLOW_ID}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run = json.loads(Path(os.environ["RUN_JSON"]).read_text(encoding="utf-8"))
+          observed = {
+              "id": run.get("id"),
+              "event": run.get("event"),
+              "head_branch": run.get("head_branch"),
+              "head_sha": run.get("head_sha"),
+              "workflow_id": run.get("workflow_id"),
+              "path": run.get("path"),
+          }
+          if observed["event"] != "workflow_dispatch":
+              raise SystemExit(f"Unexpected dispatched event: {observed}")
+          if observed["head_branch"] != "main":
+              raise SystemExit(f"Unexpected dispatched branch: {observed}")
+          if observed["head_sha"] != os.environ["SOURCE_SHA"]:
+              raise SystemExit(f"Dispatch/main race detected: {observed}")
+          if str(observed["workflow_id"]) != os.environ["TARGET_WORKFLOW_ID"]:
+              raise SystemExit(f"Unexpected target workflow identity: {observed}")
+          if observed["path"] != ".github/workflows/nim-swarm-live-eval.yml":
+              raise SystemExit(f"Unexpected target workflow path: {observed}")
+          print(json.dumps(observed, sort_keys=True))
+          PY
+          then
+            gh api --method POST \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel" >/dev/null 2>&1 || true
+            echo "Cancelled mismatched dispatched run ${RUN_ID}" >&2
+            exit 1
+          fi
+
+          {
+            echo "### NIM hosted smoke dispatched"
+            echo ""
+            echo "- command source: merged PR #183 owner comment"
+            echo "- exact source SHA: \`${GITHUB_SHA}\`"
+            echo "- target workflow run: \`${RUN_ID}\`"
+            echo "- hosted reviewer inputs: none"
+            echo "- frozen maximum reviewer attempts: 33"
+          } >> "${GITHUB_STEP_SUMMARY}"
