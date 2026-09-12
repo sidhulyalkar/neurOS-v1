@@ -8,9 +8,11 @@ from neuros_mechint.representations import (
     CaseStatus,
     EvaluationScope,
     FitRegime,
+    MethodEvidenceSummary,
     RepresentationCaseEvidence,
     RepresentationEvidenceGrid,
 )
+from neuros_mechint.representations.contracts import FitRegime as ExecutionFitRegime
 
 
 def _case(
@@ -46,6 +48,10 @@ def _grid(cases: tuple[RepresentationCaseEvidence, ...]) -> RepresentationEviden
     )
 
 
+def test_evidence_reuses_execution_fit_regime_contract() -> None:
+    assert FitRegime is ExecutionFitRegime
+
+
 def test_grid_preserves_failures_and_metric_denominators() -> None:
     grid = _grid(
         (
@@ -75,6 +81,20 @@ def test_grid_preserves_failures_and_metric_denominators() -> None:
     assert tphate.non_ok_rate == pytest.approx(0.5)
     assert tphate.nonconverged_rate == pytest.approx(0.5)
     assert not hasattr(tphate, "failure_rate")
+
+
+def test_metric_schema_can_be_sparse_but_denominator_stays_explicit() -> None:
+    grid = _grid(
+        (
+            _case("pca", "eval-1", metrics={"a": 1.0}),
+            _case("pca", "eval-2", metrics={"b": 3.0}),
+            _case("tphate", "eval-1", metrics={}),
+            _case("tphate", "eval-2", metrics={}),
+        )
+    )
+    summary = grid.summary_for_method("pca")
+    assert summary.metric_mean == {"a": 1.0, "b": 3.0}
+    assert summary.metric_n == {"a": 1, "b": 1}
 
 
 def test_grid_requires_exact_cartesian_evidence() -> None:
@@ -182,6 +202,30 @@ def test_metadata_is_deeply_frozen_and_unordered_sets_fail_closed() -> None:
 
     with pytest.raises(TypeError, match="unordered sets"):
         _case("pca", "eval-1", metrics={}, metadata={"bad": {1, 2}})
+
+
+def test_summary_direct_construction_fails_closed() -> None:
+    kwargs = dict(
+        method_id="pca",
+        fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+        evaluation_scope=EvaluationScope.SEQUENCE_LOCAL,
+        total_cases=2,
+        ok_cases=1,
+        failed_cases=1,
+        unavailable_cases=0,
+        nonconverged_cases=0,
+        metric_mean={"m": 0.5},
+        metric_n={"m": 1},
+    )
+    summary = MethodEvidenceSummary(**kwargs)
+    assert summary.metric_mean == {"m": 0.5}
+
+    with pytest.raises(ValueError, match="sum exactly"):
+        MethodEvidenceSummary(**{**kwargs, "failed_cases": 0})
+    with pytest.raises(ValueError, match="exactly match"):
+        MethodEvidenceSummary(**{**kwargs, "metric_n": {}})
+    with pytest.raises(ValueError, match="metric_n=0"):
+        MethodEvidenceSummary(**{**kwargs, "metric_n": {"m": 0}})
 
 
 def test_contracts_are_frozen() -> None:

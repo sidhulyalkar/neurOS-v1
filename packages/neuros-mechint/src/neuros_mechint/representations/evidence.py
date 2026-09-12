@@ -14,20 +14,15 @@ from enum import Enum
 from hashlib import sha256
 import json
 from math import isfinite
+from numbers import Integral, Real
 from types import MappingProxyType
 from typing import Any
+
+from .contracts import FitRegime
 
 
 _SCHEMA_VERSION = 1
 _DIGEST_DOMAIN = b"neuros.representation-evidence-grid.v1\0"
-
-
-class FitRegime(str, Enum):
-    """What information a representation method was permitted to fit on."""
-
-    TRAIN_ONLY_INDUCTIVE = "train_only_inductive"
-    TRANSDUCTIVE_TARGET_OBSERVED = "transductive_target_observed"
-    EXTERNAL_PRETRAINED = "external_pretrained"
 
 
 class EvaluationScope(str, Enum):
@@ -53,14 +48,19 @@ def _identifier(value: Any, *, name: str) -> str:
 
 
 def _finite_metric(value: Any, *, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a finite real number")
     numeric = float(value)
     if not isfinite(numeric):
         raise ValueError(f"{name} must be a finite real number")
-    # JSON has distinct spellings for -0.0 and 0.0 even though they are the same
-    # numerical value. Canonicalize them so identity does not depend on spelling.
+    # JSON distinguishes -0.0 and 0.0 even though they are numerically equal.
     return 0.0 if numeric == 0.0 else numeric
+
+
+def _count(value: Any, *, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise TypeError(f"{name} must be an integer")
+    return int(value)
 
 
 def _freeze_json(value: Any, *, path: str) -> Any:
@@ -194,6 +194,64 @@ class MethodEvidenceSummary:
     metric_mean: Mapping[str, float | None]
     metric_n: Mapping[str, int]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "method_id", _identifier(self.method_id, name="method_id"))
+        object.__setattr__(self, "fit_regime", FitRegime(self.fit_regime))
+        object.__setattr__(self, "evaluation_scope", EvaluationScope(self.evaluation_scope))
+
+        counts = tuple(
+            _count(value, name=name)
+            for value, name in (
+                (self.total_cases, "total_cases"),
+                (self.ok_cases, "ok_cases"),
+                (self.failed_cases, "failed_cases"),
+                (self.unavailable_cases, "unavailable_cases"),
+                (self.nonconverged_cases, "nonconverged_cases"),
+            )
+        )
+        if counts[0] <= 0:
+            raise ValueError("total_cases must be positive")
+        if any(value < 0 for value in counts[1:]):
+            raise ValueError("case counts cannot be negative")
+        if sum(counts[1:]) != counts[0]:
+            raise ValueError("status counts must sum exactly to total_cases")
+
+        means: dict[str, float | None] = {}
+        if not isinstance(self.metric_mean, Mapping):
+            raise TypeError("metric_mean must be a mapping")
+        for key, value in self.metric_mean.items():
+            metric_id = _identifier(key, name="metric_id")
+            means[metric_id] = (
+                None
+                if value is None
+                else _finite_metric(value, name=f"metric mean {metric_id!r}")
+            )
+
+        denominators: dict[str, int] = {}
+        if not isinstance(self.metric_n, Mapping):
+            raise TypeError("metric_n must be a mapping")
+        for key, value in self.metric_n.items():
+            metric_id = _identifier(key, name="metric_n id")
+            numeric = _count(value, name=f"metric_n {metric_id!r}")
+            if numeric < 0 or numeric > counts[1]:
+                raise ValueError("metric_n values must be between zero and ok_cases")
+            denominators[metric_id] = numeric
+        if set(denominators) != set(means):
+            raise ValueError("metric_n keys must exactly match metric_mean keys")
+        for key, mean in means.items():
+            if denominators[key] == 0 and mean is not None:
+                raise ValueError("metrics with metric_n=0 must have mean=None")
+            if denominators[key] > 0 and mean is None:
+                raise ValueError("metrics with metric_n>0 must have a finite mean")
+
+        object.__setattr__(self, "total_cases", counts[0])
+        object.__setattr__(self, "ok_cases", counts[1])
+        object.__setattr__(self, "failed_cases", counts[2])
+        object.__setattr__(self, "unavailable_cases", counts[3])
+        object.__setattr__(self, "nonconverged_cases", counts[4])
+        object.__setattr__(self, "metric_mean", MappingProxyType(means))
+        object.__setattr__(self, "metric_n", MappingProxyType(denominators))
+
     @property
     def non_ok_rate(self) -> float:
         return (self.total_cases - self.ok_cases) / self.total_cases
@@ -321,8 +379,8 @@ class RepresentationEvidenceGrid:
             failed_cases=counts[CaseStatus.FAILED],
             unavailable_cases=counts[CaseStatus.UNAVAILABLE],
             nonconverged_cases=counts[CaseStatus.NONCONVERGED],
-            metric_mean=MappingProxyType(means),
-            metric_n=MappingProxyType(denominators),
+            metric_mean=means,
+            metric_n=denominators,
         )
 
     def summaries(self) -> tuple[MethodEvidenceSummary, ...]:
