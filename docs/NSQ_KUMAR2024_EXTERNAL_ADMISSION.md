@@ -1,8 +1,8 @@
 # NSQ Kumar2024 external systems admission
 
-Status: **score-blind admission contract. No efficacy, fleet, or ORION claim.**
+Status: **score-blind admission contract under current-main qualification. No efficacy, fleet, or ORION claim.**
 
-This layer sits after the independent verifier from PR #163. It exists so a successful real external classical-worker qualification can be accepted mechanically without a human or controller opening score-bearing worker files.
+This layer sits after the independent external qualification verifier. It exists so a successful real external classical-worker qualification can be accepted mechanically without a human or controller opening score-bearing worker files.
 
 ## Authority flow
 
@@ -104,7 +104,7 @@ Example after a real external qualification:
 python3 scripts/evidence/admit_kumar2024_external_qualification.py admit \
   /path/to/qualification \
   --transport-script scripts/evidence/run_kumar2024_external_qualification.sh \
-  --expected-transport-revision <EXACT_PR163_TRANSPORT_SHA> \
+  --expected-transport-revision <EXACT_QUALIFIED_TRANSPORT_SHA> \
   --output /new/write-once/path/external_systems_admission.json
 ```
 
@@ -117,10 +117,10 @@ python3 scripts/evidence/admit_kumar2024_external_qualification.py verify-admiss
 
 Neither command should be used to inspect the numerical contents of the worker artifact.
 
-## Acceptance boundary for issue #166
+## Acceptance boundary
 
-A future issue #166 success can be recorded from the immutable admission receipt plus the underlying independently verified sealed bundle. No human score review is required for the transport go/no-go.
+A successful real external execution can be recorded from the immutable admission receipt plus the underlying independently verified sealed bundle. No human score review is required for the transport go/no-go.
 
 A structurally admitted one-shard CSP execution proves only that the frozen worker can execute outside GitHub Actions while preserving the authority graph.
 
-It does not authorize the 1,350-shard comparison, does not create an external scientific floor, and does not permit ORION comparison.
+It does not authorize the 1,350-shard comparison, does not create an external scientific floor, does not authorize production fleet execution, and does not permit ORION comparison.
