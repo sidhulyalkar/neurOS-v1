@@ -1,6 +1,6 @@
 # NSQ Kumar2024 external execution transport
 
-Status: **draft operational transport in PR #163**. This document does not modify the frozen Kumar2024 scientific comparison authority.
+Status: **current-main external transport candidate under fresh qualification**. This document does not modify the frozen Kumar2024 scientific comparison authority.
 
 ## Purpose
 
@@ -61,21 +61,13 @@ Operational installation/log files remain outside the sealed qualification subtr
 
 ## Frozen CPU lane
 
-The original promoted v1 binds `device="cpu"`, including its historical EEGNet method specification. Therefore the classical qualification in #163 remains CPU-only even when hosted by NVIDIA infrastructure.
+The original promoted v1 binds `device="cpu"`, including its historical EEGNet method specification. Therefore this classical external qualification remains CPU-only even when hosted by NVIDIA infrastructure.
 
 A GPU host must never be used to silently reinterpret v1 as CUDA execution.
 
 ## Canonical GPU lane
 
-GPU acceleration is no longer hypothetical. PR #164 has already promoted a separately versioned Kaggle T4 systems authority at:
-
-```text
-main@07a6c5fa5f212d54aae408237f14bb56f2f6eee9
-```
-
-That exact main SHA independently passed 11/11 fresh push workflows.
-
-The #164 GPU authority freezes the T4 systems-preflight identity and deterministic CUDA policy, including:
+GPU acceleration is a separately versioned authority on current `main`. The fixed T4 systems-preflight contract is intentionally distinct from this CPU transport and freezes a deterministic CUDA policy including:
 
 - fixed T4 accelerator identity;
 - `CUBLAS_WORKSPACE_CONFIG=:4096:8`;
@@ -85,13 +77,15 @@ The #164 GPU authority freezes the T4 systems-preflight identity and determinist
 - fixed score-blind EEGNet preflight shard;
 - no global efficacy, provider-ranking, external-floor, or ORION claim.
 
-PR #163 therefore complements #164 rather than replacing it:
+Current `main` also contains the score-blind GPU fleet lease/claim/retry/settlement and independent replay contracts. Those contracts establish execution-control semantics only. Full scientific fleet execution remains separately gated.
+
+The authority lanes therefore remain intentionally separated:
 
 ```text
-#163 = provider-neutral CPU/classical transport qualification
-#164 = promoted fixed T4 GPU systems authority
-#165 = future GPU fleet lease/retry/settlement authority
-#166 = external CPU transport qualification evidence
+external CPU lane = provider-neutral classical transport qualification
+fixed T4 lane     = separately frozen GPU systems preflight
+fleet lane        = score-blind lease/claim/retry/settlement authority
+analysis lane     = separately gated complete-study interpretation
 ```
 
 ## Immediate execution paths
@@ -142,9 +136,9 @@ orion_comparison_permitted = false
 
 A structurally valid result qualifies transport only.
 
-## Fleet direction
+## Fleet status and direction
 
-Do not scale directly from the one-shard shell runner. Complete promoted execution requires a separately frozen FleetAuthority with:
+Do not scale directly from the one-shard shell runner. Current `main` already provides a separately frozen score-blind fleet control plane with:
 
 - immutable lease-only inputs;
 - atomic claim-before-invocation;
@@ -156,9 +150,16 @@ Do not scale directly from the one-shard shell runner. Complete promoted executi
 - provider/hardware/runtime receipts;
 - deterministic ledger reconstruction;
 - exactly one accepted terminal artifact per expected shard;
-- participant-level analysis only after complete assembly.
+- independent replay of the settlement graph.
 
-Issue #165 owns that GPU fleet boundary after the fixed #164 T4 systems preflight is executed and independently admitted.
+Those software contracts do not themselves authorize full fleet execution. The safe progression is:
+
+1. freshly qualify this current-main external classical transport and score-blind admission layer;
+2. execute exactly one real external classical systems shard and admit it without inspecting efficacy;
+3. execute and admit the separately frozen fixed-T4 systems preflight under its own authority;
+4. qualify a tiny multi-shard GPU transport set through the promoted score-blind fleet substrate;
+5. require explicit complete-study authority before any full preregistered fleet execution or participant-level analysis;
+6. keep ORION outside the comparison until an external scientific floor is legitimately established.
 
 ## Compute-fabric principle
 
