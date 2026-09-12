@@ -1,4 +1,4 @@
-"""Boundary-preserving neural representation comparison tools."""
+"""Boundary-preserving neural representation comparison and evidence tools."""
 
 from .autoencoder import AutoencoderRepresentation
 from .benchmark import RepresentationBenchmark
@@ -14,6 +14,13 @@ from .contracts import (
     SequenceBatch,
 )
 from .controlled import build_controlled_temporal_manifold, latent_trajectory, observations
+from .evidence import (
+    CaseStatus,
+    EvaluationScope,
+    MethodEvidenceSummary,
+    RepresentationCaseEvidence,
+    RepresentationEvidenceGrid,
+)
 from .external import PrecomputedTemporalSSLRepresentation
 from .metrics import (
     aggregate_geometry_metrics,
@@ -53,8 +60,11 @@ __all__ = [
     "UPSTREAM_REPOSITORY",
     "AutoencoderRepresentation",
     "CaseMethodEvidence",
+    "CaseStatus",
+    "EvaluationScope",
     "FitRegime",
     "LagPredictiveAutoencoderRepresentation",
+    "MethodEvidenceSummary",
     "MethodOutcome",
     "MethodStatus",
     "MethodSweepSummary",
@@ -63,8 +73,10 @@ __all__ = [
     "PrecomputedTemporalSSLRepresentation",
     "RepresentationBenchmark",
     "RepresentationBenchmarkResult",
+    "RepresentationCaseEvidence",
     "RepresentationEmbedding",
     "RepresentationError",
+    "RepresentationEvidenceGrid",
     "RepresentationMethod",
     "RepresentationSweepResult",
     "RepresentationUnavailableError",

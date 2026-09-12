@@ -8,6 +8,7 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_evidence.py"
       - "packages/neuros-mechint/examples/11_representation_benchmark.py"
       - "packages/neuros-mechint/pyproject.toml"
   push:
@@ -19,6 +20,7 @@ on:
       - "packages/neuros-mechint/src/neuros_mechint/representations/**"
       - "packages/neuros-mechint/tests/test_mechint_representations.py"
       - "packages/neuros-mechint/tests/test_mechint_representation_authority.py"
+      - "packages/neuros-mechint/tests/test_mechint_representation_evidence.py"
       - "packages/neuros-mechint/examples/11_representation_benchmark.py"
       - "packages/neuros-mechint/pyproject.toml"
   workflow_dispatch:
@@ -62,7 +64,8 @@ jobs:
           set -euo pipefail
           python -m pytest -q \
             packages/neuros-mechint/tests/test_mechint_representations.py \
-            packages/neuros-mechint/tests/test_mechint_representation_authority.py
+            packages/neuros-mechint/tests/test_mechint_representation_authority.py \
+            packages/neuros-mechint/tests/test_mechint_representation_evidence.py
       - name: Exercise controlled reference-manifold benchmark
         shell: bash
         run: |
