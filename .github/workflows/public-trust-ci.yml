@@ -62,13 +62,12 @@ jobs:
           cache: pip
       - name: Enforce immutable GitHub Actions references
         run: python scripts/check_github_action_pins.py
-      - name: Install validation dependencies
+      - name: Install supported validation workspace
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyyaml cffconvert pytest
+          python scripts/bootstrap.py --profile bci --test-tools
+          python -m pip install pyyaml cffconvert
       - name: Validate scientific claim contracts
-        env:
-          PYTHONPATH: packages/neuros/src
         run: pytest -q tests/test_scientific_claim_spec.py
       - name: Validate repository public contracts
         run: python scripts/check_public_contracts.py
