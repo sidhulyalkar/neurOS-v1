@@ -1,0 +1,27 @@
+# neurOS ownership is intentionally explicit around authority-bearing surfaces.
+# A single maintainer is not independent review; these rules make ownership visible
+# today and provide clean seams for additional scientific/runtime owners later.
+* @sidhulyalkar
+
+# Scientific evidence, study execution, and research authority
+/packages/neuros/src/neuros/evidence/ @sidhulyalkar
+/packages/neuros-research/ @sidhulyalkar
+/scripts/evidence/ @sidhulyalkar
+/requirements/nsq-kumar2024-promoted-py311.constraints.txt @sidhulyalkar
+
+# Runtime and native data plane
+/packages/neuros-core/src/neuros/runtime/ @sidhulyalkar
+/rust/neuros-runtime/ @sidhulyalkar
+/rust/neuros-runtime-py/ @sidhulyalkar
+
+# Foundation / mechanism surfaces
+/packages/neuros-foundation/src/neuros/foundation_models/ @sidhulyalkar
+/packages/neuros-mechint/ @sidhulyalkar
+
+# CI, release, and repository governance
+/.github/workflows/ @sidhulyalkar
+/.github/dependabot.yml @sidhulyalkar
+/release/ @sidhulyalkar
+/scripts/check_github_action_pins.py @sidhulyalkar
+/SECURITY.md @sidhulyalkar
+/GOVERNANCE.md @sidhulyalkar
