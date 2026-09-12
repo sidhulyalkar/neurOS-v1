@@ -1,10 +1,10 @@
 # NSQ Kumar2024 NVIDIA Brev CPU runbook
 
-Status: **operational runbook for the unpromoted external transport in PR #163**.
+Status: **operational runbook for the current-main external qualification candidate.**
 
 This runbook uses NVIDIA Brev only as a Linux/x86_64 compute transport for the already-frozen Kumar2024 v1 **classical** systems qualification. It does not change the scientific graph, does not enable CUDA for v1, and does not make numerical worker output interpretable.
 
-The canonical GPU systems authority is already separately promoted by PR #164 at `main@07a6c5fa5f212d54aae408237f14bb56f2f6eee9`. That GPU lane is intentionally distinct from this CPU transport. Issue #165 owns the later GPU fleet/settlement boundary.
+The canonical fixed-T4 GPU systems authority and the score-blind GPU fleet control plane are separate current-main lanes. This CPU runbook neither replaces them nor inherits their execution authority.
 
 ## Why CPU on NVIDIA infrastructure?
 
@@ -21,7 +21,7 @@ stoppable = true
 sort = price ascending
 ```
 
-Requiring stoppable capacity is part of cost/failure safety: the launcher must be able to halt compute after either a successful or failed write-once attempt. GPU-backed NVIDIA infrastructure is reserved for the separately promoted #164 authority and its future fleet settlement in #165.
+Requiring stoppable capacity is part of cost/failure safety: the launcher must be able to halt compute after either a successful or failed write-once attempt. GPU-backed execution belongs to the separately frozen GPU authority lanes.
 
 ## Preconditions
 
@@ -29,7 +29,7 @@ On the local control machine:
 
 1. install the NVIDIA Brev CLI;
 2. run `brev login` and confirm access with `brev list`;
-3. check out PR #163's transport branch;
+3. check out the exact current-main external qualification candidate revision to be tested;
 4. require a clean Git worktree;
 5. preserve the exact binding ZIP whose SHA-256 is:
 
@@ -125,10 +125,10 @@ Do not use this one classical qualification as permission to schedule the full s
 
 The sequence is:
 
-1. qualify the provider-neutral classical worker path under #166;
-2. independently admit its structural transport evidence;
-3. transplant/qualify FleetAuthority and trusted artifact settlement against current main;
-4. execute and admit the already-promoted #164 fixed T4 GPU systems preflight without inspecting efficacy;
-5. use #165 to freeze fleet-scale GPU lease, retry, hardware-receipt, and artifact-settlement semantics;
-6. qualify a tiny multi-shard GPU transport set;
-7. only then authorize the complete preregistered fleet and participant-level analysis.
+1. freshly qualify the current-main provider-neutral classical worker path;
+2. independently admit its structural transport evidence through the score-blind admission adapter;
+3. execute exactly one real external CPU qualification and preserve the sealed evidence;
+4. separately execute/admit the fixed-T4 GPU systems preflight under its own authority;
+5. use the current-main score-blind fleet lease/claim/retry/settlement substrate only for a tiny bounded GPU transport qualification;
+6. require a new explicit complete-study authorization before scheduling the full preregistered fleet;
+7. keep ORION outside the comparison until an external scientific floor exists.
