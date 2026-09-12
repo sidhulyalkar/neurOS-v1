@@ -54,14 +54,12 @@ def _canonical_json(value: Any) -> Any:
             raise ValueError("claim manifests cannot contain NaN or infinity")
         return 0.0 if value == 0.0 else value
     if isinstance(value, Mapping):
-        normalized: dict[str, Any] = {}
-        for key in sorted(value):
-            if not isinstance(key, str):
-                raise TypeError("claim manifest mapping keys must be strings")
-            if not key.strip():
-                raise ValueError("claim manifest mapping keys must be non-empty")
-            normalized[key] = _canonical_json(value[key])
-        return normalized
+        keys = tuple(value.keys())
+        if any(not isinstance(key, str) for key in keys):
+            raise TypeError("claim manifest mapping keys must be strings")
+        if any(not key.strip() for key in keys):
+            raise ValueError("claim manifest mapping keys must be non-empty")
+        return {key: _canonical_json(value[key]) for key in sorted(keys)}
     if isinstance(value, (list, tuple)):
         return [_canonical_json(item) for item in value]
     if isinstance(value, (set, frozenset)):
