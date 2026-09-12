@@ -94,7 +94,7 @@ jobs:
           --soak-iterations 8
       - name: Upload clean-room qualification evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: neurOS-full-package-${{ env.QUALIFICATION_SOURCE_SHA }}-${{ matrix.os }}-py${{ matrix.python }}
           path: ${{ runner.temp }}/full-package-qualification
@@ -166,7 +166,7 @@ jobs:
           python scripts/list_workspace_packages.py --json > "${RUNNER_TEMP}/workspace-packages.json"
       - name: Upload workspace build evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: neurOS-workspace-wheel-audit-${{ env.QUALIFICATION_SOURCE_SHA }}
           path: |
