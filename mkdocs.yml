@@ -83,6 +83,7 @@ nav:
       - Neural System Qualification: NEURAL_SYSTEM_QUALIFICATION_V1.md
       - NSQ Runner: NSQ_RUNNER_V1.md
       - Scientific Claims: SCIENTIFIC_CLAIMS.md
+      - Scientific Claim Horizon: SCIENTIFIC_CLAIM_HORIZON.md
       - Scientific Validation Policy: SCIENTIFIC_VALIDATION_POLICY.md
       - Release Policy: RELEASE_POLICY.md
   - Real-World Evidence:
