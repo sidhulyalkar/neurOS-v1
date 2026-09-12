@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 
+import numpy as np
 import pytest
 
 from neuros_mechint.representations import (
@@ -12,7 +13,15 @@ from neuros_mechint.representations import (
     RepresentationCaseEvidence,
     RepresentationEvidenceGrid,
 )
-from neuros_mechint.representations.contracts import FitRegime as ExecutionFitRegime
+from neuros_mechint.representations.contracts import (
+    FitRegime as ExecutionFitRegime,
+    MethodStatus,
+    RepresentationEmbedding,
+)
+from neuros_mechint.representations.sequence_authority import (
+    SequenceMethodOutcome,
+    SequenceRepresentationBenchmarkResult,
+)
 
 
 def _case(
@@ -24,6 +33,7 @@ def _case(
     error_type: str | None = None,
     error_message: str | None = None,
     metadata: dict[str, object] | None = None,
+    operational: dict[str, float] | None = None,
 ) -> RepresentationCaseEvidence:
     return RepresentationCaseEvidence(
         method_id=method,
@@ -35,6 +45,7 @@ def _case(
         error_type=error_type,
         error_message=error_message,
         metadata=metadata,
+        operational=operational,
     )
 
 
@@ -45,6 +56,52 @@ def _grid(cases: tuple[RepresentationCaseEvidence, ...]) -> RepresentationEviden
         method_ids=("pca", "tphate"),
         cases=cases,
         metadata={"study": {"phase": 1, "tags": ["geometry", "controlled"]}},
+    )
+
+
+def _sequence_result(runtime: float) -> SequenceRepresentationBenchmarkResult:
+    embedding = RepresentationEmbedding(
+        method_id="pca",
+        sequences=(np.asarray([[0.0], [0.5], [1.0]], dtype=float),),
+        sequence_ids=("eval-1",),
+        fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+    )
+    return SequenceRepresentationBenchmarkResult(
+        method_ids=("pca",),
+        train_sequence_ids=("train-1",),
+        evaluation_sequence_ids=("eval-1", "eval-2"),
+        outcomes=(
+            SequenceMethodOutcome(
+                method_id="pca",
+                sequence_id="eval-1",
+                fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+                status=MethodStatus.OK,
+                embedding=embedding,
+                metrics={"trustworthiness": 0.8},
+                metadata={
+                    "execution_scope": "native_per_sequence",
+                    "runtime_seconds": runtime,
+                    "runtime_domain": "operational",
+                },
+            ),
+            SequenceMethodOutcome(
+                method_id="pca",
+                sequence_id="eval-2",
+                fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+                status=MethodStatus.FAILED,
+                error_type="RuntimeError",
+                error_message="controlled failure",
+                metadata={
+                    "execution_scope": "native_per_sequence",
+                    "runtime_seconds": runtime + 1.0,
+                    "runtime_domain": "operational",
+                },
+            ),
+        ),
+        metadata={
+            "ranking_policy": "none",
+            "claim_scope": "representation_geometry_sequence_level",
+        },
     )
 
 
@@ -186,6 +243,44 @@ def test_identity_is_canonical_but_status_sensitive() -> None:
     assert first.evidence_sha256 != _grid(changed_cases).evidence_sha256
 
 
+def test_operational_telemetry_is_preserved_but_not_scientific_identity() -> None:
+    first = RepresentationEvidenceGrid.from_sequence_benchmark(_sequence_result(0.1))
+    second = RepresentationEvidenceGrid.from_sequence_benchmark(_sequence_result(9.9))
+
+    assert first.evidence_sha256 == second.evidence_sha256
+    assert first.cases[0].operational["runtime_seconds"] == pytest.approx(0.1)
+    assert second.cases[0].operational["runtime_seconds"] == pytest.approx(9.9)
+    assert "operational" not in first.cases[0].to_manifest()
+    assert first.to_record()["cases"][0]["operational"] == {"runtime_seconds": 0.1}
+
+
+def test_sequence_adapter_preserves_status_scope_and_fails_on_unknown_metadata() -> None:
+    grid = RepresentationEvidenceGrid.from_sequence_benchmark(_sequence_result(0.1))
+    assert [case.status for case in grid.cases] == [CaseStatus.OK, CaseStatus.FAILED]
+    assert {case.evaluation_scope for case in grid.cases} == {EvaluationScope.SEQUENCE_LOCAL}
+    assert grid.summary_for_method("pca").failed_rate == pytest.approx(0.5)
+
+    result = _sequence_result(0.1)
+    bad = SequenceMethodOutcome(
+        method_id="pca",
+        sequence_id="eval-2",
+        fit_regime=FitRegime.TRAIN_ONLY_INDUCTIVE,
+        status=MethodStatus.FAILED,
+        error_type="RuntimeError",
+        error_message="controlled failure",
+        metadata={"execution_scope": "native_per_sequence", "mystery": 1},
+    )
+    mutated = SequenceRepresentationBenchmarkResult(
+        method_ids=result.method_ids,
+        train_sequence_ids=result.train_sequence_ids,
+        evaluation_sequence_ids=result.evaluation_sequence_ids,
+        outcomes=(result.outcomes[0], bad),
+        metadata=result.metadata,
+    )
+    with pytest.raises(ValueError, match="unclassified"):
+        RepresentationEvidenceGrid.from_sequence_benchmark(mutated)
+
+
 def test_metadata_is_deeply_frozen_and_unordered_sets_fail_closed() -> None:
     evidence = _case(
         "pca",
@@ -234,10 +329,12 @@ def test_contracts_are_frozen() -> None:
         evidence.status = CaseStatus.FAILED  # type: ignore[misc]
 
 
-def test_metric_values_fail_closed_on_non_finite_and_boolean_values() -> None:
+def test_metric_values_fail_closed_on_non_finite_boolean_and_negative_telemetry() -> None:
     with pytest.raises(TypeError, match="finite real"):
         _case("pca", "eval-1", metrics={"m": True})
     with pytest.raises(ValueError, match="finite real"):
         _case("pca", "eval-1", metrics={"m": float("nan")})
     with pytest.raises(ValueError, match="finite real"):
         _case("pca", "eval-1", metrics={"m": float("inf")})
+    with pytest.raises(ValueError, match="nonnegative"):
+        _case("pca", "eval-1", metrics={}, operational={"runtime_seconds": -1.0})

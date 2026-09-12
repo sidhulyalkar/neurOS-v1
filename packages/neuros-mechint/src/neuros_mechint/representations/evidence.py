@@ -3,7 +3,8 @@
 This module deliberately does not execute representation methods. It records the
 scientific evidence emitted by an already-declared benchmark or study while
 preserving missingness, non-convergence, evaluation scope, fit regime, and the
-per-metric denominator used by derived summaries.
+per-metric denominator used by derived summaries. Operational telemetry is kept
+available for diagnostics but excluded from scientific evidence identity.
 """
 
 from __future__ import annotations
@@ -53,8 +54,14 @@ def _finite_metric(value: Any, *, name: str) -> float:
     numeric = float(value)
     if not isfinite(numeric):
         raise ValueError(f"{name} must be a finite real number")
-    # JSON distinguishes -0.0 and 0.0 even though they are numerically equal.
     return 0.0 if numeric == 0.0 else numeric
+
+
+def _finite_nonnegative(value: Any, *, name: str) -> float:
+    numeric = _finite_metric(value, name=name)
+    if numeric < 0:
+        raise ValueError(f"{name} must be nonnegative")
+    return numeric
 
 
 def _count(value: Any, *, name: str) -> int:
@@ -64,7 +71,7 @@ def _count(value: Any, *, name: str) -> int:
 
 
 def _freeze_json(value: Any, *, path: str) -> Any:
-    """Deep-freeze the portable JSON subset used by evidence metadata."""
+    """Deep-freeze the portable JSON subset used by scientific metadata."""
 
     if value is None or isinstance(value, (str, bool, int)):
         return value
@@ -99,6 +106,23 @@ def _freeze_metadata(metadata: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return frozen
 
 
+def _freeze_operational(
+    operational: Mapping[str, Real] | None,
+) -> Mapping[str, float]:
+    if operational is None:
+        return MappingProxyType({})
+    if not isinstance(operational, Mapping):
+        raise TypeError("operational must be a mapping")
+    frozen: dict[str, float] = {}
+    for key, value in operational.items():
+        metric_id = _identifier(key, name="operational metric id")
+        frozen[metric_id] = _finite_nonnegative(
+            value,
+            name=f"operational metric {metric_id!r}",
+        )
+    return MappingProxyType(frozen)
+
+
 def _portable(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {key: _portable(value[key]) for key in sorted(value)}
@@ -119,7 +143,7 @@ def _canonical_json(value: Mapping[str, Any]) -> bytes:
 
 @dataclass(frozen=True, slots=True)
 class RepresentationCaseEvidence:
-    """Evidence for one method on one preserved evaluation sequence."""
+    """Scientific evidence plus non-authoritative telemetry for one case."""
 
     method_id: str
     sequence_id: str
@@ -130,6 +154,7 @@ class RepresentationCaseEvidence:
     error_type: str | None = None
     error_message: str | None = None
     metadata: Mapping[str, Any] | None = None
+    operational: Mapping[str, Real] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "method_id", _identifier(self.method_id, name="method_id"))
@@ -164,8 +189,11 @@ class RepresentationCaseEvidence:
 
         object.__setattr__(self, "metrics", MappingProxyType(metric_values))
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
+        object.__setattr__(self, "operational", _freeze_operational(self.operational))
 
     def to_manifest(self) -> dict[str, Any]:
+        """Return the scientific identity payload, excluding operational telemetry."""
+
         return {
             "method_id": self.method_id,
             "sequence_id": self.sequence_id,
@@ -177,6 +205,11 @@ class RepresentationCaseEvidence:
             "error_message": self.error_message,
             "metadata": _portable(self.metadata),
         }
+
+    def to_record(self) -> dict[str, Any]:
+        """Return the portable full record used for diagnostics and storage."""
+
+        return {**self.to_manifest(), "operational": _portable(self.operational)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +304,7 @@ class MethodEvidenceSummary:
 
 @dataclass(frozen=True, slots=True)
 class RepresentationEvidenceGrid:
-    """Exact Cartesian method × evaluation-sequence evidence authority."""
+    """Exact Cartesian method × evaluation-sequence scientific evidence authority."""
 
     train_sequence_ids: tuple[str, ...]
     evaluation_sequence_ids: tuple[str, ...]
@@ -339,6 +372,84 @@ class RepresentationEvidenceGrid:
         object.__setattr__(self, "cases", cases)
         object.__setattr__(self, "metadata", _freeze_metadata(self.metadata))
 
+    @classmethod
+    def from_sequence_benchmark(cls, result: Any) -> RepresentationEvidenceGrid:
+        """Adapt the existing sequence benchmark without reinterpreting its status.
+
+        Runtime measurements and other operational fields are kept out of the
+        scientific digest. Unknown outcome metadata fails closed so a future
+        producer cannot silently smuggle ambiguous fields into or out of identity.
+        """
+
+        from .contracts import MethodStatus
+        from .sequence_authority import SequenceRepresentationBenchmarkResult
+
+        if not isinstance(result, SequenceRepresentationBenchmarkResult):
+            raise TypeError("result must be a SequenceRepresentationBenchmarkResult")
+
+        status_map = {
+            MethodStatus.OK: CaseStatus.OK,
+            MethodStatus.FAILED: CaseStatus.FAILED,
+            MethodStatus.UNAVAILABLE: CaseStatus.UNAVAILABLE,
+        }
+        scope_map = {
+            "native_per_sequence": EvaluationScope.SEQUENCE_LOCAL,
+            "shared_method_batch": EvaluationScope.BATCH_TRANSFORM,
+        }
+        cases: list[RepresentationCaseEvidence] = []
+        for outcome in result.outcomes:
+            metadata = dict(outcome.metadata)
+            scope_tag = metadata.pop("execution_scope", None)
+            if scope_tag not in scope_map:
+                raise ValueError(
+                    f"unrecognized execution_scope for {outcome.method_id!r}: {scope_tag!r}"
+                )
+
+            runtime_domain = metadata.pop("runtime_domain", None)
+            if runtime_domain not in (None, "operational"):
+                raise ValueError(f"unrecognized runtime_domain: {runtime_domain!r}")
+            runtime_attribution = metadata.pop("runtime_attribution", None)
+            if runtime_attribution not in (None, "shared_not_sequence_additive"):
+                raise ValueError(
+                    f"unrecognized runtime_attribution: {runtime_attribution!r}"
+                )
+
+            operational: dict[str, float] = {}
+            for key in ("runtime_seconds", "shared_batch_runtime_seconds"):
+                if key in metadata:
+                    operational[key] = _finite_nonnegative(metadata.pop(key), name=key)
+            if metadata:
+                raise ValueError(
+                    "unclassified sequence outcome metadata cannot be adapted safely: "
+                    f"{sorted(metadata)!r}"
+                )
+
+            case_status = status_map[outcome.status]
+            cases.append(
+                RepresentationCaseEvidence(
+                    method_id=outcome.method_id,
+                    sequence_id=outcome.sequence_id,
+                    fit_regime=outcome.fit_regime,
+                    evaluation_scope=scope_map[scope_tag],
+                    status=case_status,
+                    metrics=dict(outcome.metrics) if case_status is CaseStatus.OK else None,
+                    error_type=outcome.error_type,
+                    error_message=outcome.error_message,
+                    operational=operational,
+                )
+            )
+
+        return cls(
+            train_sequence_ids=result.train_sequence_ids,
+            evaluation_sequence_ids=result.evaluation_sequence_ids,
+            method_ids=result.method_ids,
+            cases=tuple(cases),
+            metadata={
+                "source_contract": "SequenceRepresentationBenchmarkResult",
+                "source_metadata": dict(result.metadata),
+            },
+        )
+
     def cases_for_method(self, method_id: str) -> tuple[RepresentationCaseEvidence, ...]:
         method_id = _identifier(method_id, name="method_id")
         if method_id not in self.method_ids:
@@ -397,6 +508,17 @@ class RepresentationEvidenceGrid:
                 for case in sorted(self.cases, key=lambda item: (item.method_id, item.sequence_id))
             ],
             "metadata": _portable(self.metadata),
+        }
+
+    def to_record(self) -> dict[str, Any]:
+        """Return the full portable grid including non-authoritative telemetry."""
+
+        return {
+            **self.to_manifest(),
+            "cases": [
+                case.to_record()
+                for case in sorted(self.cases, key=lambda item: (item.method_id, item.sequence_id))
+            ],
         }
 
     @property
