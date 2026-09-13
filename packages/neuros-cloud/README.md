@@ -24,6 +24,8 @@ To request encrypted local storage, install the `security` extra and set `NEUROS
 
 Encryption requests fail closed when the key is malformed or the cryptography backend is unavailable. neurOS does not provide a custom-cipher fallback.
 
+Database backup is intentionally **not** shoehorned into the record-oriented Fernet format. When encryption is requested, `LocalStorage.upload_database()` refuses the backup rather than copying the SQLite database into the storage directory as plaintext. The source database configured through `NEUROS_DB_PATH` remains outside this local-storage encryption mechanism and requires its own filesystem, volume, or provider encryption policy.
+
 This local-file feature is not a general secrets-management system. Key distribution, rotation, host compromise, filesystem permissions, backups, provider-side encryption, and regulatory controls remain deployment responsibilities.
 
 ## Architectural role

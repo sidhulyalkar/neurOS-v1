@@ -83,7 +83,9 @@ def test_switching_to_encrypted_mode_removes_existing_plaintext(
     assert not (run_dir / "stream.b64").exists()
 
 
-def test_invalid_encryption_key_fails_before_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_encryption_key_fails_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("NEUROS_ENCRYPTION_KEY", "not-a-fernet-key")
     storage = LocalStorage(tmp_path)
     with pytest.raises(ValueError, match="Fernet key"):
@@ -100,3 +102,20 @@ def test_database_backup_fails_loudly_and_copies_valid_files(tmp_path: Path) -> 
     source.write_bytes(b"sqlite-test")
     storage.upload_database(source)
     assert (tmp_path / "runs" / "source.sqlite").read_bytes() == b"sqlite-test"
+
+
+def test_encrypted_mode_refuses_plaintext_database_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fernet_module = pytest.importorskip("cryptography.fernet")
+    monkeypatch.setenv(
+        "NEUROS_ENCRYPTION_KEY", fernet_module.Fernet.generate_key().decode("ascii")
+    )
+    storage = LocalStorage(tmp_path / "runs")
+    source = tmp_path / "source.sqlite"
+    source.write_bytes(b"sqlite-test")
+
+    with pytest.raises(RuntimeError, match="does not support database backup"):
+        storage.upload_database(source)
+
+    assert not (tmp_path / "runs" / "source.sqlite").exists()
