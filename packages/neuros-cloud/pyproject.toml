@@ -28,7 +28,7 @@ aws = ["boto3>=1.26.0", "sagemaker>=2.200.0"]
 export = ["webdataset>=0.2.48", "ome-zarr>=0.8.1", "pyarrow>=15.0.0"]
 monitoring = ["prometheus-client>=0.17.1", "mlflow>=2.11.1", "wandb>=0.16.0"]
 security = ["cryptography>=42.0.0"]
-test = ["pytest>=7.4"]
+test = ["pytest>=7.4", "pytest-asyncio>=0.21"]
 all = [
     "confluent-kafka>=2.1.1",
     "pyzmq>=25.0.2",
