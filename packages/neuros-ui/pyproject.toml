@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "neuros-ui"
 version = "2.0.0"
-description = "Dashboard, API, and visualization surfaces for neurOS"
+description = "Experimental dashboard, API, and visualization integrations for neurOS"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "neurOS Development Team"}]
 keywords = ["neuroscience", "dashboard", "visualization", "api", "streamlit"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
