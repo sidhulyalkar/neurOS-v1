@@ -55,7 +55,9 @@ def _encryption_key() -> bytes | None:
     except Exception as exc:
         raise ValueError("NEUROS_ENCRYPTION_KEY must be a valid Fernet key") from exc
     if len(decoded) != 32:
-        raise ValueError("NEUROS_ENCRYPTION_KEY must decode to exactly 32 bytes")
+        raise ValueError(
+            "NEUROS_ENCRYPTION_KEY must be a Fernet key decoding to exactly 32 bytes"
+        )
     return key
 
 
