@@ -6,11 +6,15 @@ on:
       - "packages/orion/src/orion/scientific_authority.py"
       - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
+      - "packages/neuros/src/neuros/evidence/orion_bridge.py"
+      - "packages/neuros/src/neuros/evidence/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "tests/test_orion_scientific_result_integrity.py"
       - "tests/test_orion_scientific_observation_integrity.py"
       - "tests/test_orion_scientific_lineage_integrity.py"
       - "tests/test_orion_scientific_longitudinal_integrity.py"
+      - "tests/test_orion_claim_bridge.py"
+      - "tests/test_orion_claim_bridge_import_boundary.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -20,11 +24,15 @@ on:
       - "packages/orion/src/orion/scientific_authority.py"
       - "packages/orion/src/orion/scientific/**"
       - "packages/orion/src/orion/__init__.py"
+      - "packages/neuros/src/neuros/evidence/orion_bridge.py"
+      - "packages/neuros/src/neuros/evidence/__init__.py"
       - "tests/test_orion_scientific_authority.py"
       - "tests/test_orion_scientific_result_integrity.py"
       - "tests/test_orion_scientific_observation_integrity.py"
       - "tests/test_orion_scientific_lineage_integrity.py"
       - "tests/test_orion_scientific_longitudinal_integrity.py"
+      - "tests/test_orion_claim_bridge.py"
+      - "tests/test_orion_claim_bridge_import_boundary.py"
       - "examples/orion/scientific_authority_v2.py"
       - "docs/SCIENTIFIC_AUTHORITY_V2.md"
       - ".github/workflows/orion-scientific-authority-ci.yml"
@@ -50,11 +58,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install dependency-light ORION profile
+      - name: Install dependency-light ORION + public claim bridge profile
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e packages/neuros-core
           python -m pip install -e "packages/orion[test]"
+          # The bridge only needs the SDK's dependency-light evidence package.
+          # Full SDK dependency consistency is independently owned by packaging CI.
+          python -m pip install -e packages/neuros --no-deps
       - name: Exercise Scientific Authority v2 contracts
         run: |
           pytest -q \
@@ -64,7 +75,9 @@ jobs:
             tests/test_orion_scientific_lineage_integrity.py \
             tests/test_orion_scientific_longitudinal_integrity.py \
             tests/test_orion_adaptation_integrity.py \
-            tests/test_orion_assessment.py
+            tests/test_orion_assessment.py \
+            tests/test_orion_claim_bridge.py \
+            tests/test_orion_claim_bridge_import_boundary.py
       - name: Prove deterministic machine-readable report
         run: |
           python examples/orion/scientific_authority_v2.py > "${RUNNER_TEMP}/authority-first.json"
@@ -89,9 +102,10 @@ jobs:
           assert report["target_observation_budgets"]["zero-target-observation"]["unlabeled_examples"] == 0
           assert report["target_observation_budgets"]["zero-target-observation"]["unlabeled_seconds"] in (0, 0.0, None)
           PY
-      - name: Compile scientific authority surface
+      - name: Compile scientific authority and bridge surfaces
         run: |
           python -m compileall -q \
             packages/orion/src/orion/scientific \
             packages/orion/src/orion/scientific_authority.py \
+            packages/neuros/src/neuros/evidence \
             examples/orion/scientific_authority_v2.py

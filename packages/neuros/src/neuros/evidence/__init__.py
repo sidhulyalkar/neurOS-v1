@@ -17,12 +17,15 @@ from .claims import (
     ScientificClaimBundle,
     ScientificClaimSpec,
 )
+from .orion_bridge import OrionClaimBindingReceipt, bind_orion_study_claim
 
 __all__ = [
     "ClaimEvidenceRef",
     "EvidenceRelation",
     "EvidenceRequirement",
     "EvidenceTier",
+    "OrionClaimBindingReceipt",
     "ScientificClaimBundle",
     "ScientificClaimSpec",
+    "bind_orion_study_claim",
 ]
