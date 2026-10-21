@@ -58,6 +58,8 @@ class ExternalDecoder:
         """Hash fitted arrays explicitly instead of serializing with pickle."""
 
         classifier = self.model[-1]
+        if not hasattr(classifier, "coef_"):
+            raise RuntimeError("learned_state() requires fit() to complete")
         digest = hashlib.sha256()
         for name, raw in (
             ("scaler_mean", self.model[0].mean_),

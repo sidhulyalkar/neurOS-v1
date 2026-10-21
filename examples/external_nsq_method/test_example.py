@@ -1,7 +1,25 @@
 from __future__ import annotations
 
-from .demo import run_demo
+import pytest
+
+from .demo import run_demo, synthetic_data
 from .method import ExternalFactory
+
+
+def test_learned_state_is_deterministic() -> None:
+    data = synthetic_data()
+    first = ExternalFactory().create()
+    second = ExternalFactory().create()
+
+    first.fit(data.X, data.y)
+    second.fit(data.X, data.y)
+
+    assert first.learned_state().state_sha256 == second.learned_state().state_sha256
+
+
+def test_learned_state_requires_fitted_estimator() -> None:
+    with pytest.raises(RuntimeError, match="requires fit"):
+        ExternalFactory().create().learned_state()
 
 
 def test_example_runs_through_public_nsq_import_surface() -> None:

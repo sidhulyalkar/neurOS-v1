@@ -46,3 +46,7 @@ neurOS owns:
 The factory returns a fresh estimator for every qualification budget. The
 content-addressable learned state is an explicit SHA-256 over the fitted
 scikit-learn arrays and class labels; no pickle serialization is used.
+
+The method specification records the installed scikit-learn version. This is
+intentional provenance: changing that dependency changes the method-spec SHA,
+even when the source code and estimator settings are unchanged.
