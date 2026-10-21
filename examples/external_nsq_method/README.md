@@ -16,16 +16,42 @@ biological meaning, competitiveness, or the frozen Kumar2024 comparison.
 ## Run it
 
 From the repository root, after installing the repository's research/test
-dependencies:
+dependencies (including `scikit-learn`):
 
 ```bash
 python -m examples.external_nsq_method.demo
 pytest -q examples/external_nsq_method/test_example.py
 ```
 
-To use this as a starting point in another repository, copy `method.py` and
-`demo.py`, keep the public `neuros.foundation_models` imports, and replace
+The example tests are intentionally **not** part of the default `pytest.ini`
+discovery (`testpaths = tests`), so the optional scikit-learn dependency never
+affects unrelated suites. Run them explicitly with the command above.
+
+## Use it from another repository
+
+`demo.py` imports `method.py` relatively when run as a package and falls back
+to a plain sibling import when copied elsewhere:
+
+```bash
+mkdir my-nsq-method && cd my-nsq-method
+cp <neurOS>/examples/external_nsq_method/method.py .
+cp <neurOS>/examples/external_nsq_method/demo.py .
+pip install <neurOS> scikit-learn
+python demo.py
+```
+
+Keep the public `neuros.foundation_models` imports and replace
 `ExternalDecoder` with your own estimator implementation.
+
+## Provenance note: placeholder hashes
+
+The dataset lineage, preprocessing-authority, and calibration-authority
+hashes in `demo.py` are **placeholders**: SHA-256 digests of fixed label
+strings (e.g. `"synthetic-external-nsq-method-v1:dataset-lineage"`). They
+exist only so the referee's identity checks can run on the synthetic fixture.
+They are **not** verified dataset or preprocessing hashes and attest to no
+real data. A real qualification must supply lineage hashes computed from the
+actual source data and preprocessing authorities.
 
 ## Contract boundary
 
