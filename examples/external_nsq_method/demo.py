@@ -21,9 +21,9 @@ from neuros.foundation_models.qualification_runner import (
 )
 from neuros.foundation_models.real_world import GroupedEvaluationData
 
-try:  # Running inside the neurOS repo: python -m examples.external_nsq_method.demo
+if __package__:  # Inside the neurOS repo: python -m examples.external_nsq_method.demo
     from .method import ExternalFactory
-except ImportError:  # Standalone copy: python demo.py (method.py next to it)
+else:  # Standalone copy: python demo.py (method.py next to it)
     from method import ExternalFactory  # type: ignore[no-redef]
 
 

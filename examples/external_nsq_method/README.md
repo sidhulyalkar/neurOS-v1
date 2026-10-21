@@ -29,14 +29,28 @@ affects unrelated suites. Run them explicitly with the command above.
 
 ## Use it from another repository
 
-`demo.py` imports `method.py` relatively when run as a package and falls back
-to a plain sibling import when copied elsewhere:
+`demo.py` uses a relative import when run as part of the `examples` package
+(`__package__` is set) and a plain sibling import when run as a script.
+
+First install neurOS following the repository's
+[installation instructions](../../README.md#get-useful-evidence-in-minutes)
+(until public packages are published, this means installing from a clone):
 
 ```bash
-mkdir my-nsq-method && cd my-nsq-method
-cp <neurOS>/examples/external_nsq_method/method.py .
-cp <neurOS>/examples/external_nsq_method/demo.py .
-pip install <neurOS> scikit-learn
+git clone https://github.com/sidhulyalkar/neurOS-v1.git
+cd neurOS-v1
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python scripts/bootstrap.py --profile bci --test-tools
+pip install scikit-learn
+```
+
+Then, with that environment active, copy the two files into your own project:
+
+```bash
+mkdir ../my-nsq-method && cd ../my-nsq-method
+cp ../neurOS-v1/examples/external_nsq_method/method.py .
+cp ../neurOS-v1/examples/external_nsq_method/demo.py .
 python demo.py
 ```
 
