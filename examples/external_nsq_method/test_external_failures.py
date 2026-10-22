@@ -135,9 +135,58 @@ def test_faulty_decoder_rows_are_failure_preserving(
         assert row.fit_indices_sha256 == ref.fit_indices_sha256
         assert row.run_contract_sha256 == ref.run_contract_sha256
     if decoder_cls is FitExplodesDecoder:
-        assert all(r.external_learned_state_sha256 is None for r in result.rows)
+        # fit() failed: no learned state may be produced or recorded.
+        for row in result.rows:
+            assert row.external_learned_state_sha256 is None
+            assert row.qualification_model_state_sha256 is None
+            assert row.qualification_model_state is None
+            assert row.external_state_identity_kind is None
+            assert row.learned_state_addressable is False
+            assert row.fit_s is None
+    elif decoder_cls in (NaNProbaDecoder, WrongShapeProbaDecoder):
+        # predict_proba() failed after a valid fit: the fitted sklearn state
+        # SHA must be preserved and equal to the valid run's.
+        for row, ref in zip(result.rows, baseline.rows):
+            assert row.external_learned_state_sha256 is not None
+            assert row.external_learned_state_sha256 == ref.external_learned_state_sha256
+            assert row.qualification_model_state_sha256 == ref.qualification_model_state_sha256
     np.testing.assert_array_equal(data.X, X0)
     np.testing.assert_array_equal(np.asarray(data.y), y0)
+
+
+STABLE_ROW_FIELDS = (
+    "status",
+    "calibration_per_class",
+    "method_spec_sha256",
+    "protocol_sha256",
+    "case_authority_sha256",
+    "run_contract_sha256",
+    "execution_context_sha256",
+    "source_train_indices_sha256",
+    "labeled_target_indices_sha256",
+    "fit_indices_sha256",
+    "evaluation_indices_sha256",
+    "external_learned_state_sha256",
+    "qualification_model_state_sha256",
+    "score",
+)
+
+
+def test_stable_identities_match_across_two_valid_runs():
+    _, _, protocol_a, first = _run(FaultyFactory())
+    _, _, protocol_b, second = _run(FaultyFactory())
+
+    assert protocol_a.sha256 == protocol_b.sha256
+    assert first.method_spec_sha256 == second.method_spec_sha256
+    assert first.case_authority_sha256 == second.case_authority_sha256
+    assert first.execution_context_sha256 == second.execution_context_sha256
+    assert len(first.rows) == len(second.rows)
+    for a, b in zip(first.rows, second.rows):
+        da, db = a.to_dict(), b.to_dict()
+        for name in STABLE_ROW_FIELDS:
+            assert da[name] == db[name], name
+    # Deliberately NOT asserted: fit_s / inference_s, per-row result_sha256 and
+    # case-level result.sha256 hash measured durations and are expected to vary.
 
 
 def test_lineage_mismatch_aborts_before_decoder_creation():
