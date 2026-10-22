@@ -15,6 +15,12 @@ pytest -q
 
 The generated project is a normal Python project containing an sklearn decoder, an explicit method factory, deterministic fitted-state hashing, and a synthetic longitudinal NSQ case. The demo goes through the **production NSQ referee**, not a toy parallel implementation.
 
+For a checked-in, non-promoted example that can be copied into an external
+repository, see [`examples/external_nsq_method/`](../../examples/external_nsq_method/).
+It uses the same public imports and deliberately boring
+`StandardScaler -> LogisticRegression` pipeline without entering any built-in
+model registry or Kumar2024 comparison.
+
 Its synthetic scores are intentionally non-interpretable. The useful result is the contract evidence: a fresh fitted state at every authorized calibration budget, one fixed final-assessment identity, explicit probability semantics, content-addressed learned state, and a failure-preserving case result.
 
 The smallest useful mental model is:
