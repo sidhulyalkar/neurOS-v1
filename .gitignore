@@ -55,3 +55,6 @@ benchmark_outputs/
 # Local logs
 *.log
 logs/
+
+# Local clean-environment venvs (e.g. issue #197 reproduction)
+.venv-*/
