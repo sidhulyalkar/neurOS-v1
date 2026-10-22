@@ -42,6 +42,7 @@ cd neurOS-v1
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python scripts/bootstrap.py --profile bci --test-tools
+python -m pip install -e packages/neuros-foundation
 pip install scikit-learn
 ```
 
