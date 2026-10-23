@@ -68,7 +68,10 @@ class FakeLanguageModel(nn.Module):
         b, s = input_ids.shape
         logits = torch.zeros((b, s, 128), dtype=torch.float32)
         wanted = input_ids[:, 3].view(b, 1, 1).expand(b, s, 1)
-        logits.scatter_(2, wanted, 5.0 if self.competent else -5.0)
+        base = 5.0 if self.competent else -20.0
+        # Responses are intentionally sensitive to hooks (nonzero all/null span).
+        signal = hidden[:, -1:, :] / 20.0
+        logits.scatter_(2, wanted, (base + signal).expand(b, s, 1))
         return SimpleNamespace(logits=logits)
 
 
@@ -116,7 +119,7 @@ def test_fake_attention_and_mlp_hook_surfaces_are_executed():
     adapter = PyTorchAdapter(model, targets=targets)
     example = pilot.build_examples(FakeTokenizer())[0]
     score = float(adapter.forward(example.inputs).item())
-    assert score == pytest.approx(5.0)
+    assert score > 5.0
     captured = adapter.capture_outputs(example.inputs, tuple(targets))
     assert len(captured) == 12
     modified = adapter.forward_with_replacements(
@@ -193,4 +196,5 @@ def test_offline_full_pipeline_persists_negative_evidence(monkeypatch, tmp_path)
         assert artifact["study_fingerprint"] == result["results"][name]["study_fingerprint"]
         # Constant synthetic logits cannot support any real causal circuit.
         assert result["results"][name]["promotion_passed"] is False
-        assert result["results"][name]["publication_ready"] is False
+        # Publication-ready means revisions pinned, NOT a causal finding.
+        assert result["results"][name]["provenance_complete"] is True
