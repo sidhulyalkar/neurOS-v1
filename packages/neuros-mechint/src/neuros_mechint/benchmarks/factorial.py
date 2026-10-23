@@ -550,8 +550,16 @@ def outcome_from_evidence_pack(
     *,
     effect_map: Mapping[str, float] | None = None,
 ) -> FactorialCellOutcome:
-    """Convert one completed v0.6 pack into a v0.7 cell outcome."""
+    """Convert a quantitatively estimable v0.6 pack to a v0.7 cell outcome.
 
+    An all-invalid evidence pack is a valid negative *artifact*, not a
+    numerical factorial observation. Never convert null estimates to zero.
+    """
+
+    if not result.discovery_aggregate.estimable or not result.validation_aggregate.estimable:
+        raise ValueError("nonestimable evidence pack cannot form a quantitative factorial cell")
+    if result.promotion.joint_generalization_drop is None:
+        raise ValueError("nonestimable generalization contrast cannot form a factorial cell")
     return FactorialCellOutcome(
         task_metric=_validation_task_metric(result),
         candidate_size=len(result.candidate.targets),

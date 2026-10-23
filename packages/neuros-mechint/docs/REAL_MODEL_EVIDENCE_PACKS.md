@@ -96,6 +96,12 @@ A perturbation can make the faithfulness normalization scientifically meaningles
 
 Such cases remain explicit invalid records. They are not silently discarded or sign-flipped.
 
+When **every** case in one aggregate is invalid, a v2 evidence artifact
+preserves all case-level failure reasons and uses JSON `null` for undefined
+summary effects, pass rates and uncertainty intervals. The existing v1 result
+schema remains frozen for historically representable studies. No phantom
+zero-effect observation is introduced to make the artifact serializable.
+
 ## Uncertainty
 
 When one example is evaluated under several perturbation baselines, those observations are correlated.

@@ -274,32 +274,27 @@ def run_study(
                 "preregistered_protocol": True,
             },
         )
-        try:
-            result = run_adapter_evidence_pack(
-                spec=spec, adapter=adapter, metric=metric, examples=examples,
-                candidate=candidate,
-                pack_policy=EvidencePackPolicy(
-                    min_validation_examples=PER_SPLIT,
-                    bootstrap_samples=500,
-                ),
-            )
-        except ValueError as error:
-            if "no evidence cases contain a valid faithfulness normalization" not in str(error):
-                raise
-            # Current EvidenceAggregate cannot represent zero valid cases.
-            # Preserve the frozen candidate and an explicit negative status,
-            # never silently substitute zeros or claim a valid evidence pack.
-            results[candidate.name] = {
-                "status": "NONESTIMABLE",
-                "reason": str(error),
-                "artifact": None,
-                "promotion_passed": False,
-            }
-            continue
+        result = run_adapter_evidence_pack(
+            spec=spec, adapter=adapter, metric=metric, examples=examples,
+            candidate=candidate,
+            pack_policy=EvidencePackPolicy(
+                min_validation_examples=PER_SPLIT,
+                bootstrap_samples=500,
+            ),
+        )
         artifact = write_evidence_pack_artifact(
             result, output_dir / f"{candidate.name}.json"
         )
+        estimable = (
+            result.discovery_aggregate.estimable
+            and result.validation_aggregate.estimable
+            and (
+                result.magnitude_validation_aggregate is None
+                or result.magnitude_validation_aggregate.estimable
+            )
+        )
         results[candidate.name] = {
+            "status": "EVALUATED" if estimable else "NONESTIMABLE",
             "artifact": artifact.name,
             "promotion_passed": result.promotion.passed,
             "provenance_complete": result.publication_ready,
