@@ -145,12 +145,7 @@ def task_competence(
             scores[item.example_id] = score
     return {
         "scores": scores,
-        "discovery_fraction_positive": sum(
-            value > 0 for key, value in scores.items() if key.startswith("discovery-")
-        ) / PER_SPLIT,
-        "validation_fraction_positive": sum(
-            value > 0 for key, value in scores.items() if key.startswith("validation-")
-        ) / PER_SPLIT,
+        "fraction_positive": sum(value > 0 for value in scores.values()) / len(scores),
     }
 
 
@@ -194,7 +189,10 @@ def run_study(
     adapter = PyTorchAdapter(model, targets=targets)
     # This is an intentional abort on incompatible structured model surfaces.
     adapter.capture_outputs(examples[0].inputs, tuple(targets))
-    competence = task_competence(adapter, examples)
+    discovery = tuple(e for e in examples if e.split is EvidenceSplit.DISCOVERY)
+    validation = tuple(e for e in examples if e.split is EvidenceSplit.VALIDATION)
+    # Validation model outputs must not be observed before candidate freezing.
+    competence = {"discovery": task_competence(adapter, discovery)}
     dataset_inputs = [
         {"id": e.example_id, "split": e.split.value, "tokens": e.inputs.cpu().tolist()[0]}
         for e in examples
@@ -216,7 +214,7 @@ def run_study(
     (output_dir / "dataset_manifest.json").write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    if competence["discovery_fraction_positive"] < TASK_THRESHOLD:
+    if competence["discovery"]["fraction_positive"] < TASK_THRESHOLD:
         record["study_status"] = "BASELINE_NOT_QUALIFIED"
         # No circuit inference is licensed by a model that fails the discovery task.
         (output_dir / "status.json").write_text(
@@ -225,7 +223,6 @@ def run_study(
         return record
 
     metric = OutputMetric(lambda values: values.mean(), name="next_token_logit_margin")
-    discovery = tuple(e for e in examples if e.split is EvidenceSplit.DISCOVERY)
     ranking = discover_ablation_effect_candidate(
         adapter, discovery, tuple(targets), metric=metric, k=len(targets)
     )
@@ -285,10 +282,11 @@ def run_study(
             "reasons": list(result.promotion.reasons),
         }
 
+    competence["validation"] = task_competence(adapter, validation)
     record["results"] = results
     record["study_status"] = (
         "TASK_VALIDATION_FAILED"
-        if competence["validation_fraction_positive"] < TASK_THRESHOLD
+        if competence["validation"]["fraction_positive"] < TASK_THRESHOLD
         else "EVALUATED_NOT_INDEPENDENTLY_REPRODUCED"
     )
     # Passing a pack is not equivalent to a true circuit or independent replication.
