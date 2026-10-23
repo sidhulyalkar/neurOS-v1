@@ -68,6 +68,11 @@ ecosystem = [
     "nnsight>=0.7,<0.8",
     "sae-lens>=6,<7",
 ]
+real-model-pilot = [
+    "transformers>=4.45,<5",
+    "huggingface-hub>=0.25",
+    "safetensors>=0.4",
+]
 legacy = [
     "scikit-learn>=1.2.0",
     "tqdm>=4.65.0",

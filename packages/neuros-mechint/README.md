@@ -23,6 +23,19 @@ model. They are not evidence of real LLM or biological mechanisms. See
 [`docs/STRICT_EXECUTION.md`](docs/STRICT_EXECUTION.md) for execution
 integrity controls that can be opted into for low-level causal experiments.
 
+## Experimental real-checkpoint study
+
+The separate [Pythia real-model pilot](docs/PYTHIA_REAL_MODEL_PILOT.md)
+preregisters a six-layer attention/MLP intervention study on the small,
+research-licensed Pythia checkpoint. It requires an **immutable model
+revision** and writes held-out evidence artifacts, including rejected
+hypotheses. It is optional and is **not** run against downloaded weights in
+standard CI; no empirical result is claimed until executed and reproduced.
+
+```bash
+pip install -e "packages/neuros-mechint[real-model-pilot]"
+```
+
 ## The v1 evidence ladder
 
 ```text
