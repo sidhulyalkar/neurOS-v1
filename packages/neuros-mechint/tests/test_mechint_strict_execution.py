@@ -99,9 +99,11 @@ def test_strict_rejects_nonhashable_data():
 
 
 def test_strict_execution_does_not_consume_global_rng():
+    # Model construction legitimately consumes RNG; audit execution must not.
+    experiment = _experiment()
     torch.manual_seed(123)
     before = torch.random.get_rng_state().clone()
-    _experiment().run([PatchIntervention(ComponentRef("source"))])
+    experiment.run([PatchIntervention(ComponentRef("source"))])
     assert torch.equal(before, torch.random.get_rng_state())
 
 
