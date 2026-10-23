@@ -139,7 +139,11 @@ def task_competence(
     scores = {}
     with torch.no_grad():
         for item in examples:
-            score = float(adapter.forward(item.inputs).mean().item())
+            output = adapter.forward(item.inputs)
+            replay = adapter.forward(item.inputs)
+            if not torch.equal(output.detach(), replay.detach()):
+                raise ValueError("non-deterministic pretrained-model baseline")
+            score = float(output.mean().item())
             if not torch.isfinite(torch.tensor(score)):
                 raise ValueError("nonfinite pretrained-model baseline")
             scores[item.example_id] = score
@@ -173,6 +177,7 @@ def model_and_tokenizer(revision: str, device: str) -> tuple[nn.Module, Any, str
     return model, tokenizer, transformers.__version__
 
 
+@torch.no_grad()
 def run_study(
     *,
     pretrained_model: nn.Module,
@@ -184,7 +189,8 @@ def run_study(
     """Run fixed discovery and held-out tests; never assert positive findings."""
     revision = validate_revision(revision)
     output_dir.mkdir(parents=True, exist_ok=True)
-    torch.manual_seed(seed)
+    # All discovery/random-control samplers use explicit local seeds. Avoid
+    # mutating the caller's global PyTorch RNG state.
     model = NextTokenMarginModel(pretrained_model.eval()).eval()
     device = next(pretrained_model.parameters()).device
     examples_cpu = build_examples(tokenizer, seed=seed)
