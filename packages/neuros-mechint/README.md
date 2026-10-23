@@ -4,6 +4,25 @@
 
 `neuros-mechint` is the mechanistic-evidence layer of neurOS. It can operate on ordinary PyTorch modules, ORION/NeuroFM representations, and optional TransformerLens, NNsight, SAELens, or circuit-tracer surfaces while keeping causal claims narrower than the tools used to discover them.
 
+## Circuit Auditor: zero-download first experiment
+
+A reproducible toy experiment now demonstrates the complete workflow: declare a
+known causal circuit and a nuisance circuit, challenge both with held-out examples
+and same-size random controls, and export self-checking positive **and negative**
+evidence packs.
+
+```bash
+pip install -e "packages/neuros-mechint[dev]"
+python packages/neuros-mechint/examples/23_circuit_auditor_quickstart.py --out ./mechint-demo
+neuros-mechint verify-evidence-artifact ./mechint-demo/known-route.json --json
+neuros-mechint verify-evidence-artifact ./mechint-demo/nuisance-route.json --json
+```
+
+These artifacts validate scientific *software behavior* on a planted synthetic
+model. They are not evidence of real LLM or biological mechanisms. See
+[`docs/STRICT_EXECUTION.md`](docs/STRICT_EXECUTION.md) for execution
+integrity controls that can be opted into for low-level causal experiments.
+
 ## The v1 evidence ladder
 
 ```text
