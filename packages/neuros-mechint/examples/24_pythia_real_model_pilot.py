@@ -274,23 +274,37 @@ def run_study(
                 "preregistered_protocol": True,
             },
         )
-        result = run_adapter_evidence_pack(
-            spec=spec, adapter=adapter, metric=metric, examples=examples,
-            candidate=candidate,
-            pack_policy=EvidencePackPolicy(
-                min_validation_examples=PER_SPLIT,
-                bootstrap_samples=500,
-            ),
-        )
+        try:
+            result = run_adapter_evidence_pack(
+                spec=spec, adapter=adapter, metric=metric, examples=examples,
+                candidate=candidate,
+                pack_policy=EvidencePackPolicy(
+                    min_validation_examples=PER_SPLIT,
+                    bootstrap_samples=500,
+                ),
+            )
+        except ValueError as error:
+            if "no evidence cases contain a valid faithfulness normalization" not in str(error):
+                raise
+            # Current EvidenceAggregate cannot represent zero valid cases.
+            # Preserve the frozen candidate and an explicit negative status,
+            # never silently substitute zeros or claim a valid evidence pack.
+            results[candidate.name] = {
+                "status": "NONESTIMABLE",
+                "reason": str(error),
+                "artifact": None,
+                "promotion_passed": False,
+            }
+            continue
         artifact = write_evidence_pack_artifact(
             result, output_dir / f"{candidate.name}.json"
         )
         results[candidate.name] = {
             "artifact": artifact.name,
             "promotion_passed": result.promotion.passed,
-            "publication_ready": result.publication_ready,
+            "provenance_complete": result.publication_ready,
             "publication_issues": list(result.publication_issues),
-            "run_hash": result.manifest.run_hash,
+            "run_hash": result.run_hash,
             "validation_pass_rate": result.validation_aggregate.pass_rate,
             "validation_joint_median": result.validation_aggregate.median_joint_faithfulness,
             "study_fingerprint": result.study_fingerprint,
@@ -299,11 +313,12 @@ def run_study(
 
     competence["validation"] = task_competence(adapter, validation)
     record["results"] = results
-    record["study_status"] = (
-        "TASK_VALIDATION_FAILED"
-        if competence["validation"]["fraction_positive"] < TASK_THRESHOLD
-        else "EVALUATED_NOT_INDEPENDENTLY_REPRODUCED"
-    )
+    if competence["validation"]["fraction_positive"] < TASK_THRESHOLD:
+        record["study_status"] = "TASK_VALIDATION_FAILED"
+    elif all(item.get("status") == "NONESTIMABLE" for item in results.values()):
+        record["study_status"] = "NONESTIMABLE_INTERVENTIONS"
+    else:
+        record["study_status"] = "EVALUATED_NOT_INDEPENDENTLY_REPRODUCED"
     # Passing a pack is not equivalent to a true circuit or independent replication.
     (output_dir / "status.json").write_text(
         json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
