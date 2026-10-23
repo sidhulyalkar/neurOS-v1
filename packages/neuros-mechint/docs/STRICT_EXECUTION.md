@@ -30,7 +30,8 @@ print(result.manifest.scientific_fingerprint)
 - Caller PyTorch CPU/CUDA RNG state is restored on success or failure.
 - Baseline and each intervention are replayed to detect non-deterministic outputs.
 - Model state is content-hashed before and after execution; state mutation fails.
-- Input and model content hashes are mandatory and frozen before any forward pass;\n  silent input mutation is checked after the full audit.
+- Input and model content hashes are mandatory and frozen before any forward pass;
+  silent input mutation is checked after the full audit.
 - Every intervention/control must be a dataclass, and its full dataclass
   configuration plus implementation identity participates in the scientific
   fingerprint, not just its human-readable name.
