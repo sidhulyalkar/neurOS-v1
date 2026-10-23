@@ -70,7 +70,7 @@ class RandomRoute(nn.Module):
 
 
 def test_strict_rejects_nondeterministic_baseline():
-    with pytest.raises(ValueError, match="non-deterministic baseline"):
+    with pytest.raises(ValueError, match="non-deterministic .*baseline"):
         _experiment(RandomRoute().eval()).run([PatchIntervention(ComponentRef("route"))])
 
 
@@ -117,3 +117,21 @@ def test_legacy_mode_is_still_available_without_a_new_protocol():
     report = _experiment(strict=False).run([PatchIntervention(ComponentRef("source"))])
     assert report.manifest.method_version == "1"
     assert "intervention_protocol" not in report.manifest.parameters
+
+
+class MutatingInputRoute(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.route = nn.Identity()
+
+    def forward(self, x):
+        with torch.no_grad():
+            x[:, 1].add_(1)
+        return self.route(x[:, :1])
+
+
+def test_strict_rejects_silent_input_mutation():
+    with pytest.raises(ValueError, match="mutation of the input data"):
+        _experiment(MutatingInputRoute().eval()).run([
+            PatchIntervention(ComponentRef("route"))
+        ])

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass, field, is_dataclass
 import math
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
 
 import torch
@@ -88,6 +88,15 @@ class MechanisticExperiment:
             stable_hash_or_none(self.adapter.model_fingerprint_payload())
             if self.strict_execution else None
         )
+        initial_data_hash = (
+            stable_hash_or_none({
+                "clean": self.pair.clean,
+                "corrupted": self.pair.corrupted,
+                "metadata": dict(self.pair.metadata),
+            }) if self.strict_execution else None
+        )
+        if self.strict_execution and (before_state_hash is None or initial_data_hash is None):
+            raise ValueError("strict_execution requires content-hashable data and model")
 
         def _metric(output: torch.Tensor) -> float:
             score = float(self.metric(output))
@@ -100,9 +109,12 @@ class MechanisticExperiment:
         clean_metric = _metric(clean_output)
         corrupted_metric = _metric(corrupted_output)
         if self.strict_execution:
-            replay = self.adapter.forward(self.pair.corrupted)
-            if not torch.equal(corrupted_output.detach(), replay.detach()):
-                raise ValueError("strict_execution detected a non-deterministic baseline")
+            clean_replay = self.adapter.forward(self.pair.clean)
+            corrupted_replay = self.adapter.forward(self.pair.corrupted)
+            if not torch.equal(clean_output.detach(), clean_replay.detach()):
+                raise ValueError("strict_execution detected a non-deterministic clean baseline")
+            if not torch.equal(corrupted_output.detach(), corrupted_replay.detach()):
+                raise ValueError("strict_execution detected a non-deterministic corrupted baseline")
 
         required_paths = sorted(
             {item.component.path for item in [*all_interventions, *all_controls]}
@@ -153,6 +165,8 @@ class MechanisticExperiment:
                 raise ValueError("strict_execution requires content-hashable data and model")
             if before_state_hash != model_hash:
                 raise ValueError("strict_execution detected model-state mutation")
+            if initial_data_hash != dataset_hash:
+                raise ValueError("strict_execution detected mutation of the input data")
 
         parameters: dict[str, Any] = {
             "metric": self.metric.name,
