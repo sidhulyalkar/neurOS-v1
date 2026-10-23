@@ -77,7 +77,17 @@ neuros-mechint verify-evidence-artifact ./pythia-audit-E001/low-effect-decoy.jso
 
 The commands above are intended for runs that pass the discovery preflight.
 The runner has **not** been executed here with downloaded pretrained weights,
-so no results are asserted.
+so no results are asserted. A fully nonestimable intervention protocol is
+recorded as `NONESTIMABLE` in `status.json`, with no self-checking evidence
+artifact for that candidate: the existing `EvidenceAggregate` has no
+zero-valid-case representation. This case is a scientifically meaningful
+negative diagnostic, not an automatically recovered or successful analysis.
+
+In the existing evidence-pack schema, `publication_ready` means that
+reproducibility revisions are pinned. It **does not** imply that the candidate
+passed causal faithfulness, that the validation task succeeded, or that
+independent reproduction occurred. The pilot's top-level status distinguishes
+these concerns explicitly.
 
 ## Scientific limitations and closure
 
