@@ -9,11 +9,11 @@ available for diagnostics but excluded from scientific evidence identity.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from hashlib import sha256
-import json
 from math import isfinite
 from numbers import Integral, Real
 from types import MappingProxyType
