@@ -139,3 +139,10 @@ def test_incompetent_model_yields_diagnostic_and_no_promotion(tmp_path):
     assert (tmp_path / "status.json").exists()
     assert not list(tmp_path.glob("high-effect-discovery.json"))
     assert not list(tmp_path.glob("low-effect-decoy.json"))
+
+
+def test_nonfinite_intervention_metrics_are_rejected():
+    for value in (float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError, match="nonfinite"):
+            pilot.checked_margin(torch.tensor([[value]]))
+    assert pilot.checked_margin(torch.tensor([[2.0]])).item() == pytest.approx(2.0)
