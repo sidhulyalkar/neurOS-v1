@@ -7,6 +7,7 @@ from .nnsight import NNsightAdapter, NNsightTarget
 from .pytorch import ModelCall, PyTorchAdapter
 from .registry import IntegrationStatus, integration_status, integration_status_dict
 from .sae_lens import SAELensFeatureAdapter, SAEReconstructionAudit
+from .targets import ModuleOutputTarget
 from .transformer_lens import TransformerLensAdapter
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "IntegrationStatus",
     "ModelAdapter",
     "ModelCall",
+    "ModuleOutputTarget",
     "NNsightAdapter",
     "NNsightTarget",
     "NeurOSModelAdapter",
