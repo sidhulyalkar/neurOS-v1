@@ -169,3 +169,28 @@ def test_nondeterministic_pretrained_forward_fails_preflight(tmp_path):
             revision="a" * 40,
             output_dir=tmp_path,
         )
+
+
+def test_offline_full_pipeline_persists_negative_evidence(monkeypatch, tmp_path):
+    """Exercise the full evidence pack on a fake LM at a NON-scientific CI budget."""
+    from neuros_mechint.benchmarks import read_evidence_pack_artifact
+
+    monkeypatch.setattr(pilot, "PER_SPLIT", 2)
+    monkeypatch.setattr(pilot, "RANDOM_TRIALS", 2)
+    result = pilot.run_study(
+        pretrained_model=FakeLanguageModel(competent=True),
+        tokenizer=FakeTokenizer(),
+        revision="b" * 40,
+        output_dir=tmp_path,
+    )
+    assert result["study_status"] == "EVALUATED_NOT_INDEPENDENTLY_REPRODUCED"
+    assert list(result["results"]) == [
+        "high-effect-discovery",
+        "low-effect-decoy",
+    ]
+    for name in result["results"]:
+        artifact = read_evidence_pack_artifact(tmp_path / f"{name}.json")
+        assert artifact["study_fingerprint"] == result["results"][name]["study_fingerprint"]
+        # Constant synthetic logits cannot support any real causal circuit.
+        assert result["results"][name]["promotion_passed"] is False
+        assert result["results"][name]["publication_ready"] is False
