@@ -127,12 +127,16 @@ def test_fake_attention_and_mlp_hook_surfaces_are_executed():
 
 
 def test_incompetent_model_yields_diagnostic_and_no_promotion(tmp_path):
+    pretrained = FakeLanguageModel(competent=False)
+    torch.manual_seed(741)
+    before_rng = torch.random.get_rng_state().clone()
     result = pilot.run_study(
-        pretrained_model=FakeLanguageModel(competent=False),
+        pretrained_model=pretrained,
         tokenizer=FakeTokenizer(),
         revision="a" * 40,
         output_dir=tmp_path,
     )
+    assert torch.equal(before_rng, torch.random.get_rng_state())
     assert result["study_status"] == "BASELINE_NOT_QUALIFIED"
     assert result["task_competence"]["discovery"]["fraction_positive"] == 0.0
     assert (tmp_path / "dataset_manifest.json").exists()
@@ -146,3 +150,22 @@ def test_nonfinite_intervention_metrics_are_rejected():
         with pytest.raises(ValueError, match="nonfinite"):
             pilot.checked_margin(torch.tensor([[value]]))
     assert pilot.checked_margin(torch.tensor([[2.0]])).item() == pytest.approx(2.0)
+
+
+class StochasticFakeLanguageModel(FakeLanguageModel):
+    def forward(self, *, input_ids, use_cache, return_dict):
+        result = super().forward(
+            input_ids=input_ids, use_cache=use_cache, return_dict=return_dict
+        )
+        result.logits = result.logits + torch.randn_like(result.logits)
+        return result
+
+
+def test_nondeterministic_pretrained_forward_fails_preflight(tmp_path):
+    with pytest.raises(ValueError, match="non-deterministic"):
+        pilot.run_study(
+            pretrained_model=StochasticFakeLanguageModel(),
+            tokenizer=FakeTokenizer(),
+            revision="a" * 40,
+            output_dir=tmp_path,
+        )
