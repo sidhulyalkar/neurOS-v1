@@ -149,6 +149,13 @@ def task_competence(
     }
 
 
+def checked_margin(values: torch.Tensor) -> torch.Tensor:
+    """Never allow NaN or infinity to enter the faithfulness normalization."""
+    if not bool(torch.isfinite(values).all()):
+        raise ValueError("nonfinite model margin during an intervention")
+    return values.mean()
+
+
 def model_and_tokenizer(revision: str, device: str) -> tuple[nn.Module, Any, str]:
     # Import only when running the explicitly requested public checkpoint.
     import transformers
@@ -222,7 +229,7 @@ def run_study(
         )
         return record
 
-    metric = OutputMetric(lambda values: values.mean(), name="next_token_logit_margin")
+    metric = OutputMetric(checked_margin, name="next_token_logit_margin")
     ranking = discover_ablation_effect_candidate(
         adapter, discovery, tuple(targets), metric=metric, k=len(targets)
     )
@@ -258,7 +265,7 @@ def run_study(
             metadata={
                 "held_out_lexical_sets": True,
                 "task_threshold": TASK_THRESHOLD,
-                "exploratory": False,
+                "preregistered_protocol": True,
             },
         )
         result = run_adapter_evidence_pack(
@@ -276,6 +283,8 @@ def run_study(
             "artifact": artifact.name,
             "promotion_passed": result.promotion.passed,
             "publication_ready": result.publication_ready,
+            "publication_issues": list(result.publication_issues),
+            "run_hash": result.manifest.run_hash,
             "validation_pass_rate": result.validation_aggregate.pass_rate,
             "validation_joint_median": result.validation_aggregate.median_joint_faithfulness,
             "study_fingerprint": result.study_fingerprint,
