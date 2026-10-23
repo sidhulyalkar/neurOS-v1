@@ -43,8 +43,7 @@ Python 3.10–3.12, CPU (slower) or an appropriate NVIDIA GPU:
 
 \`\`\`bash
 python scripts/bootstrap.py --profile kernel --test-tools
-pip install -e "packages/neuros-mechint[dev]"
-pip install 'transformers>=4.45,<5' 'safetensors>=0.4' 'huggingface_hub>=0.25'
+pip install -e "packages/neuros-mechint[dev,real-model-pilot]"
 \`\`\`
 
 Resolve an immutable revision **once and record it before running**:
