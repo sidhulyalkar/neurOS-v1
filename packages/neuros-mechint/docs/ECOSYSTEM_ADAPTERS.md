@@ -31,6 +31,42 @@ matched comparison / replication
 
 An adapter being integrated means the package maintains the execution contract. It does **not** mean every mechanism discovered through it is correct.
 
+## Selector-aware PyTorch module outputs
+
+The default adapter intentionally rejects structured output values without a
+declared selector. Define **named targets** to select tensors inside ordinary
+tuples, lists, or dictionaries. Explicit module-call counts prevent repeated
+module invocations from being accidentally confused.
+
+```python
+from neuros_mechint import ModuleOutputTarget, PyTorchAdapter
+
+adapter = PyTorchAdapter(model, targets={
+    "lstm_output": ModuleOutputTarget("lstm", selector=(0,)),
+    "lstm_hidden": ModuleOutputTarget("lstm", selector=(1, 0)),
+})
+cache = adapter.capture_outputs(batch, ["lstm_output", "lstm_hidden"])
+output = adapter.forward_with_replacements(
+    batch, {"lstm_hidden": torch.zeros_like(cache["lstm_hidden"])}
+)
+```
+
+For a module reused exactly twice, choose an explicit invocation with
+`ModuleOutputTarget("shared", occurrence=1, expected_calls=2)`. Both capture
+and intervention calls fail if the declared call count differs. Overlapping
+selectors in one replacement run are rejected. Hook handles are always removed.
+
+Target aliases are snapshotted at adapter construction; aliases may not shadow
+module paths. The effective model fingerprint incorporates target declarations,
+so selecting different components cannot inadvertently reuse the same scientific
+identity. No intervention is proof of a natural or biological mechanism.
+
+Limitations: this release supports built-in tuple/list/dict containers and
+tensor leaves, not arbitrary namedtuples, customized containers, functional
+operators, fused attention internals, tensor slicing, or non-tensor final model
+outputs. PyTorchAdapter remains a no-gradient patching interface, not a new
+autograd-based attribution engine.
+
 ## neurOS models
 
 `NeurOSModelAdapter` is the native bridge from `neuros-models` v2.1+.
@@ -47,7 +83,7 @@ print(adapter.recommended_paths)
 
 The dependency direction is intentionally duck-typed: `neuros-mechint` does not import or depend on `neuros-models`. This keeps mech-int usable with external models while letting neurOS decoders opt into the common experiment layer.
 
-`recommended_paths` contains only tensor-output hook points safe for the generic PyTorch capture/replacement adapter. Structured modules such as raw `nn.LSTM` or `nn.MultiheadAttention` remain declared in the manifest but require selector-aware tooling for direct replacement.
+`recommended_paths` contains only tensor-output hook points safe for the generic PyTorch capture/replacement adapter. Structured outputs from modules such as `nn.LSTM` and `nn.MultiheadAttention` can be targeted through explicit named selectors. Only the selected tensor leaf is replaced; semantics and appropriate intervention controls remain the researcher's responsibility.
 
 The most important boundary is semantic:
 
