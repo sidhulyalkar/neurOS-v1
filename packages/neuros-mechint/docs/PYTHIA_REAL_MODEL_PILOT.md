@@ -37,6 +37,41 @@ module is a **coarse model-component intervention**, not a discovered
 attention-head circuit. The methodology currently has no gradient EAP-IG
 comparator, conditional donor, or human-neural counterpart.
 
+## Manually dispatched public-checkpoint qualification
+
+The [Pythia empirical pilot GitHub Actions workflow](../../../.github/workflows/mechint-pythia-empirical-pilot.yml)
+is intentionally **manual-only**. No PR check or ordinary push will download
+external model weights or consume a large inference budget.
+
+In GitHub, open **Actions → Pythia Circuit Auditor empirical pilot → Run
+workflow**, select `main` and leave `stage=preflight`. It uses the
+verified immutable public checkpoint commit
+`e93a9faa9c77e5d09219f6c868bfc7a1bd65593c` by default, subject to
+a live Hugging Face exact-revision check. The CPU environment pins PyTorch
+2.4.1, Transformers 4.45.2 and huggingface-hub 0.25.2. If the public
+checkpoint has become inaccessible or incompatible, the workflow must fail
+closed instead of substituting another checkpoint or changing the selectors.
+
+The preflight only checks the configured six-layer hook surface and four
+discovery examples. It does **not** expose validation model outputs, select a
+causal circuit or estimate intervention effects. It emits
+`PREFLIGHT_ONLY_QUALIFIED` or `BASELINE_NOT_QUALIFIED` plus the input
+manifest. A baseline failure is retained as a negative experimental result.
+
+Only if that checkpoint passes the discovery behavioral gate should a second
+manual run select `stage=full`. Full execution runs the **unchanged v1**
+study, saves both candidate/decoy evidence artifacts or negative v2 artifacts,
+and checks their content hashes before creating a versioned GitHub Actions
+artifact bundle. On failure, environment manifests, logs and any complete
+diagnostic files are still uploaded for investigation.
+
+**No empirical results are claimed by enabling the workflow.** An Actions
+"success" means the protocol completed and artifacts were verified. It does
+not imply promotion, mechanism discovery, model task validity on held-out
+examples or independent scientific reproduction. Keep the exact source commit,
+checkpoint, Python/package versions, seed and evidence hashes together when
+requesting reproduction from another environment.
+
 ## Run locally
 
 Python 3.10–3.12, CPU (slower) or an appropriate NVIDIA GPU:
