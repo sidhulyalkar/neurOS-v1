@@ -119,6 +119,12 @@ from .ground_truth import (
     make_ground_truth_pair,
     run_ground_truth_benchmark,
 )
+from .repetition_preflight import (
+    CONTROL_SCHEMA,
+    MatchedRepetitionTrial,
+    make_matched_repetition_trials,
+    score_discovery_repetition_controls,
+)
 from .replication import (
     DEFAULT_HIERARCHY,
     REPLICATION_ARTIFACT_SCHEMA,
@@ -184,6 +190,7 @@ from .tokenizer_comparison import (
 from .v1_ground_truth import V1GroundTruthReport, run_v1_release_contract_benchmark
 
 __all__ = [
+    "CONTROL_SCHEMA",
     "CORRESPONDENCE_ARTIFACT_SCHEMA",
     "CORRESPONDENCE_STUDY_SCHEMA",
     "DEFAULT_HIERARCHY",
@@ -258,6 +265,7 @@ __all__ = [
     "InterventionManifoldKind",
     "LocalizationReport",
     "MatchedCovariate",
+    "MatchedRepetitionTrial",
     "MechanismContext",
     "MechanismEmergenceReport",
     "MechanisticHypothesis",
@@ -310,6 +318,7 @@ __all__ = [
     "localization_precision_at_k",
     "localization_recall_at_k",
     "make_ground_truth_pair",
+    "make_matched_repetition_trials",
     "observation_from_correspondence",
     "observation_from_factorial_contrast",
     "outcome_from_evidence_pack",
@@ -331,6 +340,7 @@ __all__ = [
     "run_shared_computation_benchmark",
     "run_v1_release_contract_benchmark",
     "sae_feature_name",
+    "score_discovery_repetition_controls",
     "serialize_dose_response",
     "write_correspondence_artifact",
     "write_dose_response_artifact",
