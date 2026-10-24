@@ -1,0 +1,141 @@
+name: Pythia Circuit Auditor empirical pilot
+
+# Explicit opt-in only. Normal CI never downloads external model weights.
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: preflight (discovery baseline only) or full (causal evidence)
+        required: true
+        type: choice
+        default: preflight
+        options: [preflight, full]
+      revision:
+        description: Full immutable Hugging Face model commit SHA
+        required: true
+        type: string
+        default: e93a9faa9c77e5d09219f6c868bfc7a1bd65593c
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pythia-circuit-${{ github.ref }}-${{ inputs.stage }}-${{ inputs.revision }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    name: Pythia 70M / ${{ inputs.stage }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.11"
+      - name: Install isolated CPU research environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e "packages/neuros-mechint[real-model-pilot]"
+          python -m pip install "transformers==4.45.2" "huggingface-hub==0.25.2"
+          python -m pip check
+      - name: Verify immutable public checkpoint and record environment
+        shell: bash
+        env:
+          MODEL_REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence-run
+          python -VV > evidence-run/python.txt
+          python -m pip freeze > evidence-run/pip-freeze.txt
+          git rev-parse HEAD > evidence-run/neuros-git-revision.txt
+          printf '%s\n' "$MODEL_REVISION" > evidence-run/requested-model-revision.txt
+          python - <<'PY'
+          import os, re
+          from huggingface_hub import HfApi
+          revision = os.environ["MODEL_REVISION"]
+          if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+              raise SystemExit("immutable lowercase 40-hex model SHA required")
+          resolved = HfApi().model_info("EleutherAI/pythia-70m-deduped", revision=revision)
+          if resolved.sha != revision:
+              raise SystemExit("Hugging Face model revision mismatch")
+          print("Verified checkpoint:", revision)
+          PY
+      - name: Run actual model (preserve negative findings)
+        shell: bash
+        env:
+          STAGE: ${{ inputs.stage }}
+          MODEL_REVISION: ${{ inputs.revision }}
+          HF_HOME: ${{ runner.temp }}/hf-pythia
+          TOKENIZERS_PARALLELISM: "false"
+          HF_HUB_DISABLE_TELEMETRY: "1"
+          OMP_NUM_THREADS: "2"
+        run: |
+          set -euo pipefail
+          case "$STAGE" in
+            preflight) flags="--preflight-only" ;;
+            full) flags="" ;;
+            *) exit 3 ;;
+          esac
+          set +e
+          python packages/neuros-mechint/examples/24_pythia_real_model_pilot.py \
+            --revision "$MODEL_REVISION" \
+            --device cpu --out evidence-run/study $flags \
+            > evidence-run/execution.log 2>&1
+          status=$?
+          set -e
+          cat evidence-run/execution.log
+          printf '%s\n' "$status" > evidence-run/pilot-exit-code.txt
+          # Code 2 means the model did not qualify on the task, not a valid circuit.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
+            exit "$status"
+          fi
+      - name: Verify study artifacts and status independently
+        if: always()
+        shell: bash
+        env:
+          MODEL_REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          test -s evidence-run/study/status.json
+          test -s evidence-run/study/dataset_manifest.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from neuros_mechint.benchmarks import read_evidence_pack_artifact
+          root = Path("evidence-run/study")
+          status = json.loads((root / "status.json").read_text(encoding="utf-8"))
+          dataset = json.loads((root / "dataset_manifest.json").read_text(encoding="utf-8"))
+          revision = os.environ["MODEL_REVISION"]
+          assert status["model_revision"] == status["tokenizer_revision"] == revision
+          assert dataset["dataset_hash"] == status["dataset_hash"]
+          assert status["study_status"] in {
+              "PREFLIGHT_ONLY_QUALIFIED", "BASELINE_NOT_QUALIFIED",
+              "EVALUATED_NOT_INDEPENDENTLY_REPRODUCED",
+              "TASK_VALIDATION_FAILED", "NONESTIMABLE_INTERVENTIONS",
+          }
+          verified = []
+          for label, summary in status.get("results", {}).items():
+              result = read_evidence_pack_artifact(root / summary["artifact"])
+              assert result["study_fingerprint"] == summary["study_fingerprint"]
+              assert result["spec"]["model_revision"] == revision
+              assert result["spec"]["tokenizer_revision"] == revision
+              verified.append(label)
+          Path("evidence-run/verification.json").write_text(
+              json.dumps({"status": status["study_status"], "verified": verified}, indent=2)
+              + "\n", encoding="utf-8")
+          print("Scientific status:", status["study_status"], "verified artifacts:", verified)
+          PY
+      - name: Upload immutable run diagnostics even on failure
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pythia-circuit-audit-${{ inputs.stage }}-${{ github.run_id }}
+          path: evidence-run/
+          if-no-files-found: warn
+          retention-days: 30
