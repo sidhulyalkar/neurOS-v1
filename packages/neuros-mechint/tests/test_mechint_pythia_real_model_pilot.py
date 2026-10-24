@@ -275,3 +275,22 @@ def test_incompetent_preflight_writes_negative_and_no_heldout_scores(tmp_path):
     assert outcome["study_status"] == "BASELINE_NOT_QUALIFIED"
     assert "validation" not in outcome["task_competence"]
     assert not list(tmp_path.glob("*discovery.json"))
+
+
+def test_opt_in_workflow_never_downloads_weights_during_standard_ci():
+    import re
+
+    repo_root = Path(__file__).resolve().parents[3]
+    workflow = (
+        repo_root / ".github" / "workflows" / "mechint-pythia-empirical-pilot.yml"
+    ).read_text(encoding="utf-8")
+    assert re.search(r"^on:\\n  workflow_dispatch:", workflow, re.MULTILINE)
+    assert not re.search(r"^  (push|pull_request|schedule|workflow_run):", workflow, re.MULTILINE)
+    assert "default: preflight" in workflow
+    assert "type: choice" in workflow
+    assert "e93a9faa9c77e5d09219f6c868bfc7a1bd65593c" in workflow
+    assert "timeout-minutes: 120" in workflow
+    assert "permissions:\\n  contents: read" in workflow
+    assert workflow.count("if: always()") >= 2
+    assert "read_evidence_pack_artifact" in workflow
+    assert "huggingface_hub import HfApi" in workflow
