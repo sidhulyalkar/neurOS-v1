@@ -119,6 +119,12 @@ from .ground_truth import (
     make_ground_truth_pair,
     run_ground_truth_benchmark,
 )
+from .repetition_preflight import (
+    CONTROL_SCHEMA,
+    MatchedRepetitionTrial,
+    make_matched_repetition_trials,
+    score_discovery_repetition_controls,
+)
 from .replication import (
     DEFAULT_HIERARCHY,
     REPLICATION_ARTIFACT_SCHEMA,
@@ -141,12 +147,6 @@ from .replication import (
 from .replication_ground_truth import (
     ReplicationGroundTruthReport,
     run_replication_ground_truth_benchmark,
-)
-from .repetition_preflight import (
-    CONTROL_SCHEMA,
-    MatchedRepetitionTrial,
-    make_matched_repetition_trials,
-    score_discovery_repetition_controls,
 )
 from .reproduction import (
     ReproductionMetricComparison,
@@ -190,11 +190,21 @@ from .tokenizer_comparison import (
 from .v1_ground_truth import V1GroundTruthReport, run_v1_release_contract_benchmark
 
 __all__ = [
-    "ArchitectureComparisonReport",
-    "ArchitectureMechanismSummary",
     "CONTROL_SCHEMA",
     "CORRESPONDENCE_ARTIFACT_SCHEMA",
     "CORRESPONDENCE_STUDY_SCHEMA",
+    "DEFAULT_HIERARCHY",
+    "DOSE_RESPONSE_ARTIFACT_SCHEMA",
+    "DOSE_RESPONSE_STUDY_SCHEMA",
+    "EVIDENCE_ARTIFACT_SCHEMA",
+    "EVIDENCE_PACK_SCHEMA",
+    "EVIDENCE_PACK_SCHEMA_V2",
+    "FACTORIAL_ARTIFACT_SCHEMA",
+    "FACTORIAL_STUDY_SCHEMA",
+    "REPLICATION_ARTIFACT_SCHEMA",
+    "REPLICATION_STUDY_SCHEMA",
+    "ArchitectureComparisonReport",
+    "ArchitectureMechanismSummary",
     "CandidateDiscovery",
     "CausalEffectRecord",
     "CausalSubstitutionEvaluator",
@@ -209,18 +219,12 @@ __all__ = [
     "CorrespondencePromotionDecision",
     "CorrespondenceSplit",
     "CorrespondenceValidationMetrics",
-    "DEFAULT_HIERARCHY",
-    "DOSE_RESPONSE_ARTIFACT_SCHEMA",
-    "DOSE_RESPONSE_STUDY_SCHEMA",
     "DiscoveryShiftMLP",
     "DoseResponseObservation",
     "DoseResponsePolicy",
     "DoseResponseResult",
     "DoseResponseSpec",
     "DoseResponseUnitSummary",
-    "EVIDENCE_ARTIFACT_SCHEMA",
-    "EVIDENCE_PACK_SCHEMA",
-    "EVIDENCE_PACK_SCHEMA_V2",
     "EffectMapStability",
     "EvidenceAggregate",
     "EvidenceCaseResult",
@@ -231,8 +235,6 @@ __all__ = [
     "EvidencePromotionDecision",
     "EvidenceSplit",
     "EvidenceTelemetry",
-    "FACTORIAL_ARTIFACT_SCHEMA",
-    "FACTORIAL_STUDY_SCHEMA",
     "FactorialAnalysisPolicy",
     "FactorialCellOutcome",
     "FactorialCellResult",
@@ -269,8 +271,6 @@ __all__ = [
     "MechanisticHypothesis",
     "MetricReplicationEstimate",
     "PairwiseMechanismComparison",
-    "REPLICATION_ARTIFACT_SCHEMA",
-    "REPLICATION_STUDY_SCHEMA",
     "RandomCircuitControl",
     "ReplicationAxis",
     "ReplicationCoordinates",
