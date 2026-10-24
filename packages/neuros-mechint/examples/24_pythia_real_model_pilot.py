@@ -185,6 +185,7 @@ def run_study(
     revision: str,
     output_dir: Path,
     seed: int = SEED,
+    preflight_only: bool = False,
 ) -> dict[str, Any]:
     """Run fixed discovery and held-out tests; never assert positive findings."""
     revision = validate_revision(revision)
@@ -230,6 +231,15 @@ def run_study(
     if competence["discovery"]["fraction_positive"] < TASK_THRESHOLD:
         record["study_status"] = "BASELINE_NOT_QUALIFIED"
         # No circuit inference is licensed by a model that fails the discovery task.
+        (output_dir / "status.json").write_text(
+            json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return record
+
+    if preflight_only:
+        # Cost-bounded real-checkpoint compatibility and behavioral task gate.
+        # No discovery, validation scoring or intervention claims are made.
+        record["study_status"] = "PREFLIGHT_ONLY_QUALIFIED"
         (output_dir / "status.json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -326,12 +336,17 @@ def main() -> None:
     parser.add_argument("--revision", required=True, help="exact 40-hex HF commit")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--device", choices=("cpu", "cuda", "mps"), default="cpu")
+    parser.add_argument(
+        "--preflight-only", action="store_true",
+        help="run pinned model/adapter compatibility and discovery competence only",
+    )
     args = parser.parse_args()
     revision = validate_revision(args.revision)
     pretrained, tokenizer, version = model_and_tokenizer(revision, args.device)
     record = run_study(
         pretrained_model=pretrained, tokenizer=tokenizer,
         revision=revision, output_dir=args.out,
+        preflight_only=args.preflight_only,
     )
     record["transformers_version"] = version
     record["torch_version"] = torch.__version__
