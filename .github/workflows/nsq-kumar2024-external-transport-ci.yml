@@ -60,4 +60,5 @@ jobs:
         run: python -m pip install --disable-pip-version-check "pytest==9.1.1" "pytest-asyncio==1.4.0"
       - name: Run adversarial external-evidence tests
         run: |
-          python -m pytest -q             tests/test_kumar2024_external_qualification_verifier.py             tests/test_kumar2024_external_host_preflight.py
+          python -m pytest -q tests/test_kumar2024_external_qualification_verifier.py
+          python -m pytest -q tests/test_kumar2024_external_host_preflight.py
