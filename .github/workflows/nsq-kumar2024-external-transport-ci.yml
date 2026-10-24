@@ -6,7 +6,9 @@ on:
       - "scripts/evidence/run_kumar2024_external_qualification.sh"
       - "scripts/evidence/launch_kumar2024_brev_cpu.sh"
       - "scripts/evidence/verify_kumar2024_external_qualification.py"
+      - "scripts/evidence/preflight_kumar2024_external_host.py"
       - "tests/test_kumar2024_external_qualification_verifier.py"
+      - "tests/test_kumar2024_external_host_preflight.py"
       - "docs/NSQ_KUMAR2024_EXTERNAL_EXECUTION.md"
       - "docs/NSQ_KUMAR2024_BREV_RUNBOOK.md"
       - ".github/workflows/nsq-kumar2024-external-transport-ci.yml"
@@ -16,7 +18,9 @@ on:
       - "scripts/evidence/run_kumar2024_external_qualification.sh"
       - "scripts/evidence/launch_kumar2024_brev_cpu.sh"
       - "scripts/evidence/verify_kumar2024_external_qualification.py"
+      - "scripts/evidence/preflight_kumar2024_external_host.py"
       - "tests/test_kumar2024_external_qualification_verifier.py"
+      - "tests/test_kumar2024_external_host_preflight.py"
       - "docs/NSQ_KUMAR2024_EXTERNAL_EXECUTION.md"
       - "docs/NSQ_KUMAR2024_BREV_RUNBOOK.md"
       - ".github/workflows/nsq-kumar2024-external-transport-ci.yml"
@@ -50,7 +54,10 @@ jobs:
         run: bash -n scripts/evidence/launch_kumar2024_brev_cpu.sh
       - name: Compile independent verifier
         run: python -m compileall -q scripts/evidence/verify_kumar2024_external_qualification.py
+      - name: Compile read-only host preflight
+        run: python -m compileall -q scripts/evidence/preflight_kumar2024_external_host.py
       - name: Install test tooling
         run: python -m pip install --disable-pip-version-check "pytest==9.1.1" "pytest-asyncio==1.4.0"
       - name: Run adversarial external-evidence tests
-        run: python -m pytest -q tests/test_kumar2024_external_qualification_verifier.py
+        run: |
+          python -m pytest -q             tests/test_kumar2024_external_qualification_verifier.py             tests/test_kumar2024_external_host_preflight.py
