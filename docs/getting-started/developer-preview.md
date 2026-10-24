@@ -87,9 +87,13 @@ It records:
 - captured stdout/stderr;
 - parsed JSON where the public command exposes it;
 - session, qualification, and Arena artifact locations;
+- the `bundle_sha256` emitted by `neuros qualify`, captured outside the bundle and passed back to `neuros reproduce --expected-sha256`;
+- the reproduction verdict, verified root and `origin_authenticity` status;
 - failure type/message when the path aborts.
 
 The report is initialized before package/script preflight. CI uploads the report with `always()` semantics, so a journey failure is itself retained as a diagnostic artifact rather than disappearing because the success path never reached artifact publication.
+
+The root pin is read from the **prior public CLI response**, not from the bundle being verified. This prevents the journey from declaring success when its reproduced artifact disagrees with the qualification root previously observed. Because the same journey generated that root, this checks **out-of-bundle consistency**, not independent authorship or authenticity. An external researcher must preserve or obtain the expected root from a separately trusted channel to make an independent origin claim.
 
 This is onboarding evidence, not hardware or scientific validation.
 
