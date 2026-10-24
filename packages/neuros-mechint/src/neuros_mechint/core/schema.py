@@ -13,6 +13,7 @@ MANIFEST_SCHEMA_V2 = "2"
 MANIFEST_SCHEMA_V3 = "3"
 CURRENT_MANIFEST_SCHEMA = MANIFEST_SCHEMA_V3
 ARTIFACT_ENVELOPE_SCHEMA = "neuros-mechint.artifact-envelope.v1"
+_EVIDENCE_PACK_V2_RESULT = "neuros-mechint.evidence-pack.v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,15 +142,21 @@ def validate_manifest_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     return validated
 
 
+def _supports_result_schema(spec: ArtifactSchemaSpec, value: Any) -> bool:
+    """Keep frozen v1 families intact while allowing explicit negative-evidence v2."""
+    return value == spec.result_schema or (
+        spec.family == "evidence_pack" and value == _EVIDENCE_PACK_V2_RESULT
+    )
+
+
 def make_artifact_envelope(family: str, result: Mapping[str, Any]) -> dict[str, Any]:
     """Wrap a result in the canonical v1 self-checking artifact envelope."""
 
     spec = get_artifact_schema(family)
     result_dict = deepcopy(dict(result))
-    if result_dict.get("schema_version") != spec.result_schema:
+    if not _supports_result_schema(spec, result_dict.get("schema_version")):
         raise ValueError(
-            f"{family} result schema must be {spec.result_schema!r}; "
-            f"got {result_dict.get('schema_version')!r}"
+            f"unsupported {family} result schema: {result_dict.get('schema_version')!r}"
         )
     return {
         "artifact_hash": stable_hash(result_dict),
@@ -157,7 +164,7 @@ def make_artifact_envelope(family: str, result: Mapping[str, Any]) -> dict[str, 
         "contract": {
             "envelope_schema": ARTIFACT_ENVELOPE_SCHEMA,
             "family": family,
-            "result_schema": spec.result_schema,
+            "result_schema": result_dict["schema_version"],
         },
         "result": result_dict,
     }
@@ -181,13 +188,13 @@ def migrate_artifact_envelope(payload: Mapping[str, Any], *, family: str) -> dic
     result_dict = dict(result)
     if stable_hash(result_dict) != migrated.get("artifact_hash"):
         raise ValueError(f"{family} artifact hash mismatch")
-    if result_dict.get("schema_version") != spec.result_schema:
+    if not _supports_result_schema(spec, result_dict.get("schema_version")):
         raise ValueError(f"unsupported {family} result schema")
     contract = migrated.get("contract")
     expected_contract = {
         "envelope_schema": ARTIFACT_ENVELOPE_SCHEMA,
         "family": family,
-        "result_schema": spec.result_schema,
+        "result_schema": result_dict["schema_version"],
     }
     if contract is None:
         migrated["contract"] = expected_contract

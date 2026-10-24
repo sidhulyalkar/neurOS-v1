@@ -55,6 +55,7 @@ from .emergence_ground_truth import run_mechanism_emergence_benchmark
 from .evidence_pack import (
     EVIDENCE_ARTIFACT_SCHEMA,
     EVIDENCE_PACK_SCHEMA,
+    EVIDENCE_PACK_SCHEMA_V2,
     CandidateDiscovery,
     EvidenceAggregate,
     EvidenceCaseResult,
@@ -190,6 +191,7 @@ __all__ = [
     "DOSE_RESPONSE_STUDY_SCHEMA",
     "EVIDENCE_ARTIFACT_SCHEMA",
     "EVIDENCE_PACK_SCHEMA",
+    "EVIDENCE_PACK_SCHEMA_V2",
     "FACTORIAL_ARTIFACT_SCHEMA",
     "FACTORIAL_STUDY_SCHEMA",
     "REPLICATION_ARTIFACT_SCHEMA",

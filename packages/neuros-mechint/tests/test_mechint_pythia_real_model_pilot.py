@@ -198,3 +198,46 @@ def test_offline_full_pipeline_persists_negative_evidence(monkeypatch, tmp_path)
         assert result["results"][name]["promotion_passed"] is False
         # Publication-ready means revisions pinned, NOT a causal finding.
         assert result["results"][name]["provenance_complete"] is True
+
+
+class ConstantCompetentFakeLanguageModel(FakeLanguageModel):
+    """Positive preflight margins with no causal path through the model hooks."""
+
+    def forward(self, *, input_ids, use_cache, return_dict):
+        assert use_cache is False and return_dict is True
+        b, steps = input_ids.shape
+        logits = torch.zeros((b, steps, 128), dtype=torch.float32)
+        target = input_ids[:, 3].view(b, 1, 1).expand(b, steps, 1)
+        logits.scatter_(2, target, 5.0)
+        # Execute the modules, but deliberately make their activations irrelevant.
+        hidden = input_ids.float().unsqueeze(-1)
+        for layer in self.gpt_neox.layers:
+            hidden = layer(hidden)
+        assert hidden.shape[:2] == input_ids.shape
+        return SimpleNamespace(logits=logits)
+
+
+def test_pilot_serializes_nonestimable_interventions_as_negative_artifacts(
+    monkeypatch, tmp_path
+):
+    from neuros_mechint.benchmarks import read_evidence_pack_artifact
+
+    monkeypatch.setattr(pilot, "PER_SPLIT", 2)
+    monkeypatch.setattr(pilot, "RANDOM_TRIALS", 2)
+    outcome = pilot.run_study(
+        pretrained_model=ConstantCompetentFakeLanguageModel(),
+        tokenizer=FakeTokenizer(),
+        revision="c" * 40,
+        output_dir=tmp_path,
+    )
+    assert outcome["study_status"] == "NONESTIMABLE_INTERVENTIONS"
+    for label, summary in outcome["results"].items():
+        assert summary["status"] == "NONESTIMABLE"
+        assert summary["promotion_passed"] is False
+        assert summary["validation_joint_median"] is None
+        path = tmp_path / summary["artifact"]
+        assert path.exists(), label
+        payload = read_evidence_pack_artifact(path)
+        assert payload["promotion"]["passed"] is False
+        assert payload["validation_aggregate"]["estimable"] is False
+        assert all(not case["valid"] for case in payload["candidate_cases"])

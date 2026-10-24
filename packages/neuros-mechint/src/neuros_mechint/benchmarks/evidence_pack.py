@@ -13,7 +13,7 @@ import time
 import tracemalloc
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -38,6 +38,7 @@ from .faithfulness import (
 
 EVIDENCE_ARTIFACT_SCHEMA = "neuros-mechint.evidence-pack-artifact.v1"
 EVIDENCE_PACK_SCHEMA = "neuros-mechint.evidence-pack.v1"
+EVIDENCE_PACK_SCHEMA_V2 = "neuros-mechint.evidence-pack.v2"
 
 _NORMALIZATION_FAILURES = (
     "all-target and null metrics are indistinguishable",
@@ -112,6 +113,8 @@ class EvidencePackSpec:
             raise ValueError("pack_id, model_id, and dataset_id must be non-empty")
         if not self.metric_name or not self.discovery_method:
             raise ValueError("metric_name and discovery_method must be non-empty")
+        if self.schema_version not in {EVIDENCE_PACK_SCHEMA, EVIDENCE_PACK_SCHEMA_V2}:
+            raise ValueError("unsupported evidence-pack result schema")
         targets = tuple(dict.fromkeys(str(target) for target in self.target_universe))
         if not targets:
             raise ValueError("target_universe must not be empty")
@@ -236,18 +239,23 @@ class EvidenceAggregate:
     n_valid_cases: int
     n_invalid_cases: int
     n_examples: int
-    pass_rate: float
+    pass_rate: float | None
     valid_case_rate: float
-    mean_sufficiency: float
-    mean_necessity: float
-    mean_joint_faithfulness: float
-    median_joint_faithfulness: float
-    mean_joint_random_percentile: float
-    joint_mean_ci95_low: float
-    joint_mean_ci95_high: float
+    mean_sufficiency: float | None
+    mean_necessity: float | None
+    mean_joint_faithfulness: float | None
+    median_joint_faithfulness: float | None
+    mean_joint_random_percentile: float | None
+    joint_mean_ci95_low: float | None
+    joint_mean_ci95_high: float | None
+
+    @property
+    def estimable(self) -> bool:
+        """A quantitative estimate exists only when at least one case is valid."""
+        return self.n_valid_cases > 0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "joint_mean_ci95_high": self.joint_mean_ci95_high,
             "joint_mean_ci95_low": self.joint_mean_ci95_low,
             "mean_joint_faithfulness": self.mean_joint_faithfulness,
@@ -262,6 +270,12 @@ class EvidenceAggregate:
             "pass_rate": self.pass_rate,
             "valid_case_rate": self.valid_case_rate,
         }
+        if not self.estimable:
+            # Additive v1 extension: previously there was no serializable
+            # all-invalid artifact. Normal, valid payloads stay byte-equivalent.
+            payload["estimable"] = False
+            payload["nonestimable_reason"] = "no valid faithfulness normalizations"
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -270,10 +284,10 @@ class EvidencePromotionDecision:
 
     passed: bool
     reasons: tuple[str, ...]
-    discovery_joint_median: float
-    validation_joint_median: float
-    joint_generalization_drop: float
-    validation_pass_rate: float
+    discovery_joint_median: float | None
+    validation_joint_median: float | None
+    joint_generalization_drop: float | None
+    validation_pass_rate: float | None
     validation_joint_advantage_vs_magnitude: float | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -476,7 +490,21 @@ def aggregate_evidence_cases(
         raise ValueError("cannot aggregate an empty evidence case sequence")
     reports = [item.report for item in cases if item.report is not None]
     if not reports:
-        raise ValueError("no evidence cases contain a valid faithfulness normalization")
+        return EvidenceAggregate(
+            n_cases=len(cases),
+            n_valid_cases=0,
+            n_invalid_cases=len(cases),
+            n_examples=len({item.example_id for item in cases}),
+            pass_rate=None,
+            valid_case_rate=0.0,
+            mean_sufficiency=None,
+            mean_necessity=None,
+            mean_joint_faithfulness=None,
+            median_joint_faithfulness=None,
+            mean_joint_random_percentile=None,
+            joint_mean_ci95_low=None,
+            joint_mean_ci95_high=None,
+        )
     joint = [item.joint_faithfulness for item in reports]
     percentiles = [
         item.joint_random_percentile
@@ -708,6 +736,10 @@ def _promotion_decision(
     policy: EvidencePackPolicy,
 ) -> EvidencePromotionDecision:
     reasons = []
+    if not discovery.estimable:
+        reasons.append("discovery has no estimable faithfulness cases")
+    if not validation.estimable:
+        reasons.append("validation has no estimable faithfulness cases")
     if validation.n_examples < policy.min_validation_examples:
         reasons.append(
             f"validation examples {validation.n_examples} < {policy.min_validation_examples}"
@@ -716,34 +748,49 @@ def _promotion_decision(
         reasons.append(f"discovery contains {discovery.n_invalid_cases} invalid case(s)")
     if policy.require_all_cases_valid and validation.n_invalid_cases:
         reasons.append(f"validation contains {validation.n_invalid_cases} invalid case(s)")
-    if validation.pass_rate < policy.min_validation_pass_rate:
+    if validation.pass_rate is not None and validation.pass_rate < policy.min_validation_pass_rate:
         reasons.append(
             f"validation pass rate {validation.pass_rate:.3f} < "
             f"{policy.min_validation_pass_rate:.3f}"
         )
-    if validation.median_joint_faithfulness < policy.min_validation_joint_median:
+    if (
+        validation.median_joint_faithfulness is not None
+        and validation.median_joint_faithfulness < policy.min_validation_joint_median
+    ):
         reasons.append(
             f"validation joint median {validation.median_joint_faithfulness:.3f} < "
             f"{policy.min_validation_joint_median:.3f}"
         )
-    drop = discovery.median_joint_faithfulness - validation.median_joint_faithfulness
-    if drop > policy.max_joint_generalization_drop:
-        reasons.append(
-            f"joint generalization drop {drop:.3f} > {policy.max_joint_generalization_drop:.3f}"
-        )
+    drop = None
+    if (
+        discovery.median_joint_faithfulness is not None
+        and validation.median_joint_faithfulness is not None
+    ):
+        drop = discovery.median_joint_faithfulness - validation.median_joint_faithfulness
+        if drop > policy.max_joint_generalization_drop:
+            reasons.append(
+                f"joint generalization drop {drop:.3f} > "
+                f"{policy.max_joint_generalization_drop:.3f}"
+            )
     if policy.require_multiple_intervention_baselines and len(spec.intervention_baselines) < 2:
         reasons.append("multiple intervention baselines are required")
     advantage = None
     if magnitude_validation is not None:
-        advantage = (
-            validation.median_joint_faithfulness
-            - magnitude_validation.median_joint_faithfulness
-        )
-        if advantage < policy.min_validation_joint_advantage_vs_magnitude:
-            reasons.append(
-                f"validation joint advantage vs magnitude {advantage:.3f} < "
-                f"{policy.min_validation_joint_advantage_vs_magnitude:.3f}"
+        if (
+            validation.median_joint_faithfulness is None
+            or magnitude_validation.median_joint_faithfulness is None
+        ):
+            reasons.append("magnitude comparison has no estimable faithfulness contrast")
+        else:
+            advantage = (
+                validation.median_joint_faithfulness
+                - magnitude_validation.median_joint_faithfulness
             )
+            if advantage < policy.min_validation_joint_advantage_vs_magnitude:
+                reasons.append(
+                    f"validation joint advantage vs magnitude {advantage:.3f} < "
+                    f"{policy.min_validation_joint_advantage_vs_magnitude:.3f}"
+                )
     return EvidencePromotionDecision(
         passed=not reasons,
         reasons=tuple(reasons),
@@ -753,7 +800,6 @@ def _promotion_decision(
         validation_pass_rate=validation.pass_rate,
         validation_joint_advantage_vs_magnitude=advantage,
     )
-
 
 def _model_hash(adapter: ModelAdapter) -> str | None:
     return stable_hash_or_none(adapter.model_fingerprint_payload())
@@ -905,6 +951,15 @@ def run_adapter_evidence_pack(
         policy=pack_policy,
     )
 
+    aggregates = (discovery_aggregate, validation_aggregate)
+    if magnitude_validation_aggregate is not None:
+        aggregates += (magnitude_validation_aggregate,)
+    if any(not aggregate.estimable for aggregate in aggregates):
+        # The v1 result schema is frozen. Only previously unrepresentable
+        # all-invalid outcomes use the explicit v2 result schema. Valid
+        # historical scientific fingerprints retain their v1 identity.
+        spec = replace(spec, schema_version=EVIDENCE_PACK_SCHEMA_V2)
+
     manifest = ExperimentManifest(
         experiment_name=spec.pack_id,
         method="held_out_circuit_evidence_pack",
@@ -995,6 +1050,9 @@ def read_evidence_pack_artifact(path: str | Path) -> dict[str, Any]:
     observed = stable_hash(result)
     if expected != observed:
         raise ValueError("evidence-pack artifact hash mismatch")
-    if result.get("schema_version") != EVIDENCE_PACK_SCHEMA:
+    if result.get("schema_version") not in {
+        EVIDENCE_PACK_SCHEMA,
+        EVIDENCE_PACK_SCHEMA_V2,
+    }:
         raise ValueError("unsupported evidence-pack result schema")
     return result
