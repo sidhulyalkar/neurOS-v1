@@ -6,8 +6,10 @@ on:
       - "scripts/evidence/run_kumar2024_external_qualification.sh"
       - "scripts/evidence/launch_kumar2024_brev_cpu.sh"
       - "scripts/evidence/verify_kumar2024_external_qualification.py"
+      - "scripts/evidence/preserve_kumar2024_binding.py"
       - "scripts/evidence/preflight_kumar2024_external_host.py"
       - "tests/test_kumar2024_external_qualification_verifier.py"
+      - "tests/test_kumar2024_binding_preservation.py"
       - "tests/test_kumar2024_external_host_preflight.py"
       - "docs/NSQ_KUMAR2024_EXTERNAL_EXECUTION.md"
       - "docs/NSQ_KUMAR2024_BREV_RUNBOOK.md"
@@ -18,8 +20,10 @@ on:
       - "scripts/evidence/run_kumar2024_external_qualification.sh"
       - "scripts/evidence/launch_kumar2024_brev_cpu.sh"
       - "scripts/evidence/verify_kumar2024_external_qualification.py"
+      - "scripts/evidence/preserve_kumar2024_binding.py"
       - "scripts/evidence/preflight_kumar2024_external_host.py"
       - "tests/test_kumar2024_external_qualification_verifier.py"
+      - "tests/test_kumar2024_binding_preservation.py"
       - "tests/test_kumar2024_external_host_preflight.py"
       - "docs/NSQ_KUMAR2024_EXTERNAL_EXECUTION.md"
       - "docs/NSQ_KUMAR2024_BREV_RUNBOOK.md"
@@ -56,6 +60,10 @@ jobs:
         run: python -m compileall -q scripts/evidence/verify_kumar2024_external_qualification.py
       - name: Compile read-only host preflight
         run: python -m compileall -q scripts/evidence/preflight_kumar2024_external_host.py
+      - name: Verify frozen archive and write-once preservation contracts
+        run: |
+          python -m compileall -q scripts/evidence/preserve_kumar2024_binding.py
+          python -m unittest discover -s tests -p 'test_kumar2024_binding_preservation.py' -v
       - name: Install test tooling
         run: python -m pip install --disable-pip-version-check "pytest==9.1.1" "pytest-asyncio==1.4.0"
       - name: Run adversarial external-evidence tests
