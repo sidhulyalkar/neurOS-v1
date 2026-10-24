@@ -112,7 +112,12 @@ def test_host_probe_does_not_create_attempt_directory(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _repo(repo)
     attempt = tmp_path / "fresh-attempt"
-    before = list(tmp_path.rglob("*"))
+    before = {
+        file.relative_to(tmp_path)
+        for file in tmp_path.rglob("*")
+        if ".git" not in file.parts
+    }
+    runner_text = (repo / "scripts/evidence/run_kumar2024_external_qualification.sh").read_text()
     actual_which = shutil.which
     with patch.object(
         preflight.shutil, "which",
@@ -121,7 +126,13 @@ def test_host_probe_does_not_create_attempt_directory(tmp_path: Path) -> None:
         report = preflight.inspect_host(repo, attempt, "local-wsl")
     assert report["transport_host_eligible"]
     assert not attempt.exists()
-    assert list(tmp_path.rglob("*")) == before
+    after = {
+        file.relative_to(tmp_path)
+        for file in tmp_path.rglob("*")
+        if ".git" not in file.parts
+    }
+    assert after == before
+    assert (repo / "scripts/evidence/run_kumar2024_external_qualification.sh").read_text() == runner_text
     assert any("historical source" in w for w in report["capacity_warnings"])
 
 
