@@ -5,6 +5,8 @@ on:
     paths:
       - ".github/workflows/developer-preview.yml"
       - "scripts/run_developer_preview_journey.py"
+      - "scripts/evidence/verify_public_qualification_bundle.py"
+      - "tests/test_independent_qualification_verifier.py"
       - "docs/getting-started/**"
       - "mkdocs.yml"
       - "configs/examples/mock_bci.yaml"
@@ -20,6 +22,8 @@ on:
     paths:
       - ".github/workflows/developer-preview.yml"
       - "scripts/run_developer_preview_journey.py"
+      - "scripts/evidence/verify_public_qualification_bundle.py"
+      - "tests/test_independent_qualification_verifier.py"
       - "docs/getting-started/**"
       - "mkdocs.yml"
       - "configs/examples/mock_bci.yaml"
@@ -50,6 +54,8 @@ jobs:
           cache: pip
       - name: Root-pin regression tests (stdlib only)
         run: python -m unittest discover -s tests -p "test_developer_preview_root_pin.py" -v
+      - name: Independent qualification-verifier adversarial tests
+        run: python -m unittest discover -s tests -p "test_independent_qualification_verifier.py" -v
       - name: Build exact public-path wheels
         run: |
           set -euo pipefail
@@ -132,6 +138,35 @@ jobs:
           assert reproduction["reproduced"] is True
           assert reproduction["bundle_sha256"] == root
           assert reproduction["origin_authenticity"] == "externally_pinned"
+          PY
+      - name: Independently verify installed-wheel qualification bundle
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/developer-preview-report"
+          ROOT="$(python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          p = Path(os.environ["RUNNER_TEMP"]) / "developer-preview-report" / "journey-report.json"
+          report = json.loads(p.read_text(encoding="utf-8"))
+          print(report["artifacts"]["qualification_result"]["bundle_sha256"])
+          PY
+          )"
+          python scripts/evidence/verify_public_qualification_bundle.py "${OUT}/qualification" \
+            --expected-sha256 "${ROOT}" > "${OUT}/independent-verification.json"
+          ROOT="${ROOT}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          p = Path(os.environ["RUNNER_TEMP"]) / "developer-preview-report" / "independent-verification.json"
+          report = json.loads(p.read_text(encoding="utf-8"))
+          assert report["status"] == "verified"
+          assert report["root_sha256"] == os.environ["ROOT"]
+          assert report["frame_count"] > 0
+          assert report["decoder_reexecuted"] is False
+          assert report["scientific_result_interpretable"] is False
           PY
       - name: Upload developer-preview evidence
         if: always()
