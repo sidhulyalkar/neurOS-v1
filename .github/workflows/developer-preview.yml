@@ -48,6 +48,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Root-pin regression tests (stdlib only)
+        run: python -m unittest discover -s tests -p "test_developer_preview_root_pin.py" -v
       - name: Build exact public-path wheels
         run: |
           set -euo pipefail
@@ -96,8 +98,11 @@ jobs:
             --output "${STARTER}/evidence/qualification" \
             --duration 0.1 \
             --json > "${RUNNER_TEMP}/starter-qualify.json"
+          ROOT="$(python -c 'import json, os, pathlib, re; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"starter-qualify.json"; v=json.loads(p.read_text(encoding="utf-8")).get("bundle_sha256"); assert isinstance(v,str) and re.fullmatch(r"[0-9a-f]{64}",v), "invalid root"; print(v)')"
           "${CLI}" reproduce "${STARTER}/evidence/qualification" \
+            --expected-sha256 "${ROOT}" \
             --json > "${RUNNER_TEMP}/starter-reproduce.json"
+          ROOT="${ROOT}" python -c 'import json, os, pathlib; p=pathlib.Path(os.environ["RUNNER_TEMP"])/"starter-reproduce.json"; v=json.loads(p.read_text(encoding="utf-8")); assert v.get("reproduced") is True and v.get("bundle_sha256")==os.environ["ROOT"] and v.get("origin_authenticity")=="externally_pinned", "root-pin failure"'
       - name: Run the complete installed-wheel journey
         run: |
           set -euo pipefail
@@ -121,6 +126,12 @@ jobs:
           assert all(not item["editable"] for item in payload["distributions"].values())
           required = {"session", "qualification", "arena_report"}
           assert required <= set(payload["artifacts"])
+          root = payload["artifacts"]["qualification_root_sha256"]
+          assert len(root) == 64
+          reproduction = payload["artifacts"]["reproduction_result"]
+          assert reproduction["reproduced"] is True
+          assert reproduction["bundle_sha256"] == root
+          assert reproduction["origin_authenticity"] == "externally_pinned"
           PY
       - name: Upload developer-preview evidence
         if: always()

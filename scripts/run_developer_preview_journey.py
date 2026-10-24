@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -152,6 +153,26 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
+def _qualification_root(result: Any) -> str:
+    """Require an explicit root from the public qualify CLI, not the bundle itself."""
+    if not isinstance(result, dict) or result.get("status") != "complete":
+        raise RuntimeError("qualify did not return a completed qualification object")
+    digest = result.get("bundle_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise RuntimeError("qualify did not return a valid lowercase SHA-256 bundle root")
+    return digest
+
+
+def _require_pinned_reproduction(result: Any, expected_root: str) -> None:
+    """Reject an apparently successful replay unless it used the pinned root."""
+    if not isinstance(result, dict) or result.get("reproduced") is not True:
+        raise RuntimeError("reproduce did not return a successful replay result")
+    if result.get("bundle_sha256") != expected_root:
+        raise RuntimeError("reproduce bundle root differs from the prior qualification root")
+    if result.get("origin_authenticity") != "externally_pinned":
+        raise RuntimeError("reproduce did not report externally pinned root verification")
+
+
 def run_journey(repo_root: Path, output_dir: Path, duration_s: float) -> dict[str, Any]:
     results: list[CommandResult] = []
     report: dict[str, Any] = {
@@ -272,12 +293,14 @@ def run_journey(repo_root: Path, output_dir: Path, duration_s: float) -> dict[st
             expect_json=True,
         )
         _require(qualification_dir.is_dir(), "qualification command did not create a bundle")
+        qualification_root = _qualification_root(qualify)
         reproduce = _run(
             results,
             "reproduce",
-            [neuros, "reproduce", qualification_dir, "--json"],
+            [neuros, "reproduce", qualification_dir, "--expected-sha256", qualification_root, "--json"],
             expect_json=True,
         )
+        _require_pinned_reproduction(reproduce, qualification_root)
 
         model_card = _run(
             results,
@@ -317,6 +340,7 @@ def run_journey(repo_root: Path, output_dir: Path, duration_s: float) -> dict[st
         report["artifacts"] = {
             "session": str(session_dir),
             "qualification": str(qualification_dir),
+            "qualification_root_sha256": qualification_root,
             "arena_report": str(arena_report),
             "qualification_result": qualify,
             "reproduction_result": reproduce,
