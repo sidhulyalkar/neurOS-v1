@@ -88,6 +88,63 @@ fleet lane        = score-blind lease/claim/retry/settlement authority
 analysis lane     = separately gated complete-study interpretation
 ```
 
+## Read-only archive and host preflight
+
+Before the first paid or write-once external run, inspect the original
+**frozen** binding and local Linux host with the independently testable,
+stdlib-only preflight. It does not clone, download, install, execute, create
+an attempt directory, or authorize efficacy claims. It checks the exact
+archived ZIP SHA-256, six declared managed-file digests, frozen participant /
+case / execution counts, and **exactly one authorized CSP+LDA shard**:
+
+~~~bash
+python3 scripts/evidence/preflight_kumar2024_external_host.py \
+  --archive-only \
+  --binding-zip /absolute/path/nsq-kumar2024-promoted-binding-56fd0c51.zip
+~~~
+
+On the target Linux x86_64 host (including WSL2 with an x86_64 CPU), choose
+an attempt root that **does not yet exist**:
+
+~~~bash
+python3 scripts/evidence/preflight_kumar2024_external_host.py \
+  --binding-zip /absolute/path/nsq-kumar2024-promoted-binding-56fd0c51.zip \
+  --control-repo "$PWD" \
+  --work-root "$HOME/neuros-evidence/kumar2024-qual-attempt-001" \
+  --provider local-wsl
+~~~
+
+Change \`--provider\` to \`local-linux\` or the actual permitted provider label
+when appropriate. Machine architecture, tracked transport runner, Git/uv
+availability and write-once namespace are **hard** checks. Capacity below
+16 GiB RAM or 50 GiB free disk is a **warning**, not an invented change to
+the frozen environment authority. The historical binding was produced with
+CPU-requested inference but a CUDA-enabled Torch distribution, so installation
+disk and native-runtime compatibility may be nontrivial.
+
+Only an archive/host \`ready=true\` result warrants *considering* the existing
+external execution command. The runner itself must independently reproduce the
+exact archived \`EnvironmentAuthority\` before materialization or model work.
+A successful preflight is not scientific qualification and cannot waive
+that runner's gate. Keep the archive and any original failure attempts durable.
+
+When the preflight passes and execution is separately authorized, use the
+**existing** provider-neutral runner without changing its frozen arguments:
+
+~~~bash
+bash scripts/evidence/run_kumar2024_external_qualification.sh \
+  --control-repo "$PWD" \
+  --work-root "$HOME/neuros-evidence/kumar2024-qual-attempt-001" \
+  --provider local-wsl \
+  --binding-zip /absolute/path/nsq-kumar2024-promoted-binding-56fd0c51.zip
+~~~
+
+The runner creates the write-once attempt root; the preflight never does.
+The original GitHub binding artifact (run \`33291842755\`, artifact
+\`9726471429\`) reports expiry on **2026-11-28**; an independent copy of the
+exact ZIP is therefore an operational prerequisite. Do not commit the ZIP,
+processed EEG, predictions, or result bytes into source control.
+
 ## Immediate execution paths
 
 ### NVIDIA Brev CPU
