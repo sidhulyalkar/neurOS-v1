@@ -53,6 +53,52 @@ verified_archive
 
 `verified_archive` is preferred for long-lived reproducibility.
 
+## Preserve the expiring original binding ZIP
+
+The exact original GitHub Actions archive is artifact **9726471429** from run
+**33291842755**, not an extracted/repacked directory or a regenerated binding.
+GitHub reported expiry at **2026-11-28 04:08:51 UTC** when last checked.
+
+Save the original ZIP outside GitHub Actions, preferably in a durable object
+store with independent retention and an immutable or versioned object policy.
+Never commit the archive's participant metadata to the source repository.
+
+After downloading the original **ZIP bytes**, first check their identity:
+
+```bash
+python3 scripts/evidence/preserve_kumar2024_binding.py \
+  --source-zip /path/to/original-actions-artifact.zip
+```
+
+The stdlib-only checker requires the exact archived ZIP SHA, exactly six sealed
+managed files plus the index, all six managed-file SHA-256 values, the canonical
+domain-separated binding root, source/environment/execution-plan identities,
+and explicit no-model/no-final-prediction/no-final-metric declarations. It does
+not execute neurOS, load EEG, or inspect model results.
+
+Then preserve a second byte-identical copy in a **pre-existing** archive
+directory with atomic create-if-absent semantics:
+
+```bash
+mkdir -p "$HOME/neuros-evidence/frozen"
+python3 scripts/evidence/preserve_kumar2024_binding.py \
+  --source-zip /path/to/original-actions-artifact.zip \
+  --destination "$HOME/neuros-evidence/frozen/kumar2024-binding-56fd0c51.zip" \
+  > "$HOME/neuros-evidence/frozen/kumar2024-binding-verification.json"
+```
+
+The destination is never overwritten. A pre-existing output fails rather than
+silently replacing evidence. Re-running verification without `--destination`
+is safe. Copy the verified ZIP **and its separately stored checksum/receipt**
+to long-term, access-controlled storage; the mere existence of a copy in a
+working directory is not durable archival evidence.
+
+To run exactly the authorized classical one-shard systems qualification on
+Linux/x86_64, pass that preserved ZIP to the existing external runner
+`--binding-zip` argument with a **new** `--work-root`. The runner
+independently checks environment authority and shard identity again before
+worker execution. No score-based decision-making is permitted.
+
 ## Write-once attempts
 
 Every invocation requires a new `--work-root` that does not exist. A failed or partial attempt remains quarantined and cannot be reused to manufacture a clean rerun.
