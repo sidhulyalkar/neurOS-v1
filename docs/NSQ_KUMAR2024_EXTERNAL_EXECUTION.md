@@ -191,6 +191,85 @@ The original GitHub binding artifact (run \`33291842755\`, artifact
 exact ZIP is therefore an operational prerequisite. Do not commit the ZIP,
 processed EEG, predictions, or result bytes into source control.
 
+## Original GitHub Actions one-shard lane (manual opt-in)
+
+The **historical Actions worker** and the provider-neutral external Linux runner
+produce **different outer receipt formats**. Do not pass a GitHub Actions
+download to \`verify_kumar2024_external_qualification.py\`; that verifier is
+specific to the external transport manifest.
+
+The one authorized Actions worker is already present on historical ref
+\`execution/kumar2024-authorized-56fd0c51\`, and the ref must resolve to
+\`56fd0c5132bec17575d68f62256cb80fd5661395\`. Its own workflow refuses
+a mismatched \`github.workflow_sha\`. Neither the workflow nor the binding may
+be regenerated from today's \`main\` just to make a run pass.
+
+Check that the historical ref is still pinned, the artifact remains available,
+and the Actions workflow has **not** already been dispatched before a first run.
+A successful code CI or T4 systems preflight is *not* this classical shard.
+
+~~~bash
+REPO=sidhulyalkar/neurOS-v1
+SOURCE=56fd0c5132bec17575d68f62256cb80fd5661395
+REF=execution/kumar2024-authorized-56fd0c51
+WORKFLOW=nsq-kumar2024-classical-worker-qualification.yml
+SHARD=b6943a6bd0692fb99c14d3b57b2eea04ea8bf16b79b92a18415912f2b8381ceb
+
+test "$(git ls-remote origin "refs/heads/$REF" | cut -f1)" = "$SOURCE"
+gh run list -R "$REPO" -w "$WORKFLOW" -b "$REF" \
+  -e workflow_dispatch --limit 100 \
+  --json databaseId,status,conclusion,headSha,createdAt
+~~~
+
+**Explicit owner action**: If that report shows no prior run and execution
+is still authorized under #109, use GitHub Actions' **Run workflow** UI with
+the frozen ref and the three inputs below, or run the following from an
+authenticated GitHub CLI. **It initiates real neural-data download and CPU
+model fitting; do not paste it into automated CI or run without intent.**
+
+~~~bash
+gh workflow run "$WORKFLOW" -R "$REPO" --ref "$REF" \
+  -f binding_run_id=33291842755 \
+  -f binding_artifact_id=9726471429 \
+  -f shard_spec_sha256="$SHARD"
+~~~
+
+Follow the resulting workflow run, and record its actual run ID, checked-out
+source revision and GitHub artifact ID separately. A failed/partial run is
+retained as evidence; retries require their own infrastructure justification.
+
+The historical output contains \`worker_run.json\`, \`qualification_manifest.json\`
+and five worker files. After download, run the **Actions-specific**, stdlib
+independent structural verifier (which imports neither the producing worker
+nor neurOS). For example, replacing \`RUN_ID\` with the *actual* identifier:
+
+~~~bash
+mkdir -p "$HOME/neuros-evidence/actions-worker-001"
+gh run download RUN_ID -R "$REPO" \
+  -n "nsq-kumar2024-classical-worker-qualification-$SHARD" \
+  -D "$HOME/neuros-evidence/actions-worker-001"
+
+python3 scripts/evidence/verify_kumar2024_actions_qualification.py \
+  "$HOME/neuros-evidence/actions-worker-001" \
+  > "$HOME/neuros-evidence/actions-worker-001-audit.json"
+~~~
+
+This verifier requires exact source, binding and shard identities, complete
+worker file inventory, domain-separated worker/outer manifest SHA-256
+identities, five budget rows, and all four explicit **false** scientific
+interpretation flags. It never prints numerical scores. Save the original
+GitHub artifact digest, run URL and independent verification root in a
+separate trusted record. A future re-audit can pass
+\`--expected-files-root\` with that independently preserved digest to detect
+subsequent byte drift. **An independently calculated hash is not a signed
+publisher identity or a rerun of the experimental method.**
+
+The original artifact may expire from GitHub Actions retention. Preserve
+its original ZIP and audited evidence in access-controlled durable storage
+according to dataset and artifact distribution terms. This one-shard receipt
+**qualifies systems execution only**; it never licenses external-floor
+rankings, ORION superiority or any BCI efficacy claim.
+
 ## Immediate execution paths
 
 ### NVIDIA Brev CPU
