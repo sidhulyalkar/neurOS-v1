@@ -53,7 +53,13 @@ max_random_rank_fraction diagnostic threshold.
 
 The evaluator rejects duplicated/unplanned rows, content mismatches,
 nonfinite scores, discovery rows, and baseline drift. Missing runs are recorded
-as nonestimable, **not** silently treated as zero. Resampling is by paired
+as nonestimable, **not** silently treated as zero. Every received row is
+preserved in a deterministic `received_observations` inventory containing
+its pair ID, circuit ID and observation fingerprint. The inventory's
+`received_observation_root` binds the exact partial or complete inputs, but
+the actual source observations must be retained separately to permit a
+fully independent re-audit. Hashes alone cannot reconstruct missing scores.
+Resampling is by paired
 validation trial; candidate-vs-magnitude comparisons preserve pairing.
 Random controls are aggregated across exactly the same pairs, with a
 descriptive plus-one upper-tail **rank fraction**:
