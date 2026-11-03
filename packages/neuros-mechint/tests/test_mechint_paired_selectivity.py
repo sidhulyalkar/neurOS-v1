@@ -127,7 +127,7 @@ def test_invalid_or_underpowered_design_never_promotes():
         replace(design, magnitude_targets=("c",))
     with pytest.raises(ValueError, match="duplicate validation pair content"):
         replace(design, validation_pair_hashes=(("a", "a" * 64), ("b", "a" * 64)))
-    with pytest.raises(ValueError, match="must be distinct"):
+    with pytest.raises(ValueError, match="distinct same-size"):
         replace(design, magnitude_targets=("b", "a"))
 
 
