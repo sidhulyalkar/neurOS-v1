@@ -244,3 +244,21 @@ def test_missing_row_does_not_hide_corrupt_available_intact_baseline():
         evaluate_paired_selectivity(
             design, (observations[0], contradictory, *observations[2:-1])
         )
+
+
+def test_strong_random_controls_can_defeat_apparent_candidate_selectivity():
+    design, observations = _fixture(candidate_drop=3.0)
+    # Five matched random controls outperform the candidate on every pair.
+    strong = {"random-0", "random-1", "random-2", "random-3", "random-4"}
+    changed = tuple(
+        replace(row, intervened_repeated=0.0)
+        if row.circuit_id in strong else row
+        for row in observations
+    )
+    report = evaluate_paired_selectivity(design, changed)
+    assert report["mean_candidate_difference_in_differences"] == pytest.approx(3.0)
+    assert report["ci_candidate_difference_in_differences"][0] > 0
+    assert report["mean_magnitude_difference_in_differences"] == pytest.approx(0.0)
+    assert report["random_control_plus_one_rank_fraction"] == pytest.approx(6 / 25)
+    assert report["status"] == "REJECTED_CONTROLS"
+    assert report["supports_selective_effect"] is False
