@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -165,3 +167,27 @@ def test_nonestimable_cannot_carry_fabricated_effect_summary():
     )
     with pytest.raises(ValueError, match="cannot include completed effects"):
         render_paired_selectivity_html(result)
+
+
+def test_standalone_module_cli_does_not_require_optional_visualization_import(tmp_path):
+    result = demo.synthetic_case(candidate_effect=3.2)
+    source = tmp_path / "result.json"
+    dest = tmp_path / "rendered.html"
+    source.write_text(json.dumps(result), encoding="utf-8")
+    command = [
+        sys.executable, "-m", "neuros_mechint.evidence_studio",
+        "--input", str(source), "--out", str(dest),
+    ]
+    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    assert str(dest) in completed.stdout
+    assert "Selectivity diagnostic supported" in dest.read_text()
+    smoke = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import neuros_mechint.evidence_studio; "
+            "assert 'neuros_mechint.visualization' not in sys.modules",
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    assert smoke.returncode == 0
