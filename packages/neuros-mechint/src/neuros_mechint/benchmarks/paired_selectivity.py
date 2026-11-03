@@ -140,10 +140,28 @@ class PairedSelectivityObservation:
                 raise ValueError(f"nonfinite or nonnumeric intervention score: {key}")
 
 
+def _finite_difference(left: float, right: float, *, label: str) -> float:
+    """Reject derived overflow instead of serializing nonfinite causal effects."""
+    result = left - right
+    if not math.isfinite(result):
+        raise ValueError(f"nonfinite derived selectivity: {label}")
+    return result
+
+
+def _finite_mean(values: list[float], *, label: str) -> float:
+    result = mean(values)
+    if not math.isfinite(result):
+        raise ValueError(f"nonfinite aggregate selectivity: {label}")
+    return result
+
+
 def _bootstrap(values: list[float], *, samples: int, alpha: float, seed: int) -> list[float]:
     rng = random.Random(seed)
     n = len(values)
-    estimates = sorted(mean(rng.choices(values, k=n)) for _ in range(samples))
+    estimates = sorted(
+        _finite_mean(rng.choices(values, k=n), label="bootstrap")
+        for _ in range(samples)
+    )
     lower = int((alpha / 2) * (samples - 1))
     upper = int((1 - alpha / 2) * (samples - 1))
     return [estimates[lower], estimates[upper]]
@@ -211,22 +229,40 @@ def evaluate_paired_selectivity(
                     raise ValueError(f"intact baseline drift for pair {pair_id}: {circuit_id}")
 
     def did(row: PairedSelectivityObservation) -> float:
-        return (row.intact_repeated - row.intact_control) - (
-            row.intervened_repeated - row.intervened_control
+        intact = _finite_difference(
+            row.intact_repeated, row.intact_control, label="intact contrast"
         )
+        intervened = _finite_difference(
+            row.intervened_repeated, row.intervened_control, label="intervened contrast"
+        )
+        return _finite_difference(intact, intervened, label="paired difference-in-differences")
 
     candidate_rows = [actual[(p, design.candidate_id)] for p in expected_pairs]
     magnitude_rows = [actual[(p, design.magnitude_id)] for p in expected_pairs]
-    baseline_advantage = [r.intact_repeated - r.intact_control for r in candidate_rows]
+    baseline_advantage = [
+        _finite_difference(
+            r.intact_repeated, r.intact_control, label="intact repetition advantage"
+        )
+        for r in candidate_rows
+    ]
     candidate_effect = [did(r) for r in candidate_rows]
     magnitude_effect = [did(r) for r in magnitude_rows]
-    magnitude_difference = [a - b for a, b in zip(candidate_effect, magnitude_effect)]
+    magnitude_difference = [
+        _finite_difference(a, b, label="candidate vs magnitude control")
+        for a, b in zip(candidate_effect, magnitude_effect)
+    ]
     random_effects = [
-        mean(did(actual[(p, circuit_id)]) for p in expected_pairs)
+        _finite_mean(
+            [did(actual[(p, circuit_id)]) for p in expected_pairs],
+            label=f"random control {circuit_id}",
+        )
         for circuit_id in control_names
     ]
-    candidate_mean = mean(candidate_effect)
-    p_value = (1 + sum(value >= candidate_mean for value in random_effects)) / (
+    candidate_mean = _finite_mean(candidate_effect, label="candidate causal effect")
+    # A descriptive, plus-one rank against declared circuits. This is NOT
+    # a calibrated randomization p-value without an independently justified
+    # exchangeable null/control-sampling procedure.
+    rank_fraction = (1 + sum(value >= candidate_mean for value in random_effects)) / (
         1 + len(random_effects)
     )
     baseline_ci = _bootstrap(
@@ -239,7 +275,7 @@ def evaluate_paired_selectivity(
         magnitude_difference, samples=design.bootstrap_samples, alpha=design.alpha, seed=design.seed + 2
     )
     behavior_ok = (
-        mean(baseline_advantage) > 0
+        _finite_mean(baseline_advantage, label="behavioral advantage") > 0
         and baseline_ci[0] > 0
         and mean(float(r.intact_repeated > 0) for r in candidate_rows)
         >= design.min_positive_fraction
@@ -251,7 +287,7 @@ def evaluate_paired_selectivity(
         and len(random_effects) >= design.min_random_controls
     )
     selective_ok = candidate_mean > 0 and candidate_ci[0] > 0
-    controls_ok = p_value <= design.alpha and magnitude_ci[0] > 0
+    controls_ok = rank_fraction <= design.alpha and magnitude_ci[0] > 0
     supports = (
         design.control_condition == "reordered"
         and coverage_ok and behavior_ok and selective_ok and controls_ok
@@ -279,17 +315,23 @@ def evaluate_paired_selectivity(
         "fraction_positive_repetition_advantage": mean(
             float(x > 0) for x in baseline_advantage
         ),
-        "mean_intact_repetition_advantage": mean(baseline_advantage),
+        "mean_intact_repetition_advantage": _finite_mean(
+            baseline_advantage, label="behavioral advantage"
+        ),
         "ci_intact_repetition_advantage": baseline_ci,
         "mean_candidate_difference_in_differences": candidate_mean,
         "ci_candidate_difference_in_differences": candidate_ci,
-        "mean_magnitude_difference_in_differences": mean(magnitude_effect),
+        "mean_magnitude_difference_in_differences": _finite_mean(
+            magnitude_effect, label="magnitude effect"
+        ),
         "ci_candidate_advantage_vs_magnitude": magnitude_ci,
         "random_control_mean_effects": [
             {"circuit_id": circuit_id, "mean_effect": effect}
             for circuit_id, effect in zip(control_names, random_effects)
         ],
-        "random_control_plus_one_p": p_value,
+        "random_control_plus_one_rank_fraction": rank_fraction,
+        "random_control_exchangeability_verified": False,
+        "random_control_rank_is_calibrated_p_value": False,
         "pair_evidence": [
             {"pair_id": pair_id, "candidate_effect": a, "magnitude_effect": b}
             for pair_id, a, b in zip(expected_pairs, candidate_effect, magnitude_effect)
