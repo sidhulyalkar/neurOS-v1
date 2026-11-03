@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from neuros_mechint.core.manifest import stable_hash
-from neuros_mechint.visualization.evidence_studio import (
+from neuros_mechint.evidence_studio import (
     _unique_json_keys,
     render_paired_selectivity_html,
     write_paired_selectivity_html,
