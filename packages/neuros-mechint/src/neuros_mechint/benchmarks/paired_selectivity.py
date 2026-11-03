@@ -199,9 +199,23 @@ def evaluate_paired_selectivity(
             raise ValueError(f"validation pair content hash mismatch: {row.pair_id}")
         actual[key] = row
 
+    # Bind every supplied observation to the outcome, including incomplete
+    # studies. The actual observations must still be independently retained;
+    # content hashes alone do not recreate the raw evidence.
+    received = [
+        {
+            "pair_id": pair_id,
+            "circuit_id": circuit_id,
+            "observation_fingerprint": stable_hash(actual[(pair_id, circuit_id)]),
+        }
+        for pair_id, circuit_id in sorted(actual)
+    ]
     base = {
         "schema_version": SELECTIVITY_SCHEMA,
         "design_fingerprint": stable_hash(design),
+        "n_observations_received": len(actual),
+        "received_observation_root": stable_hash(received),
+        "received_observations": received,
         "control_condition": design.control_condition,
         "validation_only": True,
         "n_pairs_planned": len(expected_pairs),
@@ -222,7 +236,6 @@ def evaluate_paired_selectivity(
     if missing:
         return finish({
             "status": "NONESTIMABLE_MISSING_OBSERVATIONS",
-            "n_observations_received": len(actual),
             "missing": [{"pair_id": p, "circuit_id": c} for p, c in missing],
             "supports_selective_effect": False,
         })
