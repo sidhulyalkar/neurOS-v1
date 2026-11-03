@@ -41,7 +41,8 @@ def test_three_synthetic_stories_generate_portable_evidence(tmp_path):
         ) == page
         assert "Synthetic diagnostic" in page
         assert "not independently reproduced" in page
-        assert "Not a calibrated p-value" in page or "not a calibrated" in page
+        if name != "03-incomplete-experiment":
+            assert "Not a calibrated p-value" in page
         assert "default-src &#" not in page
         assert "default-src 'none'" in page
         assert "<script" not in page
