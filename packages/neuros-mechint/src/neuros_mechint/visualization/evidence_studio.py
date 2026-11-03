@@ -212,7 +212,18 @@ def _valid_result(payload: Mapping[str, Any]) -> dict[str, Any]:
                 isinstance(row.get(key), str) for key in ("pair_id", "circuit_id")
             ):
                 raise ValueError("malformed missing observation")
-        if "pair_evidence" in result:
+        forbidden = (
+            "pair_evidence", "n_pairs", "n_random_controls",
+            "mean_candidate_difference_in_differences",
+            "mean_magnitude_difference_in_differences",
+            "mean_intact_repetition_advantage",
+            "ci_candidate_difference_in_differences",
+            "ci_candidate_advantage_vs_magnitude",
+            "ci_intact_repetition_advantage",
+            "random_control_mean_effects",
+            "random_control_plus_one_rank_fraction",
+        )
+        if any(key in result for key in forbidden):
             raise ValueError("nonestimable result cannot include completed effects")
     else:
         n = _expect_count(result.get("n_pairs"), "n_pairs")
@@ -464,7 +475,7 @@ def render_paired_selectivity_html(
         'is never inferred from visual polish.</p>'
         '<span class="tag">Synthetic diagnostic · not independently reproduced</span>'
         '<nav class="nav" aria-label="Report sections"><a href="#main">Verdict</a>'
-        '<a href="#effects">Effects</a><a href="#trials">Trials</a>'
+        '<a href="#claims">Evidence ladder</a><a href="#effects">Effects</a><a href="#trials">Trials</a>'
         '<a href="#provenance">Provenance</a></nav></header>'
         '<main id="main"><section class="section hero" aria-labelledby="verdict-h">'
         f'<div class="verdict {kind}"><div class="kicker">Scientific status</div>'
@@ -472,6 +483,25 @@ def render_paired_selectivity_html(
         f'<p class="muted mono">{_escape(status)}</p></div>'
         f'<div><div class="metric-grid" style="grid-template-columns:1fr">{stats}</div></div>'
         '</section>'
+        '<section class="section" id="claims" aria-labelledby="claims-h">'
+        '<h2 id="claims-h">What has actually been established?</h2>'
+        '<div class="grid">'
+        '<div><h3>1. Artifact self-consistency</h3>'
+        '<span class="pill good">Hash verified</span>'
+        '<p class="muted">The content matches its own result hash. '
+        'This is not independent authentication.</p></div>'
+        '<div><h3>2. Paired selectivity</h3>'
+        f'<span class="pill">{_escape(heading)}</span>'
+        '<p class="muted">Limited to the declared matched intervention task.</p></div>'
+        '<div><h3>3. Real-model and preregistration evidence</h3>'
+        '<span class="pill bad">Unverified</span>'
+        '<p class="muted">Pinned external execution and independent precommitment '
+        'are not established here.</p></div>'
+        '<div><h3>4. Independent reproduction</h3>'
+        '<span class="pill bad">Not established</span>'
+        '<p class="muted">No separate environment/runner has reproduced a '
+        'mechanistic finding through this diagnostic.</p></div>'
+        '</div></section>'
         f'{plot}'
         '<section class="section" id="trials"><h2>Held-out trial evidence</h2>'
         '<p class="section-sub">Per-trial summaries are retained rather than '
