@@ -18,7 +18,7 @@ def _fixture(*, candidate_drop=5.0, control_drop=0.0, magnitude_drop=0.0, n=8):
     )
     design = PairedSelectivityDesign(
         design_id="toy-repetition-v3",
-        model_revision="synthetic-pinned-model-v1",
+        model_revision="synthetic:pinned-model-v1",
         discovery_commitment="d" * 64,
         candidate_id="candidate",
         candidate_targets=("a", "b"),
@@ -138,3 +138,10 @@ def test_novel_suffix_comparison_is_sensitivity_only():
     )
     assert report["status"] == "SENSITIVITY_ONLY_NOT_PRIMARY"
     assert report["supports_selective_effect"] is False
+
+
+def test_mutable_model_revision_is_rejected():
+    design, _ = _fixture()
+    with pytest.raises(ValueError, match="pinned commit"):
+        replace(design, model_revision="main")
+    assert len(replace(design, model_revision="a" * 40).model_revision) == 40
