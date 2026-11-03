@@ -61,6 +61,8 @@ def test_report_does_not_invent_metrics_from_partial_observations():
     assert "No chart is drawn" in page
     assert "Candidate effect" not in page
     assert "Per-trial effect summaries are unavailable" in page
+    assert "Evidence ladder" in page
+    assert "Hash verified" in page
 
 
 def test_integrity_tampering_and_forced_authority_fail_closed():
@@ -146,3 +148,13 @@ def test_missing_case_label_is_html_escaped():
     page = render_paired_selectivity_html(result)
     assert "<svg onload=" not in page
     assert "&lt;svg" in page
+
+
+def test_nonestimable_cannot_carry_fabricated_effect_summary():
+    result = demo.synthetic_case(candidate_effect=3, incomplete=True)
+    result["mean_candidate_difference_in_differences"] = 0.0
+    result["result_hash"] = stable_hash(
+        {key: value for key, value in result.items() if key != "result_hash"}
+    )
+    with pytest.raises(ValueError, match="cannot include completed effects"):
+        render_paired_selectivity_html(result)
