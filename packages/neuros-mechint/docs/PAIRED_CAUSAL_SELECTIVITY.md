@@ -54,15 +54,23 @@ The evaluator rejects duplicated/unplanned rows, content mismatches,
 nonfinite scores, discovery rows, and baseline drift. Missing runs are recorded
 as nonestimable, **not** silently treated as zero. Resampling is by paired
 validation trial; candidate-vs-magnitude comparisons preserve pairing.
-Random controls are aggregated across exactly the same pairs, with the
-conservative plus-one rank `p=(1+#random>=candidate)/(1+#random)`.
+Random controls are aggregated across exactly the same pairs, with a
+descriptive plus-one upper-tail **rank fraction**:
+`r=(1+#random>=candidate)/(1+#random)`. This is **not a calibrated
+p-value** unless a separately justified exchangeable control-sampling
+scheme, frozen candidate-selection procedure and multiple-testing plan
+are established. The evaluator intentionally reports
+`random_control_exchangeability_verified=false` and
+`random_control_rank_is_calibrated_p_value=false`.
 
 A supportive *diagnostic* requires: enough held-out pairs; a positive baseline
 repetition advantage and repeated margin; a positive candidate difference-in-
 differences with bootstrap interval above zero; superiority to a magnitude
-baseline; and a plus-one random-control p-value under the declared threshold.
-The default 24 random controls permit a minimum p of 0.04; they do **not**
-support multiple candidate selection without multiplicity adjustment.
+baseline; and a plus-one random-control rank-fraction threshold under the declared threshold.
+The default 24 random controls permit a minimum descriptive rank
+fraction of 0.04; this is **not 0.04 frequentist significance**. Random
+control selection is not independently certified by this evaluator.
+Multiple candidate selection without multiplicity correction is unsupported.
 No claim is made from a score if an expected observation is missing.
 
 ### Limits and subsequent work
@@ -70,6 +78,9 @@ No claim is made from a score if an expected observation is missing.
 - A SHA-256 discovery commitment is a binding identifier, **not proof** that a
   protocol was frozen before held-out outputs were read. Independent
   timestamped preregistration or external execution audit remains necessary.
+- All four raw scores must be finite, and intermediate contrasts, paired
+  difference-in-differences, candidate-comparator differences, and bootstrap
+  means must also be finite. Derived overflow fails closed.
 - The analyzer cannot prove tokenization integrity, model RNG replay, lack of
   data leakage, or intervention-manifold validity. The **runner** must enforce
   those, using the v1 strict execution and held-out evidence facilities.
