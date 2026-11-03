@@ -119,6 +119,12 @@ from .ground_truth import (
     make_ground_truth_pair,
     run_ground_truth_benchmark,
 )
+from .paired_selectivity import (
+    SELECTIVITY_SCHEMA,
+    PairedSelectivityDesign,
+    PairedSelectivityObservation,
+    evaluate_paired_selectivity,
+)
 from .repetition_preflight import (
     CONTROL_SCHEMA,
     MatchedRepetitionTrial,
@@ -190,6 +196,10 @@ from .tokenizer_comparison import (
 from .v1_ground_truth import V1GroundTruthReport, run_v1_release_contract_benchmark
 
 __all__ = [
+    "evaluate_paired_selectivity",
+    "PairedSelectivityObservation",
+    "PairedSelectivityDesign",
+    "SELECTIVITY_SCHEMA",
     "CONTROL_SCHEMA",
     "CORRESPONDENCE_ARTIFACT_SCHEMA",
     "CORRESPONDENCE_STUDY_SCHEMA",
