@@ -54,7 +54,9 @@ def test_planted_selective_path_supports_diagnostic_only():
     assert report["status"] == "SUPPORTED_DIAGNOSTIC_ONLY"
     assert report["supports_selective_effect"]
     assert report["mean_candidate_difference_in_differences"] == 5.0
-    assert report["random_control_plus_one_p"] == pytest.approx(1 / 25)
+    assert report["random_control_plus_one_rank_fraction"] == pytest.approx(1 / 25)
+    assert report["random_control_exchangeability_verified"] is False
+    assert report["random_control_rank_is_calibrated_p_value"] is False
     assert report["preregistration_independently_verified"] is False
     assert report["real_model_evidence"] is False
     assert len(report["result_hash"]) == 64
@@ -145,3 +147,40 @@ def test_mutable_model_revision_is_rejected():
     with pytest.raises(ValueError, match="pinned commit"):
         replace(design, model_revision="main")
     assert len(replace(design, model_revision="a" * 40).model_revision) == 40
+
+
+def test_finite_raw_scores_with_overflowing_derived_contrast_are_rejected():
+    design, observations = _fixture()
+    # Both scores are finite; their subtraction is not.
+    mutated = replace(observations[0], intact_repeated=1e308, intact_control=-1e308)
+    with pytest.raises(ValueError, match="nonfinite derived selectivity"):
+        evaluate_paired_selectivity(design, (mutated, *observations[1:]))
+
+
+def test_finite_raw_scores_with_overflowing_candidate_comparator_are_rejected():
+    design, observations = _fixture()
+    # All rows have an identical intact baseline of zero; candidate and
+    # comparator effects are individually finite but their difference is not.
+    rows = []
+    for row in observations:
+        intervened_repeated = (
+            -1e308 if row.circuit_id == design.candidate_id
+            else 1e308 if row.circuit_id == design.magnitude_id
+            else 0.0
+        )
+        rows.append(replace(
+            row,
+            intact_repeated=0.0, intact_control=0.0,
+            intervened_repeated=intervened_repeated, intervened_control=0.0,
+        ))
+    with pytest.raises(ValueError, match="candidate vs magnitude control"):
+        evaluate_paired_selectivity(design, tuple(rows))
+
+
+def test_plus_one_rank_is_descriptive_not_a_calibrated_randomization_test():
+    design, observations = _fixture()
+    report = evaluate_paired_selectivity(design, observations)
+    assert report["random_control_plus_one_rank_fraction"] == pytest.approx(0.04)
+    assert report["random_control_exchangeability_verified"] is False
+    assert report["random_control_rank_is_calibrated_p_value"] is False
+    assert "random_control_plus_one_p" not in report
