@@ -235,3 +235,12 @@ def test_complete_audit_binds_all_raw_observation_fingerprints():
     assert result["n_observations_received"] == len(observations)
     assert len(result["received_observations"]) == len(observations)
     assert len(result["received_observation_root"]) == 64
+
+
+def test_missing_row_does_not_hide_corrupt_available_intact_baseline():
+    design, observations = _fixture()
+    contradictory = replace(observations[1], intact_repeated=999.0)
+    with pytest.raises(ValueError, match="intact baseline drift"):
+        evaluate_paired_selectivity(
+            design, (observations[0], contradictory, *observations[2:-1])
+        )
