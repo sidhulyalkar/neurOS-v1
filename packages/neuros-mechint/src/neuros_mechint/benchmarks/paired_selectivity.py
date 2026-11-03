@@ -58,6 +58,11 @@ class PairedSelectivityDesign:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be nonempty")
+        if re.fullmatch(
+            r"(?:[0-9a-f]{40}|[0-9a-f]{64}|synthetic:[A-Za-z0-9][A-Za-z0-9._-]*)",
+            self.model_revision,
+        ) is None:
+            raise ValueError("model_revision must be a pinned commit/hash or synthetic: fixture")
         if not isinstance(self.discovery_commitment, str) or not _SHA256.fullmatch(
             self.discovery_commitment
         ):
