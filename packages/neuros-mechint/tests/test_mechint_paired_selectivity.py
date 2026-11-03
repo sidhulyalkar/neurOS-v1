@@ -57,6 +57,8 @@ def test_planted_selective_path_supports_diagnostic_only():
     assert report["random_control_plus_one_rank_fraction"] == pytest.approx(1 / 25)
     assert report["random_control_exchangeability_verified"] is False
     assert report["random_control_rank_is_calibrated_p_value"] is False
+    assert report["target_universe_execution_verified"] is False
+    assert report["magnitude_matched_empirically_verified"] is False
     assert report["preregistration_independently_verified"] is False
     assert report["real_model_evidence"] is False
     assert len(report["result_hash"]) == 64
@@ -184,3 +186,19 @@ def test_plus_one_rank_is_descriptive_not_a_calibrated_randomization_test():
     assert report["random_control_exchangeability_verified"] is False
     assert report["random_control_rank_is_calibrated_p_value"] is False
     assert "random_control_plus_one_p" not in report
+
+
+def test_rank_threshold_is_independent_of_bootstrap_alpha():
+    design, observations = _fixture()
+    low = evaluate_paired_selectivity(design, observations)
+    # Same 95% bootstrap intervals, but a stricter descriptive control rank
+    # threshold refuses promotion without pretending to change significance.
+    strict = evaluate_paired_selectivity(
+        replace(design, max_random_rank_fraction=0.03), observations
+    )
+    assert low["status"] == "SUPPORTED_DIAGNOSTIC_ONLY"
+    assert strict["status"] == "REJECTED_CONTROLS"
+    assert low["ci_candidate_difference_in_differences"] == strict[
+        "ci_candidate_difference_in_differences"
+    ]
+    assert strict["max_random_rank_fraction"] == pytest.approx(0.03)
