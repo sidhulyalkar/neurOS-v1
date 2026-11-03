@@ -78,7 +78,7 @@ jobs:
             packages/neuros-mechint/src/neuros_mechint/circuits/acdc.py \
             packages/neuros-mechint/src/neuros_mechint/circuits/path_patching.py \
             packages/neuros-mechint/src/neuros_mechint/cli.py \
-            packages/neuros-mechint/src/neuros_mechint/visualization/evidence_studio.py \
+            packages/neuros-mechint/src/neuros_mechint/evidence_studio.py \
             packages/neuros-mechint/examples/26_evidence_studio_showcase.py \
             packages/neuros-mechint/tests/test_mechint_evidence_studio.py
 
