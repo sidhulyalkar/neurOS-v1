@@ -90,6 +90,57 @@ def main(out: Path) -> dict:
             "source": f"{name}.json",
             "report": f"{name}.html",
         }
+    gallery_cases = (
+        ("01-planted-path", "Planted selective route",
+         "A known-answer intervention selectively changes the repeated-context response."),
+        ("02-generic-degradation", "Generic degradation trap",
+         "A large raw disruption is not selective because both matched conditions worsen."),
+        ("03-incomplete-experiment", "Missing intervention evidence",
+         "One absent planned observation prevents a valid effect estimate."),
+    )
+    cards = "\n".join(
+        '<article class="case"><p class="counter">EXPERIMENT '
+        + str(index).zfill(2)
+        + '</p><h2>' + title + '</h2><p>' + description + '</p>'
+        + '<p class="status">' + summary[name]["status"] + '</p>'
+        + '<div class="links"><a href="' + name + '.html">View evidence</a>'
+        + '<a href="' + name + '.json">Source JSON</a></div></article>'
+        for index, (name, title, description) in enumerate(gallery_cases, start=1)
+    )
+    index_html = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
+        'style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'">'
+        '<title>MechInt Evidence Studio | Synthetic Showcase</title>'
+        '<style>:root{color-scheme:dark}*{box-sizing:border-box}'
+        'body{background:#09101b;color:#e8f1f7;margin:0;'
+        'font:15px/1.55 system-ui,-apple-system,sans-serif}'
+        'main{max-width:1100px;margin:auto;padding:48px 24px 80px}'
+        '.kicker{color:#6ed5e9;letter-spacing:.14em;font-size:12px;font-weight:700}'
+        'h1{font-size:clamp(30px,5vw,55px);line-height:1.14;letter-spacing:-.04em}'
+        '.intro{max-width:700px;color:#a7b8c9;font-size:17px}'
+        '.cases{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;'
+        'margin-top:35px}.case{border:1px solid #304052;border-radius:15px;'
+        'padding:24px;background:#121d2b}.case h2{font-size:21px;line-height:1.2}'
+        '.case p{color:#a7b8c9}.case .counter{font-size:11px;letter-spacing:.12em;'
+        'color:#6ed5e9}.case .status{font-size:12px;overflow-wrap:anywhere;'
+        'font-family:ui-monospace,monospace}.links{display:flex;gap:16px;flex-wrap:wrap}'
+        'a{color:#6ed5e9}a:focus-visible{outline:3px solid #6ed5e9;outline-offset:3px}'
+        'footer{margin-top:30px;color:#a7b8c9;font-size:12px}'
+        '@media(max-width:760px){main{padding:28px 16px}.cases{grid-template-columns:1fr}}'
+        '</style></head><body><main>'
+        '<div class="kicker">NEUROS / MECHINT / EVIDENCE STUDIO</div>'
+        '<h1>Three outcomes.<br>One honest evidence standard.</h1>'
+        '<p class="intro">Synthetic known-answer examples only. Explore a planted '
+        'positive diagnostic, a rejected false-positive trap, and a nonestimable '
+        'study. None are evidence of a real-model mechanism.</p>'
+        '<section class="cases" aria-label="Synthetic evidence cases">'
+        + cards
+        + '</section><footer>Fully offline. Source results accompany each '
+        'HTML explanation. No model weights were executed.</footer></main></body></html>'
+    )
+    (out / "index.html").write_text(index_html, encoding="utf-8")
     (out / "manifest.json").write_text(
         json.dumps(
             {"kind": "synthetic demonstration only", "cases": summary}, indent=2, sort_keys=True
