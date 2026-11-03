@@ -182,3 +182,11 @@ pip install -e "packages/neuros-mechint[dev,orion]"
 ## Scientific claim boundary
 
 Passing v1 software gates means the framework can express, serialize, migrate, falsify, compare, and independently reproduce the declared experiment contracts. It does **not** establish biological homology, universal neural meaning, architecture-general mechanisms, cross-dataset transfer, or a superior neural tokenization without the corresponding real held-out and independently replicated intervention evidence.
+
+### Paired causal selectivity (experimental)
+
+The [matched validation audit](docs/PAIRED_CAUSAL_SELECTIVITY.md) compares
+repetition-sensitive intervention effects with same-size random circuits and
+a magnitude baseline using paired difference-in-differences. This is a
+**synthetic/diagnostic measurement contract**, not completed real-model
+mechanistic evidence. Its own held-out and model-execution gates remain open.
