@@ -119,6 +119,12 @@ from .ground_truth import (
     make_ground_truth_pair,
     run_ground_truth_benchmark,
 )
+from .paired_selectivity import (
+    SELECTIVITY_SCHEMA,
+    PairedSelectivityDesign,
+    PairedSelectivityObservation,
+    evaluate_paired_selectivity,
+)
 from .repetition_preflight import (
     CONTROL_SCHEMA,
     MatchedRepetitionTrial,
@@ -203,6 +209,7 @@ __all__ = [
     "FACTORIAL_STUDY_SCHEMA",
     "REPLICATION_ARTIFACT_SCHEMA",
     "REPLICATION_STUDY_SCHEMA",
+    "SELECTIVITY_SCHEMA",
     "ArchitectureComparisonReport",
     "ArchitectureMechanismSummary",
     "CandidateDiscovery",
@@ -270,6 +277,8 @@ __all__ = [
     "MechanismEmergenceReport",
     "MechanisticHypothesis",
     "MetricReplicationEstimate",
+    "PairedSelectivityDesign",
+    "PairedSelectivityObservation",
     "PairwiseMechanismComparison",
     "RandomCircuitControl",
     "ReplicationAxis",
@@ -308,6 +317,7 @@ __all__ = [
     "evaluate_adapter_circuit_faithfulness",
     "evaluate_circuit_faithfulness",
     "evaluate_localization",
+    "evaluate_paired_selectivity",
     "evaluate_sae_feature_faithfulness",
     "extract_control_map",
     "extract_effect_map",
