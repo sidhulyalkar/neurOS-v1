@@ -7,22 +7,22 @@ not the pending real-model qualification in [#201](https://github.com/sidhulyalk
 
 ## Why another metric?
 
-The raw next-token logit margin on \`A B C D A B C\` may be positive from
+The raw next-token logit margin on `A B C D A B C` may be positive from
 token-frequency priors or generic context effects. A high ablation delta may
 also simply mean that an intervention breaks language modeling generally.
 
 For the **same semantic trial** and the **same circuit intervention**, record:
 
-\`\`\`text
+```text
          intact                    intervened
 repeat  r0                        r1
 control c0                        c1
-\`\`\`
+```
 
-The selective effect is \`(r0 - c0) - (r1 - c1)\`.
+The selective effect is `(r0 - c0) - (r1 - c1)`.
 A generic equal degradation of the repeated and control conditions has effect
-zero. The primary control is **reordered**: \`A B C D B A C\`; the **novel**
-\`A B C D F G H\` suffix is only a sensitivity diagnostic, as it changes
+zero. The primary control is **reordered**: `A B C D B A C`; the **novel**
+`A B C D F G H` suffix is only a sensitivity diagnostic, as it changes
 lexical inventory and final context.
 
 This *ordered-repeat* contrast does **not** detect every legitimate
@@ -32,7 +32,7 @@ exclude all induction; positive results do not identify an attention head.
 
 ## API and scientific contract
 
-\`\`\`python
+```python
 from neuros_mechint.benchmarks.paired_selectivity import (
     PairedSelectivityDesign, PairedSelectivityObservation,
     evaluate_paired_selectivity,
@@ -44,7 +44,7 @@ from neuros_mechint.benchmarks.paired_selectivity import (
 # same-cardinality interventions; record the four scalar margins per row.
 result = evaluate_paired_selectivity(design, tuple(observations))
 print(result["status"], result.get("random_control_plus_one_p"))
-\`\`\`
+```
 
 The design binds a candidate, a distinct equal-size magnitude baseline, every
 random control's target set, exact held-out pair hashes, model revision,
@@ -55,7 +55,7 @@ nonfinite scores, discovery rows, and baseline drift. Missing runs are recorded
 as nonestimable, **not** silently treated as zero. Resampling is by paired
 validation trial; candidate-vs-magnitude comparisons preserve pairing.
 Random controls are aggregated across exactly the same pairs, with the
-conservative plus-one rank \`p=(1+#random>=candidate)/(1+#random)\`.
+conservative plus-one rank `p=(1+#random>=candidate)/(1+#random)`.
 
 A supportive *diagnostic* requires: enough held-out pairs; a positive baseline
 repetition advantage and repeated margin; a positive candidate difference-in-
@@ -96,6 +96,6 @@ No claim is made from a score if an expected observation is missing.
 
 Run offline tests:
 
-\`\`\`bash
+```bash
 pytest -q packages/neuros-mechint/tests/test_mechint_paired_selectivity.py
-\`\`\`
+```
