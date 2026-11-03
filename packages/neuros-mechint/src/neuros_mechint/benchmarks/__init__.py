@@ -196,10 +196,6 @@ from .tokenizer_comparison import (
 from .v1_ground_truth import V1GroundTruthReport, run_v1_release_contract_benchmark
 
 __all__ = [
-    "evaluate_paired_selectivity",
-    "PairedSelectivityObservation",
-    "PairedSelectivityDesign",
-    "SELECTIVITY_SCHEMA",
     "CONTROL_SCHEMA",
     "CORRESPONDENCE_ARTIFACT_SCHEMA",
     "CORRESPONDENCE_STUDY_SCHEMA",
@@ -213,6 +209,7 @@ __all__ = [
     "FACTORIAL_STUDY_SCHEMA",
     "REPLICATION_ARTIFACT_SCHEMA",
     "REPLICATION_STUDY_SCHEMA",
+    "SELECTIVITY_SCHEMA",
     "ArchitectureComparisonReport",
     "ArchitectureMechanismSummary",
     "CandidateDiscovery",
@@ -280,6 +277,8 @@ __all__ = [
     "MechanismEmergenceReport",
     "MechanisticHypothesis",
     "MetricReplicationEstimate",
+    "PairedSelectivityDesign",
+    "PairedSelectivityObservation",
     "PairwiseMechanismComparison",
     "RandomCircuitControl",
     "ReplicationAxis",
@@ -318,6 +317,7 @@ __all__ = [
     "evaluate_adapter_circuit_faithfulness",
     "evaluate_circuit_faithfulness",
     "evaluate_localization",
+    "evaluate_paired_selectivity",
     "evaluate_sae_feature_faithfulness",
     "extract_control_map",
     "extract_effect_map",
