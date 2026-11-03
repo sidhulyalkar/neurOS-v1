@@ -28,6 +28,13 @@ def test_three_synthetic_stories_generate_portable_evidence(tmp_path):
     assert outcomes["03-incomplete-experiment"]["status"] == (
         "NONESTIMABLE_MISSING_OBSERVATIONS"
     )
+    gallery = (tmp_path / "index.html").read_text(encoding="utf-8")
+    assert "Three outcomes." in gallery
+    assert "Synthetic known-answer examples only" in gallery
+    assert "<script" not in gallery
+    for slug in outcomes:
+        assert f'href="{slug}.html"' in gallery
+        assert f'href="{slug}.json"' in gallery
     for name, summary in outcomes.items():
         report = json.loads((tmp_path / summary["source"]).read_text(encoding="utf-8"))
         page = (tmp_path / summary["report"]).read_text(encoding="utf-8")
