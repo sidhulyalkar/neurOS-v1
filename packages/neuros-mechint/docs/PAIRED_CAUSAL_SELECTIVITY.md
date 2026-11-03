@@ -43,12 +43,13 @@ from neuros_mechint.benchmarks.paired_selectivity import (
 # Run identical validation pairs through candidate, magnitude and random
 # same-cardinality interventions; record the four scalar margins per row.
 result = evaluate_paired_selectivity(design, tuple(observations))
-print(result["status"], result.get("random_control_plus_one_p"))
+print(result["status"], result.get("random_control_plus_one_rank_fraction"))
 ```
 
 The design binds a candidate, a distinct equal-size magnitude baseline, every
 random control's target set, exact held-out pair hashes, model revision,
-discovery commitment, and bootstrap/p-value policy.
+discovery commitment, descriptive bootstrap interval policy, and a separate
+max_random_rank_fraction diagnostic threshold.
 
 The evaluator rejects duplicated/unplanned rows, content mismatches,
 nonfinite scores, discovery rows, and baseline drift. Missing runs are recorded
@@ -66,7 +67,9 @@ are established. The evaluator intentionally reports
 A supportive *diagnostic* requires: enough held-out pairs; a positive baseline
 repetition advantage and repeated margin; a positive candidate difference-in-
 differences with bootstrap interval above zero; superiority to a magnitude
-baseline; and a plus-one random-control rank-fraction threshold under the declared threshold.
+baseline; and a plus-one random-control rank fraction below the separately
+declared `max_random_rank_fraction` threshold. The `alpha` field controls
+descriptive bootstrap intervals, not rank-fraction interpretation.
 The default 24 random controls permit a minimum descriptive rank
 fraction of 0.04; this is **not 0.04 frequentist significance**. Random
 control selection is not independently certified by this evaluator.
@@ -78,6 +81,10 @@ No claim is made from a score if an expected observation is missing.
 - A SHA-256 discovery commitment is a binding identifier, **not proof** that a
   protocol was frozen before held-out outputs were read. Independent
   timestamped preregistration or external execution audit remains necessary.
+- Identical target cardinality does not guarantee identical physical
+  perturbation magnitude, head-level intervention identity, or exchangeable
+  null circuits. `magnitude_matched_empirically_verified=false` and
+  `target_universe_execution_verified=false` remain explicit.
 - All four raw scores must be finite, and intermediate contrasts, paired
   difference-in-differences, candidate-comparator differences, and bootstrap
   means must also be finite. Derived overflow fails closed.
