@@ -232,6 +232,21 @@ def evaluate_paired_selectivity(
         result["result_hash"] = stable_hash(result)
         return result
 
+    # Validate integrity of every *available* within-pair baseline even if
+    # other circuit observations are missing. A partial study must not hide a
+    # known conflicting baseline behind a generic nonestimable status.
+    for pair_id in expected_pairs:
+        baseline = actual.get((pair_id, design.candidate_id))
+        if baseline is None:
+            continue
+        for circuit_id in circuits[1:]:
+            row = actual.get((pair_id, circuit_id))
+            if row is None:
+                continue
+            for key in ("intact_repeated", "intact_control"):
+                if not math.isclose(getattr(row, key), getattr(baseline, key), rel_tol=0, abs_tol=1e-8):
+                    raise ValueError(f"intact baseline drift for pair {pair_id}: {circuit_id}")
+
     missing = sorted(expected_keys - actual.keys())
     if missing:
         return finish({
@@ -239,14 +254,6 @@ def evaluate_paired_selectivity(
             "missing": [{"pair_id": p, "circuit_id": c} for p, c in missing],
             "supports_selective_effect": False,
         })
-
-    for pair_id in expected_pairs:
-        baseline = actual[(pair_id, design.candidate_id)]
-        for circuit_id in circuits[1:]:
-            row = actual[(pair_id, circuit_id)]
-            for key in ("intact_repeated", "intact_control"):
-                if not math.isclose(getattr(row, key), getattr(baseline, key), rel_tol=0, abs_tol=1e-8):
-                    raise ValueError(f"intact baseline drift for pair {pair_id}: {circuit_id}")
 
     def did(row: PairedSelectivityObservation) -> float:
         intact = _finite_difference(
