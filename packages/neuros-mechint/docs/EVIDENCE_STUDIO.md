@@ -18,7 +18,9 @@ python packages/neuros-mechint/examples/26_evidence_studio_showcase.py \
   --out ./mechint-evidence-demo
 ~~~
 
-Open these files in any browser:
+Start at `mechint-evidence-demo/index.html` for the three-case gallery.
+
+Open these individual files in any browser:
 
 - `mechint-evidence-demo/01-planted-path.html`: planted selective route;
   a **synthetic diagnostic**, not a real-model discovery.
