@@ -95,9 +95,9 @@ class PairedSelectivityDesign:
             for pair_id, digest in pairs
         ):
             raise ValueError("validation pair IDs and full-content hashes are required")
-        if len(set(pair_id for pair_id, _ in pairs)) != len(pairs):
+        if len({pair_id for pair_id, _ in pairs}) != len(pairs):
             raise ValueError("duplicate validation pair ID")
-        if len(set(digest for _, digest in pairs)) != len(pairs):
+        if len({digest for _, digest in pairs}) != len(pairs):
             raise ValueError("duplicate validation pair content")
         if self.min_validation_pairs < 2 or self.min_random_controls < 1:
             raise ValueError("minimum pairs must be >=2 and controls >=1")
