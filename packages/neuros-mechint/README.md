@@ -190,3 +190,17 @@ repetition-sensitive intervention effects with same-size random circuits and
 a magnitude baseline using paired difference-in-differences. This is a
 **synthetic/diagnostic measurement contract**, not completed real-model
 mechanistic evidence. Its own held-out and model-execution gates remain open.
+
+### Evidence Studio (experimental, offline)
+
+Generate self-contained, accessible and integrity-checked HTML summaries from
+existing paired-selectivity diagnostics. The three-case synthetic
+[showcase](docs/EVIDENCE_STUDIO.md) deliberately includes a positive planted
+route, generic-degradation rejection, and missing-evidence nonestimability.
+
+~~~bash
+python packages/neuros-mechint/examples/26_evidence_studio_showcase.py --out ./mechint-evidence-demo
+~~~
+
+These are **visualizations of synthetic measurement checks**, not real-model
+mechanistic discoveries or calibrated randomization tests.
