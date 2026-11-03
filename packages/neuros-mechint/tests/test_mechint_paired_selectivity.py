@@ -154,9 +154,14 @@ def test_mutable_model_revision_is_rejected():
 def test_finite_raw_scores_with_overflowing_derived_contrast_are_rejected():
     design, observations = _fixture()
     # Both scores are finite; their subtraction is not.
-    mutated = replace(observations[0], intact_repeated=1e308, intact_control=-1e308)
+    pair_id = observations[0].pair_id
+    modified = tuple(
+        replace(row, intact_repeated=1e308, intact_control=-1e308)
+        if row.pair_id == pair_id else row
+        for row in observations
+    )
     with pytest.raises(ValueError, match="nonfinite derived selectivity"):
-        evaluate_paired_selectivity(design, (mutated, *observations[1:]))
+        evaluate_paired_selectivity(design, modified)
 
 
 def test_finite_raw_scores_with_overflowing_candidate_comparator_are_rejected():
