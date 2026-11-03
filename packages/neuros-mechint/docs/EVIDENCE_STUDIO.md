@@ -34,7 +34,7 @@ self-checking hash, plus `manifest.json` for the demonstration collection.
 ## Render an existing result
 
 ~~~bash
-python -m neuros_mechint.visualization.evidence_studio \
+python -m neuros_mechint.evidence_studio \
   --input ./run/paired-selectivity.json \
   --out ./run/evidence.html \
   --title 'Held-out selectivity diagnostic'
@@ -122,7 +122,7 @@ leaderboard that ranks incompatible scientific studies.
 
 ~~~bash
 pytest -q packages/neuros-mechint/tests/test_mechint_evidence_studio.py
-ruff check packages/neuros-mechint/src/neuros_mechint/visualization/evidence_studio.py \
+ruff check packages/neuros-mechint/src/neuros_mechint/evidence_studio.py \
   packages/neuros-mechint/tests/test_mechint_evidence_studio.py \
   packages/neuros-mechint/examples/26_evidence_studio_showcase.py
 ~~~
