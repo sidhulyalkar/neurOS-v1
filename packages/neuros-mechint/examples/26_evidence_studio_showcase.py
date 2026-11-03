@@ -15,7 +15,7 @@ from neuros_mechint.benchmarks.paired_selectivity import (
     evaluate_paired_selectivity,
 )
 from neuros_mechint.core.manifest import stable_hash
-from neuros_mechint.visualization.evidence_studio import write_paired_selectivity_html
+from neuros_mechint.evidence_studio import write_paired_selectivity_html
 
 
 def synthetic_case(
