@@ -96,6 +96,9 @@ def test_missing_rows_are_nonestimable_not_zero_effect():
     assert result["supports_selective_effect"] is False
     assert len(result["missing"]) == 1
     assert "mean_candidate_difference_in_differences" not in result
+    assert result["n_observations_received"] == len(observations) - 1
+    assert len(result["received_observations"]) == len(observations) - 1
+    assert len(result["received_observation_root"]) == 64
 
 
 def test_duplicate_and_mismatched_pair_and_baselines_fail_closed():
@@ -207,3 +210,28 @@ def test_rank_threshold_is_independent_of_bootstrap_alpha():
         "ci_candidate_difference_in_differences"
     ]
     assert strict["max_random_rank_fraction"] == pytest.approx(0.03)
+
+
+def test_partial_observation_evidence_identity_is_order_invariant_and_content_bound():
+    design, observations = _fixture()
+    partial = observations[:-3]
+    one = evaluate_paired_selectivity(design, partial)
+    two = evaluate_paired_selectivity(design, partial[::-1])
+    assert one == two
+    assert one["status"] == "NONESTIMABLE_MISSING_OBSERVATIONS"
+    changed = (
+        replace(partial[0], intervened_repeated=partial[0].intervened_repeated + 0.01),
+        *partial[1:],
+    )
+    third = evaluate_paired_selectivity(design, changed)
+    assert one["received_observation_root"] != third["received_observation_root"]
+    assert one["result_hash"] != third["result_hash"]
+    assert one["missing"] == third["missing"]
+
+
+def test_complete_audit_binds_all_raw_observation_fingerprints():
+    design, observations = _fixture()
+    result = evaluate_paired_selectivity(design, observations)
+    assert result["n_observations_received"] == len(observations)
+    assert len(result["received_observations"]) == len(observations)
+    assert len(result["received_observation_root"]) == 64
