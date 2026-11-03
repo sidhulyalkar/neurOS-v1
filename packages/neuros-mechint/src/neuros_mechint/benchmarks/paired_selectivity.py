@@ -50,7 +50,8 @@ class PairedSelectivityDesign:
     min_random_controls: int = 24
     min_positive_fraction: float = 0.75
     bootstrap_samples: int = 1000
-    alpha: float = 0.05
+    alpha: float = 0.05  # descriptive bootstrap interval tail
+    max_random_rank_fraction: float = 0.05  # separate, descriptive control ranking gate
     seed: int = 37
 
     def __post_init__(self) -> None:
@@ -101,8 +102,12 @@ class PairedSelectivityDesign:
             raise ValueError("duplicate validation pair content")
         if self.min_validation_pairs < 2 or self.min_random_controls < 1:
             raise ValueError("minimum pairs must be >=2 and controls >=1")
-        if not 0 < self.min_positive_fraction <= 1 or not 0 < self.alpha < 1:
-            raise ValueError("fractions and alpha must be inside (0,1]")
+        if (
+            not 0 < self.min_positive_fraction <= 1
+            or not 0 < self.alpha < 1
+            or not 0 < self.max_random_rank_fraction <= 1
+        ):
+            raise ValueError("fractions, bootstrap alpha, and rank threshold must be valid")
         if self.bootstrap_samples < 100 or isinstance(self.seed, bool) or not isinstance(self.seed, int):
             raise ValueError("bootstrap_samples must be >=100 and seed an integer")
         object.__setattr__(self, "candidate_targets", candidate)
@@ -203,6 +208,8 @@ def evaluate_paired_selectivity(
         "n_random_controls_planned": len(control_names),
         "discovery_commitment": design.discovery_commitment,
         "preregistration_independently_verified": False,
+        "target_universe_execution_verified": False,
+        "magnitude_matched_empirically_verified": False,
         "real_model_evidence": False,
     }
 
@@ -287,7 +294,10 @@ def evaluate_paired_selectivity(
         and len(random_effects) >= design.min_random_controls
     )
     selective_ok = candidate_mean > 0 and candidate_ci[0] > 0
-    controls_ok = rank_fraction <= design.alpha and magnitude_ci[0] > 0
+    controls_ok = (
+        rank_fraction <= design.max_random_rank_fraction
+        and magnitude_ci[0] > 0
+    )
     supports = (
         design.control_condition == "reordered"
         and coverage_ok and behavior_ok and selective_ok and controls_ok
@@ -330,6 +340,7 @@ def evaluate_paired_selectivity(
             for circuit_id, effect in zip(control_names, random_effects)
         ],
         "random_control_plus_one_rank_fraction": rank_fraction,
+        "max_random_rank_fraction": design.max_random_rank_fraction,
         "random_control_exchangeability_verified": False,
         "random_control_rank_is_calibrated_p_value": False,
         "pair_evidence": [
